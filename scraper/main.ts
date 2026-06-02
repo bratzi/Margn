@@ -10,7 +10,11 @@ const rss = new Parser();
 type Source = { id: number; feed_url: string | null };
 
 // Mehrsprachiges Embedding (Cohere Embed v3). Antwort-Shape defensiv lesen.
+// Trial-Key: 100 calls/min → 650ms Pause zwischen Calls reicht
+const embedDelay = () => new Promise(r => setTimeout(r, 650));
+
 async function embed(text: string): Promise<number[]> {
+  await embedDelay();
   const r = await fetch("https://api.cohere.com/v2/embed", {
     method: "POST",
     headers: {
