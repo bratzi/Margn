@@ -12,6 +12,8 @@ jobs:
         with: { node-version: "22" }
       - run: npm install
         working-directory: scraper
+      - run: npx playwright install --with-deps chromium
+        working-directory: scraper
       - run: npm run scrape
         working-directory: scraper
         env:
