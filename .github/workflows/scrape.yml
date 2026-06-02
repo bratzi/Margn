@@ -19,4 +19,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}

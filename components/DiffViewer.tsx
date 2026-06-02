@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { wordDiff, classifyEdit, KIND_META, type EditKind } from "@/lib/diff";
+import { toDE } from "@/lib/fmt";
 
 type EditRow = {
   id: number;
@@ -12,6 +13,7 @@ type EditRow = {
   before_title: string;
   after_title: string;
   delay_minutes: number | null;
+  scanned_at: string;
 };
 
 const FILTERS: { key: EditKind | "all"; label: string }[] = [
@@ -35,7 +37,7 @@ export default function DiffViewer() {
   useEffect(() => {
     supabase
       .from("headline_edits")
-      .select("id,url,outlet,country,before_title,after_title,delay_minutes")
+      .select("id,url,outlet,country,before_title,after_title,delay_minutes,scanned_at")
       .order("scanned_at", { ascending: false })
       .limit(50)
       .then(({ data, error }) => {
@@ -104,7 +106,7 @@ export default function DiffViewer() {
                 {k.label}
               </span>
               <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--color-text-tertiary)" }}>
-                {delayLabel(e.delay_minutes)}
+                {toDE(e.scanned_at)} · {delayLabel(e.delay_minutes)}
               </span>
             </div>
 

@@ -10,27 +10,23 @@ const rss = new Parser();
 type Source = { id: number; feed_url: string | null };
 
 // Mehrsprachiges Embedding (Cohere Embed v3). Antwort-Shape defensiv lesen.
-// Trial-Key: 100 calls/min → 650ms Pause zwischen Calls reicht
-const embedDelay = () => new Promise(r => setTimeout(r, 650));
-
+// HuggingFace: intfloat/multilingual-e5-large (1024d, kostenlos, mehrsprachig)
 async function embed(text: string): Promise<number[]> {
-  await embedDelay();
-  const r = await fetch("https://api.cohere.com/v2/embed", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${process.env.COHERE_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "embed-multilingual-v3.0",
-      input_type: "clustering",
-      embedding_types: ["float"],
-      texts: [text.slice(0, 2000)],
-    }),
-  });
+  const r = await fetch(
+    "https://api-inference.huggingface.co/models/intfloat/multilingual-e5-large",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${process.env.HF_TOKEN}`,
+      },
+      body: JSON.stringify({ inputs: `passage: ${text.slice(0, 2000)}` }),
+    }
+  );
   if (!r.ok) throw new Error(`Embed failed: ${r.status} ${await r.text()}`);
   const j = await r.json();
-  return j.embeddings?.float?.[0] ?? j.embeddings?.[0];
+  // HF gibt entweder direkt ein Array oder [[...]] zurück
+  return Array.isArray(j[0]) ? j[0] : j;
 }
 
 async function upsertArticle(sourceId: number, url: string): Promise<number> {
@@ -101,13 +97,19 @@ async function processPlaywright(src: Source, homeUrl: string) {
     const page = await ctx.newPage();
     await page.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    // Alle internen Artikel-Links sammeln (mind. 30 Zeichen Pfad = kein Menü-Link)
+    // Nur echte Artikel: interne Links mit numerischer ID im Pfad, keine Kategorieseiten
     const links: string[] = await page.$$eval("a[href]", (els, base) =>
       [...new Set(
         els
-          .map((a) => (a as HTMLAnchorElement).href)
-          .filter((h) => h.startsWith(base) && h.length > base.length + 30)
-      )].slice(0, 30),
+          .map((a) => (a as HTMLAnchorElement).href.split("#")[0].split("?")[0])
+          .filter((h) =>
+            h.startsWith(base) &&
+            /\d{6,}/.test(h) &&          // Artikel haben lange numerische ID
+            !h.includes("/startseite/") &&
+            !h.includes("/home-") &&
+            !h.endsWith("/")
+          )
+      )].slice(0, 25),
       homeUrl
     );
 
