@@ -1,7 +1,7 @@
 name: scrape
 on:
   schedule:
-    - cron: "17 * * * *"   # stündlich um :17
+    - cron: "*/30 * * * *"  # alle 30 Minuten
   workflow_dispatch:
 jobs:
   scrape:
