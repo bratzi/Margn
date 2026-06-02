@@ -2,6 +2,7 @@ import Parser from "rss-parser";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { createHash } from "node:crypto";
+import { chromium } from "playwright";
 import { sb, toPgVector } from "./lib";
 
 const rss = new Parser();
@@ -85,13 +86,67 @@ async function fetchBody(url: string): Promise<string | null> {
   }
 }
 
+// Playwright-Pfad: Homepage laden, Artikel-Links sammeln, jeden Artikel rendern.
+async function processPlaywright(src: Source, homeUrl: string) {
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    locale: "de-DE",
+  });
+  try {
+    const page = await ctx.newPage();
+    await page.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    // Alle internen Artikel-Links sammeln (mind. 30 Zeichen Pfad = kein Menü-Link)
+    const links: string[] = await page.$$eval("a[href]", (els, base) =>
+      [...new Set(
+        els
+          .map((a) => (a as HTMLAnchorElement).href)
+          .filter((h) => h.startsWith(base) && h.length > base.length + 30)
+      )].slice(0, 30),
+      homeUrl
+    );
+
+    for (const url of links) {
+      try {
+        const ap = await ctx.newPage();
+        await ap.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+        const html = await ap.content();
+        await ap.close();
+
+        const dom = new JSDOM(html, { url });
+        const article = new Readability(dom.window.document).parse();
+        if (!article || article.textContent.length < 200) continue;
+
+        const title = article.title?.trim() ?? "";
+        const teaser = article.excerpt?.trim() ?? "";
+        if (!title) continue;
+
+        const id = await upsertArticle(src.id, url);
+        await saveVersion(id, title, teaser, article.textContent);
+        console.log("OK (pw):", url);
+      } catch (e) {
+        console.error("FEHLER (pw):", url, (e as Error).message);
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
 async function processSource(src: Source) {
   if (!src.feed_url) return;
+
+  // playwright://<url> → headless-Browser-Pfad
+  if (src.feed_url.startsWith("playwright://")) {
+    await processPlaywright(src, src.feed_url.replace("playwright://", ""));
+    return;
+  }
+
   const feed = await rss.parseURL(src.feed_url);
   for (const entry of feed.items) {
     const url = entry.link;
     if (!url) continue;
-    // Titel + Teaser kommen direkt aus dem RSS-Feed – kein Bot-Block möglich
     const title = entry.title?.trim() ?? "";
     const teaser = (entry.contentSnippet ?? entry.summary ?? "").trim();
     if (!title) continue;
