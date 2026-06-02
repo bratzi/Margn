@@ -1,0 +1,22 @@
+{
+  "name": "newsscraper-scraper",
+  "type": "module",
+  "scripts": {
+    "scrape": "tsx main.ts",
+    "signals": "tsx signals.ts",
+    "cluster": "tsx cluster.ts"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5",
+    "@supabase/supabase-js": "^2",
+    "dotenv": "^17.4.2",
+    "jsdom": "^24",
+    "rss-parser": "^3"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21",
+    "playwright": "^1",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}
