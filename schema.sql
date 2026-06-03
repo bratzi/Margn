@@ -24,6 +24,8 @@ create table articles (
   last_seen    timestamptz default now(),
   published_at timestamptz,
   is_article   boolean default true
+  -- last_seen wird bei jedem Crawl aktualisiert, sobald der Artikel wieder verlinkt/erreicht wird.
+  -- Artikel mit altem last_seen sind aus der Seite "abgefallen" (nicht mehr verlinkt).
 );
 
 -- Versionshistorie + Embedding + erweiterbarer Signal-Beutel
@@ -72,13 +74,21 @@ create index on article_versions using gin (signals);
 create index on articles (source_id, last_seen desc);
 
 -- RPC: sprachübergreifende Ähnlichkeitssuche
+-- DISTINCT ON article_id: pro Artikel nur die nächstgelegene Version, sonst verdrängen
+-- mit der Zeit die vielen Eigen-Versionen eines Artikels echte Nachbarn.
 create or replace function similar_articles(query_embedding vector(1024), match_count int)
 returns table (article_id bigint, similarity real)
 language sql stable as $$
-  select av.article_id, 1 - (av.embedding <=> query_embedding) as similarity
-  from article_versions av
-  where av.embedding is not null
-  order by av.embedding <=> query_embedding
+  select t.article_id, t.similarity
+  from (
+    select distinct on (av.article_id)
+      av.article_id,
+      1 - (av.embedding <=> query_embedding) as similarity
+    from article_versions av
+    where av.embedding is not null
+    order by av.article_id, av.embedding <=> query_embedding
+  ) t
+  order by t.similarity desc
   limit match_count;
 $$;
 
