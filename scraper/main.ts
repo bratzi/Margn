@@ -10,10 +10,10 @@ const rss = new Parser();
 type Source = { id: number; feed_url: string | null };
 
 // Mehrsprachiges Embedding (Cohere Embed v3). Antwort-Shape defensiv lesen.
-// HuggingFace: intfloat/multilingual-e5-large (1024d, kostenlos, mehrsprachig)
+// HuggingFace Router (neue Inference-API): intfloat/multilingual-e5-large (1024d, mehrsprachig)
 async function embed(text: string): Promise<number[]> {
   const r = await fetch(
-    "https://api-inference.huggingface.co/models/intfloat/multilingual-e5-large",
+    "https://router.huggingface.co/hf-inference/models/intfloat/multilingual-e5-large/pipeline/feature-extraction",
     {
       method: "POST",
       headers: {

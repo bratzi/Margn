@@ -2,7 +2,9 @@ import { sb, toPgVector, fromPgVector } from "./lib";
 
 // Kosinus-Ähnlichkeit, ab der zwei Artikel als "dieselbe Geschichte" gelten.
 // 0.80–0.85 ist ein guter Startbereich; je höher, desto strenger.
-const THRESHOLD = 0.58;
+// e5-large staucht Cosine-Werte: Rauschen ~0.80–0.82, echte Stories ~0.86–0.90.
+// 0.86 gegen Ketten-Cluster (vorher 0.58 für Cohere – Modellwechsel!).
+const THRESHOLD = 0.86;
 const NEIGHBORS = 10;
 const BATCH = 200;
 
