@@ -8,7 +8,7 @@ import { sb, toPgVector } from "./lib";
 const MAX_PAGES = Number(process.env.CRAWL_MAX_PAGES ?? 80); // gerenderte Seiten pro Quelle
 const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);  // Linktiefe ab Startseite
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 300);  // Höflichkeitspause
-const MIN_BODY = 600;                                        // ab hier gilt eine Seite als Artikel
+const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen: kein Embed, kein DB-Write
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -103,9 +103,14 @@ function sameDomainLinks(html: string, baseUrl: string, pageUrl: string): string
 // Echte Artikel tragen eine lange ID oder ein Datum im Pfad; Rubriken nicht.
 function looksLikeArticle(url: string): boolean {
   const u = url.toLowerCase();
-  // Offensichtliche Nicht-Artikel-Seiten hart ausschließen
+  // Footer/Service-Seiten
   if (/\/(impressum|kontakt|datenschutz|newsletter|mediathek|archiv|suche|recherche|abo|hilfe|agb|rss|index)\b/.test(u)) return false;
-  if (/(^|\/)(home|startseite)[-/]/.test(u)) return false;          // .../startseite-..., /home-...
+  // Audio/Video/Bild-Strecken + Evergreen-Service (kein Fließtext)
+  if (/\/(podcast|video|livestream|audio|multimedia|bilder|fotostrecke|guides?-d-achat|qui-sommes-nous|about-us|le-monde-(services|et-vous))\b/.test(u)) return false;
+  // Widget-/Hub-Seiten mit ID, aber ohne Artikeltext (Börsenkurse, Wetter, Horoskop, Themen-Hubs …)
+  if (/(boersenkurse|kurse|horoskop|wetter|lotto|gewinnspiel|comics|spiele|aboseite|abonnement|bildplus|ateaserseite|teaserseite|alle-infos|thema-|bestseller|verbraucherdialog|chaleur-humaine|se-former)/.test(u)) return false;
+  if (/[-/](home|startseite|teaserseite)[-/]/.test(u)) return false; // .../startseite-..., erotik-home-..., /home-...
+  if (/\/tv\/|[-/]a-z[-/.]/.test(u)) return false;                   // TV-Hubs, A-Z-Glossare
   let path: string;
   try { path = new URL(url).pathname; } catch { return false; }
   const segs = path.replace(/\/+$/, "").split("/").filter(Boolean);
@@ -131,18 +136,22 @@ function asArticle(html: string, url: string): { title: string; teaser: string; 
 async function crawlSource(ctx: BrowserContext, src: Source) {
   const visited = new Set<string>();
   const queued = new Set<string>();
-  const queue: Seed[] = [];
-  const enqueue = (s: Seed) => {
-    if (queued.has(s.url)) return;     // schon eingereiht? überspringen (Breitensuche, FIFO)
+  // Zwei FIFO-Queues: Artikel-Links werden zuerst abgearbeitet (Budget füllt sich mit echten
+  // Artikeln), Rubriken/Übersichten danach – aber jeweils in Breiten-/Seitenreihenfolge,
+  // also kein Abtauchen in einen einzelnen Strang (z.B. eine Podcast-Liste).
+  const articleQ: Seed[] = [];
+  const sectionQ: Seed[] = [];
+  const enqueue = (s: Seed, isArticle: boolean) => {
+    if (queued.has(s.url)) return;
     queued.add(s.url);
-    queue.push(s);
+    (isArticle ? articleQ : sectionQ).push(s);
   };
 
-  enqueue({ url: src.base_url, depth: 0 }); // Startseite als Ausgangspunkt
+  enqueue({ url: src.base_url, depth: 0 }, false); // Startseite = Übersicht
 
   let pages = 0, found = 0;
-  while (queue.length && pages < MAX_PAGES) {
-    const s = queue.shift()!;
+  while ((articleQ.length || sectionQ.length) && pages < MAX_PAGES) {
+    const s = (articleQ.shift() ?? sectionQ.shift())!; // Artikel zuerst, sonst Rubrik
     if (visited.has(s.url)) continue;
     visited.add(s.url);
     pages++;
@@ -170,7 +179,7 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
     // Nur das SPEICHERN (oben) ist auf echte Artikel beschränkt.
     if (s.depth < MAX_DEPTH) {
       for (const link of sameDomainLinks(html, src.base_url, s.url)) {
-        enqueue({ url: link, depth: s.depth + 1 });
+        enqueue({ url: link, depth: s.depth + 1 }, looksLikeArticle(link)); // Artikel- vs. Rubrik-Queue
       }
     }
     await sleep(DELAY_MS);
