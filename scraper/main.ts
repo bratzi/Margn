@@ -154,7 +154,10 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
 }
 
 async function run() {
-  const { data } = await sb.from("sources").select("id,base_url,language").eq("active", true);
+  const { data, error } = await sb.from("sources").select("id,base_url,language").eq("active", true);
+  if (error) throw new Error(`Quellen-Abfrage fehlgeschlagen: ${error.message}`);
+  console.log(`${data?.length ?? 0} aktive Quellen geladen.`);
+  if (!data?.length) throw new Error("Keine aktiven Quellen gefunden – Abbruch.");
   const browser = await chromium.launch();
   try {
     for (const src of (data ?? []) as Source[]) {
