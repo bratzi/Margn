@@ -99,6 +99,22 @@ function sameDomainLinks(html: string, baseUrl: string, pageUrl: string): string
   }
 }
 
+// URL-Muster: ist das überhaupt eine Artikel-URL (und keine Rubrik-/Übersichts-/Footer-Seite)?
+// Echte Artikel tragen eine lange ID oder ein Datum im Pfad; Rubriken nicht.
+function looksLikeArticle(url: string): boolean {
+  const u = url.toLowerCase();
+  // Offensichtliche Nicht-Artikel-Seiten hart ausschließen
+  if (/\/(impressum|kontakt|datenschutz|newsletter|mediathek|archiv|suche|recherche|abo|hilfe|agb|rss|index)\b/.test(u)) return false;
+  if (/(^|\/)(home|startseite)[-/]/.test(u)) return false;          // .../startseite-..., /home-...
+  let path: string;
+  try { path = new URL(url).pathname; } catch { return false; }
+  const segs = path.replace(/\/+$/, "").split("/").filter(Boolean);
+  if (segs.length < 2) return false;                                // Rubrik-Wurzel: /inland, /sport
+  if (/\/$/.test(path)) return false;                               // Rubrik-Index: /politique/
+  // Artikel-Signal: lange Zahl-ID, Datumspfad /YYYY/MM/DD/ oder Slug-NNN.html
+  return /\d{5,}/.test(u) || /\/\d{4}\/\d{2}\/\d{2}\//.test(u) || /-\d+\.html?$/.test(u);
+}
+
 // Gerenderte Seite als Artikel lesen (sichtbarer Text). null = eher Übersichtsseite.
 function asArticle(html: string, url: string): { title: string; teaser: string; body: string } | null {
   try {
@@ -114,8 +130,13 @@ function asArticle(html: string, url: string): { title: string; teaser: string; 
 // Rekursiver, begrenzter Chromium-Crawl einer Quelle.
 async function crawlSource(ctx: BrowserContext, src: Source) {
   const visited = new Set<string>();
+  const queued = new Set<string>();
   const queue: Seed[] = [];
-  const enqueue = (s: Seed) => { if (!visited.has(s.url)) queue.push(s); };
+  const enqueue = (s: Seed) => {
+    if (queued.has(s.url)) return;     // schon eingereiht? überspringen (Breitensuche, FIFO)
+    queued.add(s.url);
+    queue.push(s);
+  };
 
   enqueue({ url: src.base_url, depth: 0 }); // Startseite als Ausgangspunkt
 
@@ -129,9 +150,9 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
     const { html } = await renderPage(ctx, s.url);
     if (!html) continue;
 
-    // Artikel? Dann Version speichern. upsertArticle setzt last_seen = "zuletzt verlinkt/erreicht".
-    // Artikel, die über die Zeit nicht mehr erreicht werden, behalten ihr altes last_seen (= abgefallen).
-    const art = asArticle(html, s.url);
+    // Artikel? Erst URL-Muster (keine Rubrik/Übersicht), dann Inhalt prüfen.
+    // upsertArticle setzt last_seen = "zuletzt verlinkt/erreicht"; altes last_seen = abgefallen.
+    const art = looksLikeArticle(s.url) ? asArticle(html, s.url) : null;
     if (art) {
       found++;
       if (!DRY_RUN) {
@@ -145,8 +166,12 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
       if (found % 10 === 0) console.log(`  ${src.base_url}: ${found} Artikel / ${pages} Seiten…`);
     }
 
+    // Links IMMER verfolgen – auch von Rubrik-/Übersichtsseiten, denn dort hängen die Artikel.
+    // Nur das SPEICHERN (oben) ist auf echte Artikel beschränkt.
     if (s.depth < MAX_DEPTH) {
-      for (const link of sameDomainLinks(html, src.base_url, s.url)) enqueue({ url: link, depth: s.depth + 1 });
+      for (const link of sameDomainLinks(html, src.base_url, s.url)) {
+        enqueue({ url: link, depth: s.depth + 1 });
+      }
     }
     await sleep(DELAY_MS);
   }
