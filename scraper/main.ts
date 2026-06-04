@@ -10,9 +10,11 @@ const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);  // Linktiefe ab Sta
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 300);  // Höflichkeitspause
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen: kein Embed, kein DB-Write
-// "articles" (Default): Artikel zuerst rendern → Analyse-Budget. "structure": Rubriken zuerst
-// rendern → Baumstruktur kartieren (Startseite → Zwischenseiten → Artikel), kein Embedding.
-const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure";
+// "articles": crawlen + Artikel inline rendern/embedden (kleine frische Läufe).
+// "structure": Rubriken crawlen, ALLE Links klassifiziert in pages/page_links (kein Embedding).
+// "analyze": KEIN Crawl – nimmt bereits entdeckte pages.kind='article' und rendert+embedded sie
+//            (Entkopplung Entdeckung↔Analyse; arbeitet den Backlog ab, bis MAX_PAGES erreicht).
+const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -256,11 +258,80 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
   console.log(`Quelle ${src.base_url}: ${pages} Seiten gerendert [${summary}]`);
 }
 
+// Alle Zeilen einer Abfrage holen (PostgREST limitiert auf 1000/Request → paginieren).
+async function fetchAll<T>(build: (from: number) => any): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build(from).range(from, from + 999);
+    if (error) throw error;
+    out.push(...((data ?? []) as T[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+// analyze-Modus: bereits entdeckte Artikel-URLs (pages.kind='article') rendern + embedden.
+// Kein Rubriken-Crawl. Arbeitet bis zu MAX_PAGES noch nicht analysierte Artikel ab.
+async function analyzeBacklog() {
+  const { data: srcs } = await sb.from("sources").select("id,base_url,language").eq("active", true);
+  const srcById = new Map((srcs ?? []).map((s: any) => [s.id, s]));
+  const activeIds = [...srcById.keys()];
+
+  // 1) entdeckte Artikel-Knoten + bereits analysierte URLs laden
+  const discovered = await fetchAll<{ url: string; source_id: number }>((from) =>
+    sb.from("pages").select("url,source_id").eq("kind", "article").in("source_id", activeIds).order("id", { ascending: true })
+  );
+  const doneRows = await fetchAll<{ url: string }>((from) => sb.from("articles").select("url"));
+  const done = new Set(doneRows.map((r) => r.url));
+
+  // Budget gleichmäßig über die Quellen verteilen (sonst frisst die größte Quelle alles).
+  const perSource = Math.ceil(MAX_PAGES / activeIds.length);
+  const bySrc = new Map<number, string[]>();
+  let openTotal = 0;
+  for (const p of discovered) {
+    if (done.has(p.url)) continue;
+    openTotal++;
+    const arr = bySrc.get(p.source_id) ?? bySrc.set(p.source_id, []).get(p.source_id)!;
+    if (arr.length < perSource) arr.push(p.url);
+  }
+  const batch = [...bySrc.values()].reduce((s, a) => s + a.length, 0);
+  console.log(`Entdeckt: ${discovered.length} | analysiert: ${done.size} | offen: ${openTotal} | dieser Lauf: ${batch} (max ${perSource}/Quelle)`);
+
+  const browser = await chromium.launch();
+  try {
+    for (const [sid, urls] of bySrc) {
+      const src = srcById.get(sid);
+      const ctx = await browser.newContext({ userAgent: UA, locale: src.language === "fr" ? "fr-FR" : "de-DE" });
+      let ok = 0;
+      try {
+        for (const url of urls) {
+          const { html } = await renderPage(ctx, url);
+          if (!html) continue;
+          const art = asArticle(html, url);
+          if (!art) continue;
+          try {
+            const id = await upsertArticle(sid, url);
+            await saveVersion(id, art.title, art.teaser, art.body);
+            ok++;
+            if (ok % 25 === 0) console.log(`  ${src.base_url}: ${ok}/${urls.length}…`);
+          } catch (e) { console.error("FEHLER:", url, (e as Error).message); }
+          await sleep(DELAY_MS);
+        }
+      } finally { await ctx.close(); }
+      console.log(`Quelle ${src.base_url}: ${ok}/${urls.length} analysiert.`);
+    }
+  } finally { await browser.close(); }
+}
+
 async function run() {
   const { data, error } = await sb.from("sources").select("id,base_url,language").eq("active", true);
   if (error) throw new Error(`Quellen-Abfrage fehlgeschlagen: ${error.message}`);
   console.log(`${data?.length ?? 0} aktive Quellen geladen.`);
   if (!data?.length) throw new Error("Keine aktiven Quellen gefunden – Abbruch.");
+
+  // analyze-Modus: kein Crawl, nur entdeckte Artikel abarbeiten.
+  if (MODE === "analyze") { await analyzeBacklog(); return; }
+
   const browser = await chromium.launch();
   try {
     for (const src of (data ?? []) as Source[]) {
