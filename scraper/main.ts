@@ -10,6 +10,9 @@ const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);  // Linktiefe ab Sta
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 300);  // Höflichkeitspause
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen: kein Embed, kein DB-Write
+// "articles" (Default): Artikel zuerst rendern → Analyse-Budget. "structure": Rubriken zuerst
+// rendern → Baumstruktur kartieren (Startseite → Zwischenseiten → Artikel), kein Embedding.
+const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -210,7 +213,10 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
   let pages = 0;
   const counts: Record<string, number> = {};
   while ((articleQ.length || sectionQ.length) && pages < MAX_PAGES) {
-    const s = (articleQ.shift() ?? sectionQ.shift())!; // Artikel zuerst, sonst Rubrik
+    // structure: Rubriken zuerst (Baum kartieren); articles: Artikel zuerst (Analyse füllen)
+    const s = (MODE === "structure"
+      ? (sectionQ.shift() ?? articleQ.shift())
+      : (articleQ.shift() ?? sectionQ.shift()))!;
     if (visited.has(s.url)) continue;
     visited.add(s.url);
     pages++;
@@ -231,8 +237,9 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
         const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
         // 2) Links als Knoten + Kanten (von wo wird wohin verlinkt)
         if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
-        // 3) NUR Artikel gehen in die Analyse (Embedding/Cluster)
-        if (kind === "article" && article) {
+        // 3) NUR Artikel gehen in die Analyse (Embedding/Cluster) – im structure-Modus
+        //    überspringen wir das Embedding (wir kartieren nur den Baum, kein HF-Call).
+        if (kind === "article" && article && MODE !== "structure") {
           const id = await upsertArticle(src.id, s.url);
           await saveVersion(id, article.title, article.teaser, article.body);
         }
