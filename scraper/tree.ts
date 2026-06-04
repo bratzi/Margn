@@ -31,10 +31,13 @@ const pages = await fetchAll<Node>("pages", "url,kind", (q) => q.eq("source_id",
 type T = { seg: string; kind: string; children: Map<string, T>; articleCount: number };
 const root: T = { seg: src.base_url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""), kind: "section", children: new Map(), articleCount: 0 };
 
+// Struktur-/Datums-Segmente, die keine echten Rubriken sind (Le Monde: /article/2026/05/26/…)
+const SKIP_SEG = /^(\d{4}|\d{1,2}|article|aktuell)$/;
+
 for (const p of pages) {
   let path: string;
   try { path = new URL(p.url).pathname; } catch { continue; }
-  const segs = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  const segs = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean).filter((s) => !SKIP_SEG.test(s));
   if (!segs.length) continue; // Startseite selbst
   let cur = root;
   segs.forEach((seg, i) => {
@@ -70,6 +73,8 @@ function compress(n: T) {
 for (const ch of root.children.values()) compress(ch);
 
 const ICON: Record<string, string> = { article: "📄", section: "📂", media: "🎬", interactive: "🎛️", sponsored: "💰", service: "⚙️", unknown: "·" };
+// Verzweigungsknoten (haben Artikel darunter) sind de-facto Rubriken → 📂, auch wenn URL-Typ "unknown".
+const iconOf = (k: T) => k.kind === "article" ? "📄" : (k.kind === "unknown" || !ICON[k.kind] ? "📂" : ICON[k.kind]);
 
 function render(n: T, prefix: string) {
   const kids = [...n.children.values()]
@@ -79,7 +84,7 @@ function render(n: T, prefix: string) {
   shown.forEach((k, i) => {
     const last = i === shown.length - 1 && kids.length <= MAX_CHILDREN;
     const tag = k.kind === "article" ? "" : `  (${k.articleCount} Artikel)`;
-    console.log(`${prefix}${last ? "└─ " : "├─ "}${ICON[k.kind] ?? "·"} ${k.seg}${tag}`);
+    console.log(`${prefix}${last ? "└─ " : "├─ "}${iconOf(k)} ${k.seg}${tag}`);
     if (k.kind !== "article") render(k, prefix + (last ? "   " : "│  "));
   });
   if (kids.length > MAX_CHILDREN) {
