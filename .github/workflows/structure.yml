@@ -1,0 +1,27 @@
+name: structure
+on:
+  schedule:
+    - cron: "0 3 * * 0"   # wöchentlich, So 03:00 UTC – kartiert die Zwischenseiten-/Rubriken-Struktur
+  workflow_dispatch:
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: npm install
+        working-directory: scraper
+      - run: npx playwright install --with-deps chromium
+        working-directory: scraper
+      - run: npm run scrape
+        working-directory: scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # structure-Modus: Rubriken bevorzugt rendern, KEIN Embedding (HF_TOKEN nicht nötig)
+          CRAWL_MODE: "structure"
+          CRAWL_MAX_PAGES: "100"
+          CRAWL_MAX_DEPTH: "3"
+          CRAWL_DELAY_MS: "300"
