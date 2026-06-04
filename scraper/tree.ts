@@ -2,11 +2,11 @@ import "dotenv/config";
 import { sb } from "./lib";
 
 // Aufruf: npx tsx tree.ts [quelle] [maxKinderProKnoten]
-// Zeigt den Link-Baum einer Quelle ab der Startseite – aber NUR die Äste, die zu Artikeln führen.
+// Zeigt die Rubriken-Hierarchie einer Quelle aus den URL-Pfaden: Startseite → Zwischenseiten → Artikel.
+// Nur Äste, die (irgendwo darunter) zu Artikeln führen, werden gezeigt.
 const arg = (process.argv[2] ?? "tagesschau").toLowerCase();
 const MAX_CHILDREN = Number(process.argv[3] ?? 6);
 
-// Alle Zeilen einer Tabelle holen (PostgREST limitiert auf 1000/Request → paginieren).
 async function fetchAll<T>(table: string, cols: string, filter?: (q: any) => any): Promise<T[]> {
   const out: T[] = [];
   for (let from = 0; ; from += 1000) {
@@ -22,69 +22,72 @@ async function fetchAll<T>(table: string, cols: string, filter?: (q: any) => any
 
 const { data: srcs } = await sb.from("sources").select("id,name,base_url");
 const src = (srcs ?? []).find((s) => s.name.toLowerCase().includes(arg) || s.base_url.includes(arg));
-if (!src) { console.log("Quelle nicht gefunden. Verfügbar:", srcs?.map((s) => s.name).join(", ")); process.exit(1); }
+if (!src) { console.log("Quelle nicht gefunden:", srcs?.map((s) => s.name).join(", ")); process.exit(1); }
 
-type Node = { id: number; url: string; kind: string; depth: number | null };
-const nodes = await fetchAll<Node>("pages", "id,url,kind,depth", (q) => q.eq("source_id", src.id));
-const ids = new Set(nodes.map((n) => n.id));
-const byId = new Map(nodes.map((n) => [n.id, n]));
+type Node = { url: string; kind: string };
+const pages = await fetchAll<Node>("pages", "url,kind", (q) => q.eq("source_id", src.id));
 
-type Edge = { from_page_id: number; to_page_id: number };
-const edgesAll = await fetchAll<Edge>("page_links", "from_page_id,to_page_id");
-const children = new Map<number, number[]>();
-const parents = new Map<number, number[]>();
-for (const e of edgesAll) {
-  if (!ids.has(e.from_page_id) || !ids.has(e.to_page_id)) continue; // nur diese Quelle
-  (children.get(e.from_page_id) ?? children.set(e.from_page_id, []).get(e.from_page_id)!).push(e.to_page_id);
-  (parents.get(e.to_page_id) ?? parents.set(e.to_page_id, []).get(e.to_page_id)!).push(e.from_page_id);
+// --- Baum aus URL-Pfadsegmenten aufbauen ---
+type T = { seg: string; kind: string; children: Map<string, T>; articleCount: number };
+const root: T = { seg: src.base_url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""), kind: "section", children: new Map(), articleCount: 0 };
+
+for (const p of pages) {
+  let path: string;
+  try { path = new URL(p.url).pathname; } catch { continue; }
+  const segs = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  if (!segs.length) continue; // Startseite selbst
+  let cur = root;
+  segs.forEach((seg, i) => {
+    const isLeaf = i === segs.length - 1;
+    let child = cur.children.get(seg);
+    if (!child) { child = { seg, kind: "section", children: new Map(), articleCount: 0 }; cur.children.set(seg, child); }
+    if (isLeaf) child.kind = p.kind; // Blatt trägt den echten Typ (article/media/…)
+    cur = child;
+  });
 }
 
-// "Führt zu Artikel?" – Rückwärts-BFS von allen Artikel-Knoten zu ihren Vorfahren.
-const leads = new Set<number>();
-const stack: number[] = nodes.filter((n) => n.kind === "article").map((n) => n.id);
-stack.forEach((id) => leads.add(id));
-while (stack.length) {
-  const id = stack.pop()!;
-  for (const p of parents.get(id) ?? []) if (!leads.has(p)) { leads.add(p); stack.push(p); }
+// --- Artikel-Zähler hochpropagieren + Pruning (nur Äste mit Artikeln) ---
+function count(n: T): number {
+  let c = n.kind === "article" ? 1 : 0;
+  for (const ch of n.children.values()) c += count(ch);
+  n.articleCount = c;
+  return c;
 }
+count(root);
 
-// Wurzel = Startseite (depth 0 oder url == base_url).
-const norm = (u: string) => u.replace(/\/+$/, "");
-const root = nodes.find((n) => n.depth === 0) ?? nodes.find((n) => norm(n.url) === norm(src.base_url));
-if (!root) { console.log("Keine Startseite (depth 0) im Baum – erst einen Crawl laufen lassen."); process.exit(0); }
+// --- Einzel-Ketten zusammenfassen (z.B. /article/2026/06/03 → eine Zeile) ---
+function compress(n: T) {
+  for (const ch of [...n.children.values()]) compress(ch);
+  if (n.children.size === 1) {
+    const [only] = [...n.children.values()];
+    if (n.kind === "section" && only.kind === "section" && only.children.size) {
+      n.seg = `${n.seg}/${only.seg}`;
+      n.children = only.children;
+      n.kind = only.kind;
+    }
+  }
+}
+for (const ch of root.children.values()) compress(ch);
 
-const short = (u: string) => u.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "") || "/";
 const ICON: Record<string, string> = { article: "📄", section: "📂", media: "🎬", interactive: "🎛️", sponsored: "💰", service: "⚙️", unknown: "·" };
 
-let articleCount = 0, sectionCount = 0;
-const printed = new Set<number>();
-
-function render(id: number, prefix: string, isLast: boolean) {
-  const n = byId.get(id)!;
-  const branch = prefix === "" ? "" : isLast ? "└─ " : "├─ ";
-  console.log(`${prefix}${branch}${ICON[n.kind] ?? "·"} ${short(n.url)}`);
-  printed.add(id);
-  if (n.kind === "article") { articleCount++; return; }
-  sectionCount++;
-
-  // Kinder: nur die, die zu Artikeln führen, noch nicht gedruckt, keine Schleifen.
-  const kids = (children.get(id) ?? [])
-    .filter((c) => leads.has(c) && !printed.has(c))
-    .map((c) => byId.get(c)!)
-    // Rubriken zuerst (Struktur), dann Artikel
-    .sort((a, b) => (a.kind === "article" ? 1 : 0) - (b.kind === "article" ? 1 : 0));
-
+function render(n: T, prefix: string) {
+  const kids = [...n.children.values()]
+    .filter((c) => c.articleCount > 0 || c.kind === "article")
+    .sort((a, b) => (a.kind === "article" ? 1 : 0) - (b.kind === "article" ? 1 : 0) || b.articleCount - a.articleCount);
   const shown = kids.slice(0, MAX_CHILDREN);
-  const childPrefix = prefix + (prefix === "" ? "" : isLast ? "   " : "│  ");
-  shown.forEach((k, i) => render(k.id, childPrefix, i === shown.length - 1 && kids.length <= MAX_CHILDREN));
+  shown.forEach((k, i) => {
+    const last = i === shown.length - 1 && kids.length <= MAX_CHILDREN;
+    const tag = k.kind === "article" ? "" : `  (${k.articleCount} Artikel)`;
+    console.log(`${prefix}${last ? "└─ " : "├─ "}${ICON[k.kind] ?? "·"} ${k.seg}${tag}`);
+    if (k.kind !== "article") render(k, prefix + (last ? "   " : "│  "));
+  });
   if (kids.length > MAX_CHILDREN) {
-    const rest = kids.length - MAX_CHILDREN;
-    const restArts = kids.slice(MAX_CHILDREN).filter((k) => k.kind === "article").length;
-    console.log(`${childPrefix}└─ … +${rest} weitere (${restArts} Artikel)`);
+    const rest = kids.slice(MAX_CHILDREN);
+    console.log(`${prefix}└─ … +${rest.length} weitere Rubriken (${rest.reduce((s, k) => s + k.articleCount, 0)} Artikel)`);
   }
 }
 
-console.log(`\nBAUM: ${src.name} — nur Pfade, die zu Artikeln führen\n`);
-render(root.id, "", true);
-console.log(`\nKnoten gesamt: ${nodes.length} | zu Artikeln führend: ${leads.size} | im Baum gezeigt: ${printed.size}`);
-console.log(`(📂 Zwischenseiten: ${sectionCount}, 📄 Artikel: ${articleCount})`);
+console.log(`\nBAUM: ${src.name} — Rubriken-Hierarchie, nur Äste mit Artikeln\n`);
+console.log(`📂 ${root.seg}  (Startseite, ${root.articleCount} Artikel gesamt)`);
+render(root, "");
