@@ -132,6 +132,64 @@ function asArticle(html: string, url: string): { title: string; teaser: string; 
   }
 }
 
+// === Klassifikation der Seiten (Knoten im Baum) ===
+type Kind = "article" | "section" | "media" | "interactive" | "sponsored" | "service" | "unknown";
+
+// Schätzung allein aus der URL (für entdeckte, noch nicht gerenderte Links).
+function classifyUrl(url: string): Kind {
+  const u = url.toLowerCase();
+  if (/(anzeige|sponsored|advertorial|promotion|werbung|\/adv\/)/.test(u)) return "sponsored";
+  if (/\/(impressum|kontakt|datenschutz|newsletter|abo|login|konto|hilfe|agb|nutzungsbedingungen|privacy|mentions-legales|cgu)\b/.test(u)) return "service";
+  if (/\/(podcast|video|audio|mediathek|livestream|bilder|fotostrecke|galerie|multimedia|tv)\b/.test(u)) return "media";
+  if (/(boersenkurse|kurse|wetter|horoskop|lotto|gewinnspiel|rechner|tabelle|ergebnisse|spielplan)/.test(u)) return "interactive";
+  if (looksLikeArticle(u)) return "article";
+  return "unknown";
+}
+
+// Sichere Klassifikation nach dem Rendern (zieht den Inhalt hinzu).
+function classifyRendered(url: string, html: string): { kind: Kind; article: { title: string; teaser: string; body: string } | null } {
+  const byUrl = classifyUrl(url);
+  if (byUrl !== "article" && byUrl !== "unknown") return { kind: byUrl, article: null };
+  const art = looksLikeArticle(url) ? asArticle(html, url) : null;
+  if (art) return { kind: "article", article: art };
+  return { kind: "section", article: null }; // gerenderte, navigationale Nicht-Artikel-Seite
+}
+
+// === Knoten/Kanten-Persistenz (der Baum) ===
+const pageId = new Map<string, number>(); // url -> pages.id (laufzeitweiter Cache)
+
+// Entdeckte Links als Knoten anlegen (nur neu; bestehende Klassifikation NICHT überschreiben).
+async function ensureNodes(sourceId: number, urls: string[], depth: number) {
+  const fresh = urls.filter((u) => !pageId.has(u));
+  if (!fresh.length) return;
+  const rows = fresh.map((url) => ({ source_id: sourceId, url, kind: classifyUrl(url), depth }));
+  await sb.from("pages").upsert(rows, { onConflict: "url", ignoreDuplicates: true });
+  for (let i = 0; i < fresh.length; i += 200) {
+    const { data } = await sb.from("pages").select("id,url").in("url", fresh.slice(i, i + 200));
+    for (const p of data ?? []) pageId.set(p.url, p.id);
+  }
+}
+
+// Gerenderten Knoten mit sicherer Klassifikation schreiben (überschreibt kind).
+async function upsertRenderedNode(sourceId: number, url: string, kind: Kind, depth: number): Promise<number> {
+  const { data, error } = await sb.from("pages")
+    .upsert({ source_id: sourceId, url, kind, depth, last_seen: new Date().toISOString() }, { onConflict: "url" })
+    .select("id").single();
+  if (error) throw error;
+  pageId.set(url, data.id);
+  return data.id;
+}
+
+// Kanten "von dieser Seite -> Links" speichern.
+async function addEdges(fromId: number, toUrls: string[]) {
+  const rows = toUrls.map((u) => pageId.get(u))
+    .filter((id): id is number => !!id && id !== fromId) // keine Self-Loops
+    .map((to) => ({ from_page_id: fromId, to_page_id: to }));
+  for (let i = 0; i < rows.length; i += 500) {
+    await sb.from("page_links").upsert(rows.slice(i, i + 500), { onConflict: "from_page_id,to_page_id", ignoreDuplicates: true });
+  }
+}
+
 // Rekursiver, begrenzter Chromium-Crawl einer Quelle.
 async function crawlSource(ctx: BrowserContext, src: Source) {
   const visited = new Set<string>();
@@ -149,7 +207,8 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
 
   enqueue({ url: src.base_url, depth: 0 }, false); // Startseite = Übersicht
 
-  let pages = 0, found = 0;
+  let pages = 0;
+  const counts: Record<string, number> = {};
   while ((articleQ.length || sectionQ.length) && pages < MAX_PAGES) {
     const s = (articleQ.shift() ?? sectionQ.shift())!; // Artikel zuerst, sonst Rubrik
     if (visited.has(s.url)) continue;
@@ -159,32 +218,35 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
     const { html } = await renderPage(ctx, s.url);
     if (!html) continue;
 
-    // Artikel? Erst URL-Muster (keine Rubrik/Übersicht), dann Inhalt prüfen.
-    // upsertArticle setzt last_seen = "zuletzt verlinkt/erreicht"; altes last_seen = abgefallen.
-    const art = looksLikeArticle(s.url) ? asArticle(html, s.url) : null;
-    if (art) {
-      found++;
-      if (!DRY_RUN) {
-        try {
+    // Links der Seite (für Kanten + Rekursion)
+    const links = s.depth < MAX_DEPTH ? sameDomainLinks(html, src.base_url, s.url) : [];
+
+    // Seite klassifizieren (Knoten im Baum)
+    const { kind, article } = classifyRendered(s.url, html);
+    counts[kind] = (counts[kind] ?? 0) + 1;
+
+    if (!DRY_RUN) {
+      try {
+        // 1) diese Seite als klassifizierten Knoten speichern
+        const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
+        // 2) Links als Knoten + Kanten (von wo wird wohin verlinkt)
+        if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
+        // 3) NUR Artikel gehen in die Analyse (Embedding/Cluster)
+        if (kind === "article" && article) {
           const id = await upsertArticle(src.id, s.url);
-          await saveVersion(id, art.title, art.teaser, art.body);
-        } catch (e) {
-          console.error("FEHLER speichern:", s.url, (e as Error).message);
+          await saveVersion(id, article.title, article.teaser, article.body);
         }
+      } catch (e) {
+        console.error("FEHLER:", s.url, (e as Error).message);
       }
-      if (found % 10 === 0) console.log(`  ${src.base_url}: ${found} Artikel / ${pages} Seiten…`);
     }
 
-    // Links IMMER verfolgen – auch von Rubrik-/Übersichtsseiten, denn dort hängen die Artikel.
-    // Nur das SPEICHERN (oben) ist auf echte Artikel beschränkt.
-    if (s.depth < MAX_DEPTH) {
-      for (const link of sameDomainLinks(html, src.base_url, s.url)) {
-        enqueue({ url: link, depth: s.depth + 1 }, looksLikeArticle(link)); // Artikel- vs. Rubrik-Queue
-      }
-    }
+    // Rekursion: Links verfolgen (Artikel-Links bevorzugt), auch von Rubrik-/Übersichtsseiten.
+    for (const link of links) enqueue({ url: link, depth: s.depth + 1 }, classifyUrl(link) === "article");
     await sleep(DELAY_MS);
   }
-  console.log(`Quelle ${src.base_url}: ${pages} Seiten gerendert, ${found} Artikel erreicht.`);
+  const summary = Object.entries(counts).map(([k, n]) => `${k}=${n}`).join(", ");
+  console.log(`Quelle ${src.base_url}: ${pages} Seiten gerendert [${summary}]`);
 }
 
 async function run() {

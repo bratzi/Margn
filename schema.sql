@@ -67,11 +67,33 @@ create table article_clusters (
   primary key (cluster_id, article_id)
 );
 
+-- Link-Baum: JEDE entdeckte Seite ist ein Knoten, klassifiziert nach Typ.
+-- Nur kind='article' wird embedded/analysiert; der Rest dient der Struktur-/Pfad-Analyse
+-- (Wie viele Zwischenseiten betreibt ein Verlag? Von wo wird auf Artikel verlinkt?).
+create table pages (
+  id         bigint generated always as identity primary key,
+  source_id  bigint references sources(id),
+  url        text not null unique,
+  kind       text not null default 'unknown',  -- article | section | media | interactive | sponsored | service | unknown
+  depth      int,                               -- Linktiefe ab Startseite
+  first_seen timestamptz default now(),
+  last_seen  timestamptz default now()
+);
+-- Kanten des Baums: from_page verlinkt auf to_page.
+create table page_links (
+  from_page_id bigint not null references pages(id) on delete cascade,
+  to_page_id   bigint not null references pages(id) on delete cascade,
+  first_seen   timestamptz default now(),
+  primary key (from_page_id, to_page_id)
+);
+
 -- Indizes
 create index on article_versions (article_id, scanned_at desc);
 create index on article_versions using ivfflat (embedding vector_cosine_ops) with (lists = 100);
 create index on article_versions using gin (signals);
 create index on articles (source_id, last_seen desc);
+create index on pages (source_id, kind);
+create index on page_links (to_page_id);   -- "von wo wird hierher verlinkt?"
 
 -- RPC: sprachübergreifende Ähnlichkeitssuche
 -- DISTINCT ON article_id: pro Artikel nur die nächstgelegene Version, sonst verdrängen
