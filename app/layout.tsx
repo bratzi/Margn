@@ -1,11 +1,15 @@
 import "./globals.css";
+import Nav from "@/components/Nav";
 
-export const metadata = { title: "NewsScraper — Crawl-Fortschritt" };
+export const metadata = { title: "NewsScraper — Medienobservatorium" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="de">
-      <body>{children}</body>
+      <body>
+        <Nav />
+        {children}
+      </body>
     </html>
   );
 }

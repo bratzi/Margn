@@ -1,13 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
-type Row = { id: number; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean; analyzed_at: string | null; title: string | null };
+type Row = { id: number; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean; title: string | null; edited: boolean; cluster_id: number | null; cluster_size: number | null };
+type Cluster = { cluster_id: number; size: number; outlets: number };
+type Mode = "all" | "analyzed" | "backlog" | "edited" | "clustered";
 
 const PAGE = 25;
 const FLAG: Record<string, string> = { DE: "🇩🇪", FR: "🇫🇷" };
+const MODES: { k: Mode; l: string }[] = [
+  { k: "all", l: "Alle" }, { k: "analyzed", l: "Analysiert" }, { k: "backlog", l: "Backlog" },
+  { k: "edited", l: "✏️ Geändert" }, { k: "clustered", l: "🔗 Im Cluster" },
+];
 
 function shortUrl(u: string) {
   try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; }
@@ -20,62 +27,84 @@ function fmt(iso: string | null) {
 
 export default function ArticleDashboard() {
   const [summary, setSummary] = useState<Summary[]>([]);
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [editCount, setEditCount] = useState(0);
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
-  const [status, setStatus] = useState<"all" | "analyzed" | "backlog">("all");
-  const [outlet, setOutlet] = useState<string>("all");
+  const [mode, setMode] = useState<Mode>("all");
+  const [outlet, setOutlet] = useState("all");
   const [page, setPage] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  const loadSummary = useCallback(async () => {
-    const { data } = await supabase.from("article_status_summary").select("*");
-    setSummary((data as Summary[]) ?? []);
+  const loadStats = useCallback(async () => {
+    const [{ data: sum }, { data: clu }, { count: ed }] = await Promise.all([
+      supabase.from("article_status_summary").select("*"),
+      supabase.from("cluster_overview").select("cluster_id,size,outlets"),
+      supabase.from("article_status").select("*", { count: "exact", head: true }).eq("edited", true),
+    ]);
+    setSummary((sum as Summary[]) ?? []);
+    setClusters((clu as Cluster[]) ?? []);
+    setEditCount(ed ?? 0);
     setUpdatedAt(new Date());
   }, []);
 
   const loadRows = useCallback(async () => {
-    let q = supabase.from("article_status").select("id,url,outlet,country,discovered_at,analyzed,analyzed_at,title", { count: "exact" });
-    if (status !== "all") q = q.eq("analyzed", status === "analyzed");
+    let q = supabase.from("article_status").select("id,url,outlet,country,discovered_at,analyzed,title,edited,cluster_id,cluster_size", { count: "exact" });
+    if (mode === "analyzed") q = q.eq("analyzed", true);
+    else if (mode === "backlog") q = q.eq("analyzed", false);
+    else if (mode === "edited") q = q.eq("edited", true);
+    else if (mode === "clustered") q = q.not("cluster_id", "is", null);
     if (outlet !== "all") q = q.eq("outlet", outlet);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []);
     setTotal(count ?? 0);
-  }, [status, outlet, page]);
+  }, [mode, outlet, page]);
 
-  useEffect(() => { loadSummary(); }, [loadSummary]);
+  useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { loadRows(); }, [loadRows]);
-
-  // Live: alle 15 s aktualisieren
-  useEffect(() => {
-    const t = setInterval(() => { loadSummary(); loadRows(); }, 15000);
-    return () => clearInterval(t);
-  }, [loadSummary, loadRows]);
+  useEffect(() => { const t = setInterval(() => { loadStats(); loadRows(); }, 15000); return () => clearInterval(t); }, [loadStats, loadRows]);
 
   const totals = useMemo(() => summary.reduce((a, s) => ({ d: a.d + s.discovered, an: a.an + s.analyzed, b: a.b + s.backlog }), { d: 0, an: 0, b: 0 }), [summary]);
   const pct = totals.d ? Math.round((totals.an / totals.d) * 100) : 0;
+  const crossOutlet = clusters.filter((c) => c.outlets > 1).length;
   const pages = Math.max(1, Math.ceil(total / PAGE));
 
   return (
     <div className="wrap">
       <div className="h-row">
         <div>
-          <div className="title">NewsScraper — Crawl-Fortschritt</div>
-          <div className="subtitle">Entdeckte Artikel je Quelle · analysiert (embedded) vs. Backlog</div>
+          <div className="title">Crawl-Fortschritt & Analyse</div>
+          <div className="subtitle">Entdeckte Artikel je Quelle · analysiert vs. Backlog · stille Edits · Story-Cluster</div>
         </div>
-        <div className="live"><span className="dot" /> live · aktualisiert {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</div>
+        <div className="live"><span className="dot" /> live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</div>
       </div>
 
-      {/* Gesamtfortschritt */}
+      {/* Gesamtfortschritt + KPIs */}
       <div className="panel pad overall">
         <div>
           <div className="big">{pct}%<small>analysiert</small></div>
           <div className="kpis">
             <div className="kpi"><b>{totals.an.toLocaleString("de-DE")}</b> <span>analysiert</span></div>
-            <div className="kpi"><b>{totals.b.toLocaleString("de-DE")}</b> <span>im Backlog</span></div>
-            <div className="kpi"><b>{totals.d.toLocaleString("de-DE")}</b> <span>entdeckt gesamt</span></div>
+            <div className="kpi"><b>{totals.b.toLocaleString("de-DE")}</b> <span>Backlog</span></div>
+            <div className="kpi"><b>{totals.d.toLocaleString("de-DE")}</b> <span>entdeckt</span></div>
           </div>
         </div>
         <div><div className="bar"><i style={{ width: `${pct}%` }} /></div></div>
+      </div>
+
+      <div className="kpi-row">
+        <Link href="/echoes" className="kpi-tile">
+          <div className="kpi-n">{clusters.length.toLocaleString("de-DE")}</div>
+          <div className="kpi-l">Story-Cluster</div>
+        </Link>
+        <Link href="/echoes" className="kpi-tile accent">
+          <div className="kpi-n">{crossOutlet.toLocaleString("de-DE")}</div>
+          <div className="kpi-l">blattübergreifend</div>
+        </Link>
+        <Link href="/edits" className="kpi-tile">
+          <div className="kpi-n">{editCount.toLocaleString("de-DE")}</div>
+          <div className="kpi-l">stille Edits</div>
+        </Link>
       </div>
 
       {/* Karten je Quelle */}
@@ -102,10 +131,8 @@ export default function ArticleDashboard() {
       {/* Filter */}
       <div className="controls">
         <div className="seg">
-          {(["all", "analyzed", "backlog"] as const).map((k) => (
-            <button key={k} className={status === k ? "on" : ""} onClick={() => { setStatus(k); setPage(0); }}>
-              {k === "all" ? "Alle" : k === "analyzed" ? "Analysiert" : "Backlog"}
-            </button>
+          {MODES.map((m) => (
+            <button key={m.k} className={mode === m.k ? "on" : ""} onClick={() => { setMode(m.k); setPage(0); }}>{m.l}</button>
           ))}
         </div>
         <select value={outlet} onChange={(e) => { setOutlet(e.target.value); setPage(0); }}>
@@ -120,7 +147,7 @@ export default function ArticleDashboard() {
       <div className="panel">
         <table>
           <thead>
-            <tr><th>Quelle</th><th>Artikel</th><th>Entdeckt</th><th>Status</th></tr>
+            <tr><th>Quelle</th><th>Artikel</th><th>Entdeckt</th><th>Status</th><th>Signale</th></tr>
           </thead>
           <tbody>
             {rows.map((r) => {
@@ -134,15 +161,16 @@ export default function ArticleDashboard() {
                     </a>
                   </td>
                   <td className="mono muted" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
-                  <td>
-                    {r.analyzed
-                      ? <span className="badge ok"><i />analysiert</span>
-                      : <span className="badge wait"><i />Backlog</span>}
+                  <td>{r.analyzed ? <span className="badge ok"><i />analysiert</span> : <span className="badge wait"><i />Backlog</span>}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {r.edited && <Link href="/edits" className="badge edit">✏️ geändert</Link>}
+                    {r.cluster_id && <Link href="/echoes" className="badge clu">🔗 #{r.cluster_id}{r.cluster_size && r.cluster_size > 1 ? ` ·${r.cluster_size}` : ""}</Link>}
+                    {!r.edited && !r.cluster_id && <span className="muted">—</span>}
                   </td>
                 </tr>
               );
             })}
-            {!rows.length && <tr><td colSpan={4} className="muted" style={{ padding: 28, textAlign: "center" }}>Keine Artikel.</td></tr>}
+            {!rows.length && <tr><td colSpan={5} className="muted" style={{ padding: 28, textAlign: "center" }}>Keine Artikel.</td></tr>}
           </tbody>
         </table>
       </div>
