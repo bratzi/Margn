@@ -4,9 +4,10 @@ import { chromium, type BrowserContext } from "playwright";
 import { sb } from "./lib";
 
 // --- Crawl-Grenzen (per Env übersteuerbar; CI knapp, lokaler Tief-Crawl höher) ---
-const MAX_PAGES = Number(process.env.CRAWL_MAX_PAGES ?? 80); // gerenderte Seiten pro Quelle
-const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);  // Linktiefe ab Startseite
-const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 300);  // Höflichkeitspause
+const MAX_PAGES = Number(process.env.CRAWL_MAX_PAGES ?? 80);    // gerenderte Seiten pro Quelle
+const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);     // Linktiefe ab Startseite
+const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 100);     // Höflichkeitspause (kein Embed mehr → kürzer)
+const CONCURRENCY = Number(process.env.CRAWL_CONCURRENCY ?? 4); // parallele Browser-Tabs
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
 // "articles": crawlen + Artikel in articles-Tabelle speichern (Metadaten, kein Volltext/Embedding).
@@ -46,9 +47,7 @@ async function renderPage(ctx: BrowserContext, url: string): Promise<{ status: n
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
     const status = resp?.status() ?? 0;
-    // kurz warten, damit nachladender Inhalt (JS) noch reinkommt
-    await page.waitForTimeout(500);
-    const html = await page.content();
+    const html = await page.content(); // kein waitForTimeout – brauchen nur Links, keinen vollständigen Text
     return { status, html };
   } catch {
     return { status: 0, html: null };
@@ -185,44 +184,45 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
 
   let pages = 0;
   const counts: Record<string, number> = {};
-  while ((articleQ.length || sectionQ.length) && pages < MAX_PAGES) {
-    // structure: Rubriken zuerst (Baum kartieren); articles: Artikel zuerst (Analyse füllen)
-    const s = (MODE === "structure"
-      ? (sectionQ.shift() ?? articleQ.shift())
-      : (articleQ.shift() ?? sectionQ.shift()))!;
-    if (visited.has(s.url)) continue;
+
+  // Einen einzelnen Seed verarbeiten (renderPage + classify + DB-Write + neue Links einreihen).
+  async function processOne(s: Seed) {
+    if (visited.has(s.url)) return;
     visited.add(s.url);
     pages++;
 
     const { html } = await renderPage(ctx, s.url);
-    if (!html) continue;
+    if (!html) return;
 
-    // Links der Seite (für Kanten + Rekursion)
     const links = s.depth < MAX_DEPTH ? sameDomainLinks(html, src.base_url, s.url) : [];
-
-    // Seite klassifizieren (Knoten im Baum)
     const { kind, article } = classifyRendered(s.url, html);
     counts[kind] = (counts[kind] ?? 0) + 1;
 
     if (!DRY_RUN) {
       try {
-        // 1) diese Seite als klassifizierten Knoten speichern
         const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
-        // 2) Links als Knoten + Kanten (von wo wird wohin verlinkt)
         if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
-        // 3) Artikel in articles-Tabelle (nur Metadaten, kein Volltext/Embedding).
-        if (kind === "article" && article && MODE !== "structure") {
-          await upsertArticle(src.id, s.url);
-        }
-      } catch (e) {
-        console.error("FEHLER:", s.url, (e as Error).message);
-      }
+        if (kind === "article" && article && MODE !== "structure") await upsertArticle(src.id, s.url);
+      } catch (e) { console.error("FEHLER:", s.url, (e as Error).message); }
     }
-
-    // Rekursion: Links verfolgen (Artikel-Links bevorzugt), auch von Rubrik-/Übersichtsseiten.
     for (const link of links) enqueue({ url: link, depth: s.depth + 1 }, classifyUrl(link) === "article");
-    await sleep(DELAY_MS);
   }
+
+  // Parallele Worker: CONCURRENCY Tabs laufen gleichzeitig.
+  const next = (): Seed | undefined => MODE === "structure"
+    ? (sectionQ.shift() ?? articleQ.shift())
+    : (articleQ.shift() ?? sectionQ.shift());
+
+  async function worker() {
+    while (pages < MAX_PAGES) {
+      const s = next();
+      if (!s) break;
+      await processOne(s);
+      await sleep(DELAY_MS);
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
   const summary = Object.entries(counts).map(([k, n]) => `${k}=${n}`).join(", ");
   console.log(`Quelle ${src.base_url}: ${pages} Seiten gerendert [${summary}]`);
 }
@@ -266,29 +266,21 @@ async function analyzeBacklog() {
   const batch = [...bySrc.values()].reduce((s, a) => s + a.length, 0);
   console.log(`Entdeckt: ${discovered.length} | analysiert: ${done.size} | offen: ${openTotal} | dieser Lauf: ${batch} (max ${perSource}/Quelle)`);
 
-  const browser = await chromium.launch();
-  try {
-    for (const [sid, urls] of bySrc) {
-      const src = srcById.get(sid);
-      const ctx = await browser.newContext({ userAgent: UA, locale: src.language === "fr" ? "fr-FR" : "de-DE" });
-      let ok = 0;
-      try {
-        for (const url of urls) {
-          const { html } = await renderPage(ctx, url);
-          if (!html) continue;
-          const art = asArticle(html, url);
-          if (!art) continue;
-          try {
-            await upsertArticle(sid, url);
-            ok++;
-            if (ok % 25 === 0) console.log(`  ${src.base_url}: ${ok}/${urls.length}…`);
-          } catch (e) { console.error("FEHLER:", url, (e as Error).message); }
-          await sleep(DELAY_MS);
-        }
-      } finally { await ctx.close(); }
-      console.log(`Quelle ${src.base_url}: ${ok}/${urls.length} analysiert.`);
+  // Kein Chromium mehr nötig: wir speichern nur URL + Metadaten (no content/embed).
+  // Direkt batch-upsertn aus pages → articles.
+  for (const [sid, urls] of bySrc) {
+    const src = srcById.get(sid);
+    const CHUNK = 200;
+    let ok = 0;
+    for (let i = 0; i < urls.length; i += CHUNK) {
+      const chunk = urls.slice(i, i + CHUNK);
+      const rows = chunk.map((url) => ({ source_id: sid, url, last_seen: new Date().toISOString() }));
+      const { error } = await sb.from("articles").upsert(rows, { onConflict: "url", ignoreDuplicates: false });
+      if (error) console.error("FEHLER batch:", error.message);
+      else ok += chunk.length;
     }
-  } finally { await browser.close(); }
+    console.log(`Quelle ${src.base_url}: ${ok}/${urls.length} analysiert.`);
+  }
 }
 
 async function run() {

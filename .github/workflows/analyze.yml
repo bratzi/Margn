@@ -23,5 +23,4 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           # analyze-Modus: bereits entdeckte pages.kind='article' rendern+embedden (kein Crawl).
           CRAWL_MODE: "analyze"
-          CRAWL_MAX_PAGES: "250"   # ~42 Artikel/Quelle pro Tag, passt ins Minutenbudget
-          CRAWL_DELAY_MS: "200"
+          CRAWL_MAX_PAGES: "6000"  # analyze braucht kein Chromium mehr → Batch läuft in Sekunden
