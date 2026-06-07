@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { FileText, Folder, Clock } from "@/components/icons";
+import PublisherCompare from "@/components/PublisherCompare";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
 type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean };
@@ -67,26 +68,8 @@ export default function ArticleDashboard() {
           <div className="stat-tile accent"><div className="l">Fortschritt</div><div className="n tnum">{pct}%</div><div className="bar"><i style={{ width: `${pct}%` }} /></div></div>
         </div>
 
-        {/* Quellen */}
-        <h2 className="section-h">Quellen <span className="count">{summary.length} Portale</span></h2>
-        <div className="grid">
-          {summary.map((s) => {
-            const p = s.discovered ? Math.round((s.analyzed / s.discovered) * 100) : 0;
-            return (
-              <div className="card" key={s.source_id}>
-                <div className="top">
-                  <div className="outlet">{s.outlet}<span className="cc">{s.country}</span></div>
-                  <div className="pct tnum">{p}%</div>
-                </div>
-                <div className="bar"><i style={{ width: `${p}%` }} /></div>
-                <div className="nums">
-                  <span><b className="tnum">{s.analyzed.toLocaleString("de-DE")}</b> analysiert</span>
-                  <span><b className="tnum">{s.backlog.toLocaleString("de-DE")}</b> Backlog</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* Publizisten-Vergleich (Kern der Startseite) */}
+        <PublisherCompare />
 
         {/* Artikel */}
         <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer</span></h2>
