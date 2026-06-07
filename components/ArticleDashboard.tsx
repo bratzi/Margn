@@ -5,7 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
-type Row = { id: number; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean };
+type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean };
 type Mode = "all" | "analyzed" | "backlog";
 
 const PAGE = 25;
@@ -39,7 +39,7 @@ export default function ArticleDashboard() {
   }, []);
 
   const loadRows = useCallback(async () => {
-    let q = supabase.from("article_status").select("id,url,outlet,country,discovered_at,analyzed", { count: "exact" });
+    let q = supabase.from("article_status").select("id,article_id,url,outlet,country,discovered_at,analyzed", { count: "exact" });
     if (mode === "analyzed") q = q.eq("analyzed", true);
     else if (mode === "backlog") q = q.eq("analyzed", false);
     if (outlet !== "all") q = q.eq("outlet", outlet);
@@ -128,9 +128,15 @@ export default function ArticleDashboard() {
                 <tr key={r.id}>
                   <td style={{ whiteSpace: "nowrap" }}>{FLAG[r.country ?? ""] ?? ""} {r.outlet}</td>
                   <td>
-                    <Link href={`/articles/${r.id}`} className="url" title={r.url} style={{ color: "var(--text)" }}>
-                      <span className="mono"><span className="path">{host}</span>{path}</span>
-                    </Link>
+                    {r.article_id ? (
+                      <Link href={`/articles/${r.article_id}`} className="url" title={r.url} style={{ color: "var(--text)" }}>
+                        <span className="mono"><span className="path">{host}</span>{path}</span>
+                      </Link>
+                    ) : (
+                      <a href={r.url} target="_blank" rel="noreferrer" className="url" title={r.url}>
+                        <span className="mono"><span className="path">{host}</span>{path}</span>
+                      </a>
+                    )}
                   </td>
                   <td className="mono muted" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
                   <td>{r.analyzed ? <span className="badge ok"><i />analysiert</span> : <span className="badge wait"><i />Backlog</span>}</td>

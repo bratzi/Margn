@@ -12,8 +12,9 @@ const MIN_BODY = 1200;                                       // viel Fließtext 
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
 // "articles": crawlen + Artikel in articles-Tabelle speichern (Metadaten, kein Volltext/Embedding).
 // "structure": Rubriken crawlen, ALLE Links klassifiziert in pages/page_links.
-// "analyze": KEIN Crawl – nimmt entdeckte pages.kind='article', rendert+speichert Metadaten.
-const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze";
+// "analyze": KEIN Crawl – nimmt entdeckte pages.kind='article', batch-upsert in articles.
+// "enrich":  Rendert alle articles ohne Titel mit Chromium und trägt Metadaten nach.
+const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -394,14 +395,62 @@ async function analyzeBacklog() {
   }
 }
 
+// enrich-Modus: Alle articles ohne Titel mit Chromium rendern und Metadaten nachtragen.
+// Läuft parallel (CONCURRENCY Tabs). Ideal nach dem ersten analyze-Batch.
+async function enrichArticles(sources: Source[]) {
+  const srcById = new Map(sources.map((s) => [s.id, s]));
+
+  // Artikel ohne Titel laden (balanciert über Quellen)
+  const perSource = Math.ceil(MAX_PAGES / sources.length);
+  const toEnrich: { id: number; url: string; source_id: number }[] = [];
+  for (const src of sources) {
+    const { data } = await sb.from("articles").select("id,url,source_id")
+      .eq("source_id", src.id).is("title", null).limit(perSource);
+    toEnrich.push(...((data ?? []) as { id: number; url: string; source_id: number }[]));
+  }
+  console.log(`Zu bereichern: ${toEnrich.length} Artikel (max ${perSource}/Quelle)`);
+  if (!toEnrich.length) { console.log("Alle Artikel haben bereits Metadaten."); return; }
+
+  const browser = await chromium.launch();
+  const queue = [...toEnrich];
+  let done = 0;
+
+  async function worker(langHint: string) {
+    const ctx = await browser.newContext({ userAgent: UA, locale: langHint === "fr" ? "fr-FR" : "de-DE" });
+    try {
+      while (true) {
+        const item = queue.shift();
+        if (!item) break;
+        const { html } = await renderPage(ctx, item.url);
+        if (!html) continue;
+        const meta = extractMeta(html, item.url);
+        try {
+          const { authors, keywords, categories, ...fields } = meta;
+          await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString() }).eq("id", item.id);
+          await upsertDimensions(item.id, authors, keywords, categories);
+          done++;
+          if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
+        } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
+        await sleep(DELAY_MS);
+      }
+    } finally { await ctx.close(); }
+  }
+
+  // Pro Quelle eigener Worker mit passender Locale
+  const workers = sources.map((s) => worker(s.language ?? "de"));
+  await Promise.all(workers);
+  await browser.close();
+  console.log(`Fertig: ${done}/${toEnrich.length} Artikel angereichert.`);
+}
+
 async function run() {
   const { data, error } = await sb.from("sources").select("id,base_url,language").eq("active", true);
   if (error) throw new Error(`Quellen-Abfrage fehlgeschlagen: ${error.message}`);
   console.log(`${data?.length ?? 0} aktive Quellen geladen.`);
   if (!data?.length) throw new Error("Keine aktiven Quellen gefunden – Abbruch.");
 
-  // analyze-Modus: kein Crawl, nur entdeckte Artikel abarbeiten.
   if (MODE === "analyze") { await analyzeBacklog(); return; }
+  if (MODE === "enrich")  { await enrichArticles(data as Source[]); return; }
 
   const browser = await chromium.launch();
   try {
