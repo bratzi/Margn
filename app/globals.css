@@ -189,6 +189,9 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .barrow .track { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
 .barrow .track i { display: block; height: 100%; border-radius: 99px; transition: width .6s cubic-bezier(.4,0,.2,1); }
 .barrow .val { font-size: 12px; color: var(--ink); text-align: right; font-weight: 600; }
+.barrow-btn { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; width: 100%; }
+.barrow-btn:hover .lbl { color: var(--ink); }
+.barrow-btn.sel .lbl { color: var(--accent); font-weight: 600; }
 
 /* ---------- Autoren-Transparenz (stacked) ---------- */
 .legend { display: flex; gap: 18px; margin-bottom: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }

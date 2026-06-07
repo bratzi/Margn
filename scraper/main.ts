@@ -3,6 +3,7 @@ import { Readability } from "@mozilla/readability";
 import { chromium, type BrowserContext } from "playwright";
 import { createHash } from "node:crypto";
 import { sb } from "./lib";
+import { topicOf } from "./topics";
 
 // --- Crawl-Grenzen (per Env übersteuerbar; CI knapp, lokaler Tief-Crawl höher) ---
 const MAX_PAGES = Number(process.env.CRAWL_MAX_PAGES ?? 80);    // gerenderte Seiten pro Quelle
@@ -131,8 +132,9 @@ function extractMeta(html: string, url: string) {
     .map((c: string) => c.trim()).filter((c: string) => c.length > 1 && c.length < 80);
 
   const author_status = classifyAuthorStatus(authorList);
+  const topic = topicOf(categories, url);
 
-  return { title, description, og_image, published_at, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, authors: authorList, keywords, categories };
+  return { title, description, og_image, published_at, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, authors: authorList, keywords, categories };
 }
 
 // Autoren-Status: 'named' (echte Person), 'anonymous' (Redaktion/Agentur/Eigenname), 'none' (keiner).

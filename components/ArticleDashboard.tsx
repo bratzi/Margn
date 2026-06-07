@@ -5,7 +5,9 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { FileText, Folder, Clock } from "@/components/icons";
 import PublisherCompare from "@/components/PublisherCompare";
+import TopicChart from "@/components/TopicChart";
 import FilterPanel, { type Src } from "@/components/FilterPanel";
+import { topicLabel } from "@/lib/topics";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
 type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean; paywalled: boolean | null };
@@ -39,20 +41,24 @@ export default function ArticleDashboard() {
   const [paywall, setPaywall] = useState("all");
   const [atype, setAtype] = useState("all");
   const [author, setAuthor] = useState("all");
+  const [topic, setTopic] = useState("all");
   const [lang, setLang] = useState("all");
   const [period, setPeriod] = useState("all");
+  const [topicStats, setTopicStats] = useState<{ topic: string; source_id: number; n: number }[]>([]);
 
   // Quellen + Summary laden
   useEffect(() => {
     (async () => {
-      const [{ data: srcs }, { data: sum }] = await Promise.all([
+      const [{ data: srcs }, { data: sum }, { data: ts }] = await Promise.all([
         supabase.from("sources").select("id,name,base_url,country").eq("active", true),
         supabase.from("article_status_summary").select("*"),
+        supabase.from("topic_stats").select("*"),
       ]);
       const s = (srcs as Src[]) ?? [];
       setSources(s);
       setActive(new Set(s.map((x) => x.id)));
       setSummary((sum as Summary[]) ?? []);
+      setTopicStats((ts as any[]) ?? []);
       setUpdatedAt(new Date());
     })();
   }, []);
@@ -67,19 +73,27 @@ export default function ArticleDashboard() {
     else if (paywall === "no") q = q.eq("paywalled", false);
     if (atype !== "all") q = q.eq("article_type", atype);
     if (author !== "all") q = q.eq("author_status", author);
+    if (topic !== "all") q = q.eq("topic", topic);
     if (lang !== "all") q = q.eq("language", lang);
     const c = cutoff(period);
     if (c) q = q.gte("published_at", c);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []);
     setTotal(count ?? 0);
-  }, [active, status, paywall, atype, author, lang, period, page]);
+  }, [active, status, paywall, atype, author, topic, lang, period, page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [active, status, paywall, atype, author, lang, period]);
+  useEffect(() => { setPage(0); }, [active, status, paywall, atype, author, topic, lang, period]);
 
   const toggle = (id: number) => setActive((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
+
+  const topicOpts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of topicStats) if (active.has(r.source_id)) m.set(r.topic, (m.get(r.topic) ?? 0) + r.n);
+    return [...m.entries()].filter(([t]) => t !== "sonstiges").sort((a, b) => b[1] - a[1])
+      .map(([key, n]) => ({ key, label: topicLabel(key), n }));
+  }, [topicStats, active]);
 
   const visSummary = useMemo(() => summary.filter((s) => active.has(s.source_id)), [summary, active]);
   const totals = useMemo(() => visSummary.reduce((a, s) => ({ d: a.d + s.discovered, an: a.an + s.analyzed, b: a.b + s.backlog }), { d: 0, an: 0, b: 0 }), [visSummary]);
@@ -104,7 +118,9 @@ export default function ArticleDashboard() {
 
           <PublisherCompare activeSources={[...active]} />
 
-          <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer</span></h2>
+          <TopicChart activeSources={[...active]} current={topic} onPick={setTopic} />
+
+          <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer{topic !== "all" ? ` · ${topicLabel(topic)}` : ""}</span></h2>
           <div className="panel">
             <table>
               <thead><tr><th>Quelle</th><th>Artikel</th><th>Entdeckt</th><th>Status</th></tr></thead>
@@ -144,6 +160,7 @@ export default function ArticleDashboard() {
           active={active} toggle={toggle} setAll={setAll}
           status={status} setStatus={setStatus} paywall={paywall} setPaywall={setPaywall}
           atype={atype} setAtype={setAtype} author={author} setAuthor={setAuthor}
+          topic={topic} setTopic={setTopic} topics={topicOpts}
           lang={lang} setLang={setLang} period={period} setPeriod={setPeriod}
         />
       </div>
