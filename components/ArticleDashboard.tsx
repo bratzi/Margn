@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
-type Row = { id: number; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean; title: string | null };
+type Row = { id: number; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean };
 type Mode = "all" | "analyzed" | "backlog";
 
 const PAGE = 25;
@@ -38,7 +38,7 @@ export default function ArticleDashboard() {
   }, []);
 
   const loadRows = useCallback(async () => {
-    let q = supabase.from("article_status").select("id,url,outlet,country,discovered_at,analyzed,title", { count: "exact" });
+    let q = supabase.from("article_status").select("id,url,outlet,country,discovered_at,analyzed", { count: "exact" });
     if (mode === "analyzed") q = q.eq("analyzed", true);
     else if (mode === "backlog") q = q.eq("analyzed", false);
     if (outlet !== "all") q = q.eq("outlet", outlet);
@@ -128,7 +128,7 @@ export default function ArticleDashboard() {
                   <td style={{ whiteSpace: "nowrap" }}>{FLAG[r.country ?? ""] ?? ""} {r.outlet}</td>
                   <td>
                     <a href={r.url} target="_blank" rel="noreferrer" className="url" title={r.url}>
-                      {r.title ? r.title : <span className="mono"><span className="path">{host}</span>{path}</span>}
+                      <span className="mono"><span className="path">{host}</span>{path}</span>
                     </a>
                   </td>
                   <td className="mono muted" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>

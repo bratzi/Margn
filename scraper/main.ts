@@ -1,19 +1,17 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 import { Readability } from "@mozilla/readability";
-import { createHash } from "node:crypto";
 import { chromium, type BrowserContext } from "playwright";
-import { sb, toPgVector } from "./lib";
+import { sb } from "./lib";
 
 // --- Crawl-Grenzen (per Env übersteuerbar; CI knapp, lokaler Tief-Crawl höher) ---
 const MAX_PAGES = Number(process.env.CRAWL_MAX_PAGES ?? 80); // gerenderte Seiten pro Quelle
 const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);  // Linktiefe ab Startseite
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 300);  // Höflichkeitspause
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
-const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen: kein Embed, kein DB-Write
-// "articles": crawlen + Artikel inline rendern/embedden (kleine frische Läufe).
-// "structure": Rubriken crawlen, ALLE Links klassifiziert in pages/page_links (kein Embedding).
-// "analyze": KEIN Crawl – nimmt bereits entdeckte pages.kind='article' und rendert+embedded sie
-//            (Entkopplung Entdeckung↔Analyse; arbeitet den Backlog ab, bis MAX_PAGES erreicht).
+const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
+// "articles": crawlen + Artikel in articles-Tabelle speichern (Metadaten, kein Volltext/Embedding).
+// "structure": Rubriken crawlen, ALLE Links klassifiziert in pages/page_links.
+// "analyze": KEIN Crawl – nimmt entdeckte pages.kind='article', rendert+speichert Metadaten.
 const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -27,20 +25,7 @@ const makeDom = (html: string, url: string) => new JSDOM(html, { url, virtualCon
 type Source = { id: number; base_url: string; language: string | null };
 type Seed = { url: string; depth: number };
 
-// HuggingFace Router: intfloat/multilingual-e5-large (1024d, mehrsprachig)
-async function embed(text: string): Promise<number[]> {
-  const r = await fetch(
-    "https://router.huggingface.co/hf-inference/models/intfloat/multilingual-e5-large/pipeline/feature-extraction",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${process.env.HF_TOKEN}` },
-      body: JSON.stringify({ inputs: `passage: ${text.slice(0, 2000)}` }),
-    }
-  );
-  if (!r.ok) throw new Error(`Embed failed: ${r.status} ${await r.text()}`);
-  const j = await r.json();
-  return Array.isArray(j[0]) ? j[0] : j;
-}
+// embed() DEAKTIVIERT – reaktivieren wenn Cluster-Feature wieder aufgenommen wird.
 
 async function upsertArticle(sourceId: number, url: string): Promise<number> {
   const { data, error } = await sb
@@ -52,16 +37,8 @@ async function upsertArticle(sourceId: number, url: string): Promise<number> {
   return data.id;
 }
 
-// latestVersion + changed-Flag DEAKTIVIERT: Stille-Edits-Feature auf Eis.
-// Wieder aktivieren wenn das Feature reaktiviert wird.
-
-async function saveVersion(articleId: number, title: string, teaser: string, body: string) {
-  const hash = createHash("sha256").update(body ?? "").digest("hex");
-  const vector = await embed(`${title}\n\n${teaser}`);
-  await sb.from("article_versions").insert({
-    article_id: articleId, title, teaser, body_hash: hash, body_text: body, changed: false, embedding: toPgVector(vector),
-  });
-}
+// embed() + saveVersion() DEAKTIVIERT: article_versions auf Eis (Speicherplatz).
+// Wieder aktivieren: embed, toPgVector, createHash importieren + saveVersion reaktivieren.
 
 // Eine Seite im echten Browser rendern. Liefert HTTP-Status + gerendertes HTML.
 async function renderPage(ctx: BrowserContext, url: string): Promise<{ status: number; html: string | null }> {
@@ -233,11 +210,9 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
         const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
         // 2) Links als Knoten + Kanten (von wo wird wohin verlinkt)
         if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
-        // 3) NUR Artikel gehen in die Analyse (Embedding/Cluster) – im structure-Modus
-        //    überspringen wir das Embedding (wir kartieren nur den Baum, kein HF-Call).
+        // 3) Artikel in articles-Tabelle (nur Metadaten, kein Volltext/Embedding).
         if (kind === "article" && article && MODE !== "structure") {
-          const id = await upsertArticle(src.id, s.url);
-          await saveVersion(id, article.title, article.teaser, article.body);
+          await upsertArticle(src.id, s.url);
         }
       } catch (e) {
         console.error("FEHLER:", s.url, (e as Error).message);
@@ -304,8 +279,7 @@ async function analyzeBacklog() {
           const art = asArticle(html, url);
           if (!art) continue;
           try {
-            const id = await upsertArticle(sid, url);
-            await saveVersion(id, art.title, art.teaser, art.body);
+            await upsertArticle(sid, url);
             ok++;
             if (ok % 25 === 0) console.log(`  ${src.base_url}: ${ok}/${urls.length}…`);
           } catch (e) { console.error("FEHLER:", url, (e as Error).message); }
