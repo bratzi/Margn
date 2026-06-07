@@ -10,11 +10,12 @@ const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 100);     // Höflichkeits
 const CONCURRENCY = Number(process.env.CRAWL_CONCURRENCY ?? 4); // parallele Browser-Tabs
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
-// "articles": crawlen + Artikel in articles-Tabelle speichern (Metadaten, kein Volltext/Embedding).
-// "structure": Rubriken crawlen, ALLE Links klassifiziert in pages/page_links.
-// "analyze": KEIN Crawl – nimmt entdeckte pages.kind='article', batch-upsert in articles.
-// "enrich":  Rendert alle articles ohne Titel mit Chromium und trägt Metadaten nach.
-const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich";
+// "articles":   crawlen + Artikel speichern (Metadaten).
+// "structure":  Rubriken crawlen, Links klassifizieren.
+// "analyze":    batch-upsert pages.kind='article' → articles (kein Chromium).
+// "enrich":     articles ohne Titel rendern + Metadaten nachtragen.
+// "reclassify": pages.kind='article' rendern, Videos → kind='media' + aus articles entfernen.
+const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich" | "reclassify";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -229,13 +230,42 @@ function classifyUrl(url: string): Kind {
   return "unknown";
 }
 
+// Inhaltbasierte Video-Erkennung. Greift auch wenn die URL wie ein Artikel aussieht (z.B. Bild).
+// Signale (eines reicht):
+//   1. JSON-LD @type = VideoObject
+//   2. og:type = video.*
+//   3. twitter:card = player
+//   4. Kein lesbarer Fließtext (Readability < MIN_BODY), aber <video>-Tag vorhanden
+function isVideoPage(html: string): boolean {
+  // 1) og:type = video.*
+  if (/property=["']og:type["'][^>]+content=["']video\./i.test(html) ||
+      /content=["']video\.[^"']+["'][^>]+property=["']og:type["']/i.test(html)) return true;
+  // 2) twitter:card = player
+  if (/name=["']twitter:card["'][^>]+content=["']player["']/i.test(html) ||
+      /content=["']player["'][^>]+name=["']twitter:card["']/i.test(html)) return true;
+  // 3) JSON-LD VideoObject als primärer Typ
+  const ld = parseJsonLd(html);
+  if (ld.some((d) => {
+    const t = d["@type"];
+    return t === "VideoObject" || (Array.isArray(t) && t.includes("VideoObject"));
+  })) return true;
+  // 4) Seite hat <video> oder bekannte Player-Klassen + kaum Text
+  if (/<video[\s>]/i.test(html) || /class=["'][^"']*(jwplayer|video-js|videoPlayer|bc-player)[^"']*["']/i.test(html)) {
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (text.split(/\s+/).length < 150) return true; // Video-Seite mit wenig Begleittext
+  }
+  return false;
+}
+
 // Sichere Klassifikation nach dem Rendern (zieht den Inhalt hinzu).
 function classifyRendered(url: string, html: string): { kind: Kind; article: { title: string; teaser: string; body: string } | null } {
   const byUrl = classifyUrl(url);
   if (byUrl !== "article" && byUrl !== "unknown") return { kind: byUrl, article: null };
+  // Inhaltbasierte Checks (überschreiben URL-Schätzung)
+  if (isVideoPage(html)) return { kind: "media", article: null };
   const art = looksLikeArticle(url) ? asArticle(html, url) : null;
   if (art) return { kind: "article", article: art };
-  return { kind: "section", article: null }; // gerenderte, navigationale Nicht-Artikel-Seite
+  return { kind: "section", article: null };
 }
 
 // === Knoten/Kanten-Persistenz (der Baum) ===
@@ -443,6 +473,54 @@ async function enrichArticles(sources: Source[]) {
   console.log(`Fertig: ${done}/${toEnrich.length} Artikel angereichert.`);
 }
 
+// reclassify: Rendert alle pages.kind='article', erkennt Videos nachträglich und korrigiert.
+// Videos → pages.kind='media', Eintrag in articles gelöscht (waren falsch klassifiziert).
+async function reclassifyPages(sources: Source[]) {
+  const srcById = new Map(sources.map((s) => [s.id, s]));
+  const perSource = Math.ceil(MAX_PAGES / sources.length);
+
+  // pages.kind='article' laden (die potenziell falsch klassifizierten)
+  const toCheck: { id: number; url: string; source_id: number }[] = [];
+  for (const src of sources) {
+    const { data } = await sb.from("pages").select("id,url,source_id")
+      .eq("source_id", src.id).eq("kind", "article").limit(perSource);
+    toCheck.push(...((data ?? []) as { id: number; url: string; source_id: number }[]));
+  }
+  console.log(`Prüfe ${toCheck.length} Seiten auf Video-Inhalt (max ${perSource}/Quelle)…`);
+
+  const browser = await chromium.launch();
+  const queue = [...toCheck];
+  let corrected = 0, kept = 0;
+
+  async function worker(langHint: string) {
+    const ctx = await browser.newContext({ userAgent: UA, locale: langHint === "fr" ? "fr-FR" : "de-DE" });
+    try {
+      while (true) {
+        const item = queue.shift();
+        if (!item) break;
+        const { html } = await renderPage(ctx, item.url);
+        if (!html) continue;
+        if (isVideoPage(html)) {
+          // pages.kind auf 'media' korrigieren
+          await sb.from("pages").update({ kind: "media" }).eq("id", item.id);
+          // aus articles entfernen falls fälschlicherweise eingetragen
+          await sb.from("articles").delete().eq("url", item.url);
+          corrected++;
+          console.log(`  VIDEO erkannt: ${item.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 70)}`);
+        } else {
+          kept++;
+        }
+        if ((corrected + kept) % 100 === 0) console.log(`  ${corrected + kept}/${toCheck.length} geprüft (${corrected} Videos)…`);
+        await sleep(DELAY_MS);
+      }
+    } finally { await ctx.close(); }
+  }
+
+  await Promise.all(sources.map((s) => worker(s.language ?? "de")));
+  await browser.close();
+  console.log(`\nFertig: ${corrected} als Video reklassifiziert, ${kept} korrekt als Artikel.`);
+}
+
 async function run() {
   const { data, error } = await sb.from("sources").select("id,base_url,language").eq("active", true);
   if (error) throw new Error(`Quellen-Abfrage fehlgeschlagen: ${error.message}`);
@@ -450,7 +528,8 @@ async function run() {
   if (!data?.length) throw new Error("Keine aktiven Quellen gefunden – Abbruch.");
 
   if (MODE === "analyze") { await analyzeBacklog(); return; }
-  if (MODE === "enrich")  { await enrichArticles(data as Source[]); return; }
+  if (MODE === "enrich")     { await enrichArticles(data as Source[]); return; }
+  if (MODE === "reclassify") { await reclassifyPages(data as Source[]); return; }
 
   const browser = await chromium.launch();
   try {
