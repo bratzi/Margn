@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
@@ -127,9 +128,9 @@ export default function ArticleDashboard() {
                 <tr key={r.id}>
                   <td style={{ whiteSpace: "nowrap" }}>{FLAG[r.country ?? ""] ?? ""} {r.outlet}</td>
                   <td>
-                    <a href={r.url} target="_blank" rel="noreferrer" className="url" title={r.url}>
+                    <Link href={`/articles/${r.id}`} className="url" title={r.url} style={{ color: "var(--text)" }}>
                       <span className="mono"><span className="path">{host}</span>{path}</span>
-                    </a>
+                    </Link>
                   </td>
                   <td className="mono muted" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
                   <td>{r.analyzed ? <span className="badge ok"><i />analysiert</span> : <span className="badge wait"><i />Backlog</span>}</td>

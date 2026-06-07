@@ -28,18 +28,125 @@ type Seed = { url: string; depth: number };
 
 // embed() DEAKTIVIERT – reaktivieren wenn Cluster-Feature wieder aufgenommen wird.
 
-async function upsertArticle(sourceId: number, url: string): Promise<number> {
-  const { data, error } = await sb
-    .from("articles")
-    .upsert({ source_id: sourceId, url, last_seen: new Date().toISOString() }, { onConflict: "url" })
-    .select("id")
-    .single();
+async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<typeof extractMeta>): Promise<number> {
+  const row: Record<string, unknown> = { source_id: sourceId, url, last_seen: new Date().toISOString() };
+  if (meta) {
+    const { authors, keywords, categories, ...rest } = meta;
+    Object.assign(row, rest);
+    void authors; void keywords; void categories; // handled separately
+  }
+  const { data, error } = await sb.from("articles").upsert(row, { onConflict: "url" }).select("id").single();
   if (error) throw error;
   return data.id;
 }
 
-// embed() + saveVersion() DEAKTIVIERT: article_versions auf Eis (Speicherplatz).
-// Wieder aktivieren: embed, toPgVector, createHash importieren + saveVersion reaktivieren.
+// --- Metadaten-Extraktion aus gerendertem HTML ---
+
+const PAYWALL_CSS = /paywall|premium-overlay|piano-|plus-artikel|abo-schranke|metered-wall|subscriber-only|locked-content/i;
+const TYPE_MAP: Record<string, string> = {
+  LiveBlogPosting: "liveblog", OpinionNewsArticle: "opinion", AnalysisNewsArticle: "analysis",
+  ReviewNewsArticle: "review", ReportageNewsArticle: "reportage", InteractiveNewsArticle: "interactive",
+};
+
+function parseJsonLd(html: string): any[] {
+  const out: any[] = [];
+  const rx = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = rx.exec(html)) !== null) {
+    try { const j = JSON.parse(m[1]); out.push(...(Array.isArray(j) ? j : [j])); } catch {}
+  }
+  return out;
+}
+
+function metaContent(html: string, ...selectors: string[]): string | null {
+  for (const sel of selectors) {
+    const rx = new RegExp(`<meta[^>]+(?:name|property)=["']${sel}["'][^>]+content=["']([^"']+)["']`, "i");
+    const m = rx.exec(html) ?? new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${sel}["']`, "i").exec(html);
+    if (m?.[1]) return m[1].trim();
+  }
+  return null;
+}
+
+function extractMeta(html: string, url: string) {
+  const ld = parseJsonLd(html);
+  const article = ld.find((d) => typeof d["@type"] === "string" && d["@type"].includes("Article")) ?? {};
+
+  const title =
+    metaContent(html, "og:title", "twitter:title") ??
+    article.headline ??
+    html.match(/<title[^>]*>([^<]+)/i)?.[1]?.trim() ?? null;
+
+  const description =
+    metaContent(html, "og:description", "description", "twitter:description") ??
+    article.description ?? null;
+
+  const og_image =
+    metaContent(html, "og:image", "twitter:image") ??
+    article.image?.url ?? article.image ?? null;
+
+  const published_at =
+    metaContent(html, "article:published_time") ??
+    article.datePublished ?? null;
+
+  const modified_at =
+    metaContent(html, "article:modified_time") ??
+    article.dateModified ?? null;
+
+  // Paywall: JSON-LD isAccessibleForFree oder CSS-Pattern
+  const paywalled =
+    ld.some((d) => d.isAccessibleForFree === false || d.isAccessibleForFree === "False") ||
+    PAYWALL_CSS.test(html);
+
+  // Artikeltyp aus @type
+  const rawType = typeof article["@type"] === "string" ? article["@type"] : "NewsArticle";
+  const article_type = TYPE_MAP[rawType] ?? "news";
+
+  // Wörter + Lesezeit (sichtbarer Text)
+  const visibleText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const word_count = visibleText.trim().split(/\s+/).length;
+  const reading_min = Math.max(1, Math.round(word_count / 200));
+
+  // Sprache
+  const lang_detected = html.match(/<html[^>]+lang=["']([a-z]{2})/i)?.[1] ?? null;
+
+  // Autoren (JSON-LD author + meta)
+  const authorRaw = article.author ?? [];
+  const authorList: string[] = (Array.isArray(authorRaw) ? authorRaw : [authorRaw])
+    .map((a: any) => (typeof a === "string" ? a : a?.name ?? "").trim())
+    .filter(Boolean);
+  const metaAuthor = metaContent(html, "author", "article:author");
+  if (metaAuthor && !authorList.includes(metaAuthor)) authorList.push(metaAuthor);
+
+  // Keywords
+  const kwRaw = article.keywords ?? metaContent(html, "keywords", "article:tag") ?? "";
+  const keywords: string[] = (typeof kwRaw === "string" ? kwRaw.split(/[,;|]/) : kwRaw)
+    .map((k: string) => k.trim().toLowerCase()).filter((k: string) => k.length > 1 && k.length < 60);
+
+  // Kategorien
+  const catRaw = article.articleSection ?? metaContent(html, "article:section") ?? "";
+  const categories: string[] = (typeof catRaw === "string" ? catRaw.split(/[,;|]/) : catRaw)
+    .map((c: string) => c.trim()).filter((c: string) => c.length > 1 && c.length < 80);
+
+  return { title, description, og_image, published_at, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, authors: authorList, keywords, categories };
+}
+
+// Junction-Tabellen (authors/keywords/categories) befüllen.
+async function upsertDimensions(articleId: number, authors: string[], keywords: string[], categories: string[]) {
+  const save = async (table: string, junctionTable: string, articleCol: string, dimCol: string, values: string[]) => {
+    if (!values.length) return;
+    // Dimensionen upserten
+    await sb.from(table).upsert(values.map((v) => ({ name: v })), { onConflict: "name", ignoreDuplicates: true });
+    const { data } = await sb.from(table).select("id,name").in("name", values);
+    if (!data?.length) return;
+    const rows = data.map((d: any) => ({ [articleCol]: articleId, [dimCol]: d.id }));
+    await sb.from(junctionTable).upsert(rows, { onConflict: `${articleCol},${dimCol}`, ignoreDuplicates: true });
+  };
+  await Promise.all([
+    save("authors", "article_authors", "article_id", "author_id", authors),
+    save("keywords", "article_keywords", "article_id", "keyword_id", keywords),
+    save("categories", "article_categories", "article_id", "category_id", categories),
+  ]);
+}
 
 // Eine Seite im echten Browser rendern. Liefert HTTP-Status + gerendertes HTML.
 async function renderPage(ctx: BrowserContext, url: string): Promise<{ status: number; html: string | null }> {
@@ -202,7 +309,11 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
       try {
         const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
         if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
-        if (kind === "article" && article && MODE !== "structure") await upsertArticle(src.id, s.url);
+        if (kind === "article" && article && MODE !== "structure") {
+          const meta = extractMeta(html, s.url);
+          const artId = await upsertArticle(src.id, s.url, meta);
+          await upsertDimensions(artId, meta.authors, meta.keywords, meta.categories);
+        }
       } catch (e) { console.error("FEHLER:", s.url, (e as Error).message); }
     }
     for (const link of links) enqueue({ url: link, depth: s.depth + 1 }, classifyUrl(link) === "article");
