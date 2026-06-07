@@ -3,24 +3,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { FileText, Folder, Clock } from "@/components/icons";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
 type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean };
 type Mode = "all" | "analyzed" | "backlog";
 
-const PAGE = 25;
-const MODES: { k: Mode; l: string }[] = [
-  { k: "all", l: "Alle" }, { k: "analyzed", l: "Analysiert" }, { k: "backlog", l: "Backlog" },
-];
+const PAGE = 30;
+const MODES: { k: Mode; l: string }[] = [{ k: "all", l: "Alle" }, { k: "analyzed", l: "Analysiert" }, { k: "backlog", l: "Backlog" }];
 
 function shortUrl(u: string) {
   try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; }
   catch { return { host: "", path: u }; }
 }
-function fmt(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-}
+const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 
 export default function ArticleDashboard() {
   const [summary, setSummary] = useState<Summary[]>([]);
@@ -56,108 +52,84 @@ export default function ArticleDashboard() {
   const pages = Math.max(1, Math.ceil(total / PAGE));
 
   return (
-    <div className="wrap">
-      {/* Hero */}
-      <header className="hero">
-        <div className="kicker"><span className="live-dot" /> Live-Beobachtung · aktualisiert {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</div>
-        <h1>Wie Nachrichtenseiten <em>wirklich</em> publizieren.</h1>
-        <p>
-          margn beobachtet, wie deutschsprachige und französische Nachrichtenportale ihre Artikel
-          veröffentlichen, strukturieren und über die Zeit verändern — offen einsehbar für jeden.
-        </p>
-      </header>
-
-      {/* KPI-Kacheln */}
-      <div className="kpi-row" style={{ marginBottom: 24 }}>
-        <div className="kpi-tile"><div className="n">{summary.length}</div><div className="l">beobachtete Quellen</div></div>
-        <div className="kpi-tile"><div className="n">{totals.d.toLocaleString("de-DE")}</div><div className="l">entdeckte Artikel</div></div>
-        <div className="kpi-tile"><div className="n">{totals.an.toLocaleString("de-DE")}</div><div className="l">davon analysiert</div></div>
+    <>
+      <div className="topbar">
+        <h1>Übersicht</h1>
+        <span className="live"><span className="live-dot" /> Live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</span>
       </div>
 
-      {/* Gesamtfortschritt */}
-      <div className="panel pad overall">
-        <div>
-          <div className="big">{pct}%<small>analysiert</small></div>
-          <div className="kpis">
-            <div className="kpi"><b>{totals.an.toLocaleString("de-DE")}</b> <span>analysiert</span></div>
-            <div className="kpi"><b>{totals.b.toLocaleString("de-DE")}</b> <span>im Backlog</span></div>
+      <div className="page">
+        {/* KPI-Strip */}
+        <div className="kpi-strip">
+          <div className="stat-tile"><div className="l"><Folder /> Quellen</div><div className="n tnum">{summary.length}</div><div className="sub">beobachtete Portale</div></div>
+          <div className="stat-tile"><div className="l"><FileText /> Entdeckt</div><div className="n tnum">{totals.d.toLocaleString("de-DE")}</div><div className="sub">Artikel gefunden</div></div>
+          <div className="stat-tile"><div className="l"><Clock /> Analysiert</div><div className="n tnum">{totals.an.toLocaleString("de-DE")}</div><div className="sub">{totals.b.toLocaleString("de-DE")} im Backlog</div></div>
+          <div className="stat-tile accent"><div className="l">Fortschritt</div><div className="n tnum">{pct}%</div><div className="bar"><i style={{ width: `${pct}%` }} /></div></div>
+        </div>
+
+        {/* Quellen */}
+        <h2 className="section-h">Quellen <span className="count">{summary.length} Portale</span></h2>
+        <div className="grid">
+          {summary.map((s) => {
+            const p = s.discovered ? Math.round((s.analyzed / s.discovered) * 100) : 0;
+            return (
+              <div className="card" key={s.source_id}>
+                <div className="top">
+                  <div className="outlet">{s.outlet}<span className="cc">{s.country}</span></div>
+                  <div className="pct tnum">{p}%</div>
+                </div>
+                <div className="bar"><i style={{ width: `${p}%` }} /></div>
+                <div className="nums">
+                  <span><b className="tnum">{s.analyzed.toLocaleString("de-DE")}</b> analysiert</span>
+                  <span><b className="tnum">{s.backlog.toLocaleString("de-DE")}</b> Backlog</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Artikel */}
+        <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer</span></h2>
+        <div className="controls">
+          <div className="seg">
+            {MODES.map((m) => <button key={m.k} className={mode === m.k ? "on" : ""} onClick={() => { setMode(m.k); setPage(0); }}>{m.l}</button>)}
           </div>
+          <select value={outlet} onChange={(e) => { setOutlet(e.target.value); setPage(0); }}>
+            <option value="all">Alle Quellen</option>
+            {summary.map((s) => <option key={s.source_id} value={s.outlet}>{s.outlet}</option>)}
+          </select>
         </div>
-        <div className="bar"><i style={{ width: `${pct}%` }} /></div>
-      </div>
 
-      {/* Quellen */}
-      <h2 className="section-h">Quellen <span className="count">{summary.length} Portale</span></h2>
-      <div className="grid">
-        {summary.map((s) => {
-          const p = s.discovered ? Math.round((s.analyzed / s.discovered) * 100) : 0;
-          return (
-            <div className="card" key={s.source_id}>
-              <div className="top">
-                <div className="outlet">{s.outlet}<span className="cc">{s.country}</span></div>
-                <div className="pct">{p}%</div>
-              </div>
-              <div className="bar sm"><i style={{ width: `${p}%` }} /></div>
-              <div className="nums">
-                <span><b>{s.analyzed.toLocaleString("de-DE")}</b> analysiert</span>
-                <span><b>{s.backlog.toLocaleString("de-DE")}</b> Backlog</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Artikel-Tabelle */}
-      <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer</span></h2>
-      <div className="controls">
-        <div className="seg">
-          {MODES.map((m) => (
-            <button key={m.k} className={mode === m.k ? "on" : ""} onClick={() => { setMode(m.k); setPage(0); }}>{m.l}</button>
-          ))}
+        <div className="panel">
+          <table>
+            <thead><tr><th>Quelle</th><th>Artikel</th><th>Entdeckt</th><th>Status</th></tr></thead>
+            <tbody>
+              {rows.map((r) => {
+                const { host, path } = shortUrl(r.url);
+                return (
+                  <tr key={r.id}>
+                    <td style={{ whiteSpace: "nowrap" }}>{r.outlet} <span className="cc">{r.country}</span></td>
+                    <td>
+                      {r.article_id
+                        ? <Link href={`/articles/${r.article_id}`} className="url" title={r.url}><span className="mono"><span className="path">{host}</span>{path}</span></Link>
+                        : <a href={r.url} target="_blank" rel="noreferrer" className="url" title={r.url}><span className="mono"><span className="path">{host}</span>{path}</span></a>}
+                    </td>
+                    <td className="mono faint" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
+                    <td>{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
+                  </tr>
+                );
+              })}
+              {!rows.length && <tr><td colSpan={4} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Artikel.</td></tr>}
+            </tbody>
+          </table>
         </div>
-        <select value={outlet} onChange={(e) => { setOutlet(e.target.value); setPage(0); }}>
-          <option value="all">Alle Quellen</option>
-          {summary.map((s) => <option key={s.source_id} value={s.outlet}>{s.outlet}</option>)}
-        </select>
-      </div>
 
-      <div className="panel">
-        <table>
-          <thead>
-            <tr><th>Quelle</th><th>Artikel</th><th>Entdeckt</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const { host, path } = shortUrl(r.url);
-              return (
-                <tr key={r.id}>
-                  <td style={{ whiteSpace: "nowrap" }}>{r.outlet} <span className="cc">{r.country}</span></td>
-                  <td>
-                    {r.article_id ? (
-                      <Link href={`/articles/${r.article_id}`} className="url" title={r.url}>
-                        <span className="mono"><span className="path">{host}</span>{path}</span>
-                      </Link>
-                    ) : (
-                      <a href={r.url} target="_blank" rel="noreferrer" className="url" title={r.url}>
-                        <span className="mono"><span className="path">{host}</span>{path}</span>
-                      </a>
-                    )}
-                  </td>
-                  <td className="mono faint" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
-                  <td>{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
-                </tr>
-              );
-            })}
-            {!rows.length && <tr><td colSpan={4} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Artikel.</td></tr>}
-          </tbody>
-        </table>
+        <div className="pager">
+          <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>← Zurück</button>
+          <span>Seite {page + 1} / {pages}</span>
+          <button disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Weiter →</button>
+        </div>
       </div>
-
-      <div className="pager">
-        <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>← Zurück</button>
-        <span>Seite {page + 1} / {pages}</span>
-        <button disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Weiter →</button>
-      </div>
-    </div>
+    </>
   );
 }

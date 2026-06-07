@@ -57,14 +57,14 @@ export default function ArticleDetail({ id }: { id: number }) {
     })();
   }, [id]);
 
-  if (loading) return <div className="wrap"><p className="faint">Lade…</p></div>;
-  if (!a) return <div className="wrap"><p className="faint">Artikel nicht gefunden.</p></div>;
+  if (loading) return <div className="page"><p className="faint">Lade…</p></div>;
+  if (!a) return <div className="page"><p className="faint">Artikel nicht gefunden.</p></div>;
 
   const segs = (() => { try { return new URL(a.url).pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean); } catch { return []; } })();
   const type = a.article_type ?? "news";
 
   return (
-    <div className="wrap detail">
+    <div className="page detail">
       <Link href="/articles" className="back"><ArrowLeft size={15} /> Alle Artikel</Link>
 
       {/* Kicker */}
