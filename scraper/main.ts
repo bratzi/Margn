@@ -1,6 +1,7 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { chromium, type BrowserContext } from "playwright";
+import { createHash } from "node:crypto";
 import { sb } from "./lib";
 
 // --- Crawl-Grenzen (per Env übersteuerbar; CI knapp, lokaler Tief-Crawl höher) ---
@@ -148,6 +149,92 @@ async function upsertDimensions(articleId: number, authors: string[], keywords: 
     save("keywords", "article_keywords", "article_id", "keyword_id", keywords),
     save("categories", "article_categories", "article_id", "category_id", categories),
   ]);
+}
+
+// --- Änderungs-Tracking (speicherschonend über Absatz-Fingerprints) ---
+
+// Body in normalisierte Absätze (≥60 Zeichen, gegen UI-Rauschen) zerlegen.
+function normalizeParas(body: string): string[] {
+  return body.split(/\n+/).map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p.length >= 60);
+}
+const fp = (s: string) => createHash("sha1").update(s.toLowerCase()).digest("hex").slice(0, 12);
+
+type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null } | null;
+
+// Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
+// Unterscheidet "extension" (nur hinzugefügt = valide Erweiterung, z.B. Timeline-Artikel) von
+// "edit" (entfernt/ersetzt = stille Änderung) und "mixed".
+async function trackChanges(articleId: number, prev: PrevState, newTitle: string | null, body: string, isLiveblog: boolean) {
+  const paras = normalizeParas(body);
+  if (!paras.length) return;
+  const fps = paras.map(fp);
+  const contentHash = fp(fps.join("|"));
+  const bodyWords = body.trim().split(/\s+/).length;
+
+  // Erstkontakt: nur Baseline-Fingerprint speichern, kein Snapshot.
+  if (!prev || !prev.content_hash) {
+    await sb.from("articles").update({
+      content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords,
+      ...(isLiveblog ? { article_type: "liveblog" } : {}),
+    }).eq("id", articleId);
+    return;
+  }
+  const titleChanged = !!prev.title && !!newTitle && prev.title !== newTitle;
+  if (prev.content_hash === contentHash && !titleChanged) return; // nichts geändert
+
+  // Absatz-Diff
+  const oldSet = new Set((prev.para_fps ?? "").split(",").filter(Boolean));
+  const newSet = new Set(fps);
+  const fpToText = new Map(paras.map((p, i) => [fps[i], p]));
+  const addedFps = fps.filter((f) => !oldSet.has(f));
+  const addedTexts = [...new Set(addedFps)].map((f) => fpToText.get(f)!).filter(Boolean);
+  const removedCount = [...oldSet].filter((f) => !newSet.has(f)).length;
+
+  // Nur reine Umsortierung (gleiche Absätze, andere Reihenfolge) → kein Snapshot.
+  // Absätze sind durch normalizeParas bereits ≥60 Zeichen, daher zählt jeder echte Zugang.
+  if (!titleChanged && addedFps.length === 0 && removedCount === 0) {
+    await sb.from("articles").update({ content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords }).eq("id", articleId);
+    return;
+  }
+
+  // Klassifikation: nur hinzugefügt = Erweiterung; nur entfernt/Titel = Änderung; beides = mixed.
+  let kind: "extension" | "edit" | "mixed";
+  if (addedFps.length > 0 && removedCount === 0 && !titleChanged) kind = "extension";
+  else if (addedFps.length === 0 && (removedCount > 0 || titleChanged)) kind = "edit";
+  else kind = "mixed";
+
+  await sb.from("article_snapshots").insert({
+    article_id: articleId, change_kind: kind,
+    title_old: titleChanged ? prev.title : null,
+    title_new: titleChanged ? newTitle : null,
+    added: addedTexts.join("\n\n").slice(0, 8000),
+    added_count: addedFps.length, removed_count: removedCount,
+    word_delta: bodyWords - (prev.body_words ?? bodyWords),
+  });
+
+  const extCount = (prev.extension_count ?? 0) + (kind === "extension" || kind === "mixed" ? 1 : 0);
+  const editCount = (prev.edit_count ?? 0) + (kind === "edit" || kind === "mixed" ? 1 : 0);
+  // Kategorie "timeline": mehrfach erweitert (echter, über Tage wachsender Artikel)
+  const newType = isLiveblog ? "liveblog" : (extCount >= 2 ? "timeline" : undefined);
+  await sb.from("articles").update({
+    content_hash: contentHash, para_fps: fps.join(","), title: newTitle, body_words: bodyWords,
+    revision_count: (prev.revision_count ?? 0) + 1, extension_count: extCount, edit_count: editCount,
+    ...(newType ? { article_type: newType } : {}),
+  }).eq("id", articleId);
+}
+
+// Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
+async function saveArticleFull(sourceId: number, url: string, html: string) {
+  const meta = extractMeta(html, url);
+  const art = asArticle(html, url);
+  // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
+  const { data: prev } = await sb.from("articles")
+    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count")
+    .eq("url", url).maybeSingle();
+  const id = await upsertArticle(sourceId, url, meta);
+  await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
+  if (art) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
+  return id;
 }
 
 // Eine Seite im echten Browser rendern. Liefert HTTP-Status + gerendertes HTML.
@@ -340,9 +427,7 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
         const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
         if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
         if (kind === "article" && article && MODE !== "structure") {
-          const meta = extractMeta(html, s.url);
-          const artId = await upsertArticle(src.id, s.url, meta);
-          await upsertDimensions(artId, meta.authors, meta.keywords, meta.categories);
+          await saveArticleFull(src.id, s.url, html);
         }
       } catch (e) { console.error("FEHLER:", s.url, (e as Error).message); }
     }
@@ -453,10 +538,16 @@ async function enrichArticles(sources: Source[]) {
         const { html } = await renderPage(ctx, item.url);
         if (!html) continue;
         const meta = extractMeta(html, item.url);
+        const art = asArticle(html, item.url);
         try {
+          // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
+          const { data: prev } = await sb.from("articles")
+            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count")
+            .eq("id", item.id).maybeSingle();
           const { authors, keywords, categories, ...fields } = meta;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString() }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
+          if (art) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
