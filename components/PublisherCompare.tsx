@@ -14,9 +14,11 @@ import { supabase } from "@/lib/supabase";
 const short = (n: string) => n.replace(" Online", "");
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
-export default function PublisherCompare() {
-  const [stats, setStats] = useState<Stat[]>([]);
-  useEffect(() => { supabase.from("publisher_stats").select("*").then(({ data }) => setStats((data as Stat[]) ?? [])); }, []);
+export default function PublisherCompare({ activeSources }: { activeSources?: number[] }) {
+  const [all, setAll] = useState<Stat[]>([]);
+  useEffect(() => { supabase.from("publisher_stats").select("*").then(({ data }) => setAll((data as Stat[]) ?? [])); }, []);
+  const act = activeSources ? new Set(activeSources) : null;
+  const stats = act ? all.filter((s) => act.has(s.source_id)) : all;
   if (!stats.length) return null;
 
   const charts: { title: string; desc: string; color: string; fmt?: (n: number) => string; data: { label: string; value: number; raw?: string }[] }[] = [
