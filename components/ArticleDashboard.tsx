@@ -38,6 +38,7 @@ export default function ArticleDashboard() {
   const [status, setStatus] = useState("all");
   const [paywall, setPaywall] = useState("all");
   const [atype, setAtype] = useState("all");
+  const [author, setAuthor] = useState("all");
   const [lang, setLang] = useState("all");
   const [period, setPeriod] = useState("all");
 
@@ -65,16 +66,17 @@ export default function ArticleDashboard() {
     if (paywall === "yes") q = q.eq("paywalled", true);
     else if (paywall === "no") q = q.eq("paywalled", false);
     if (atype !== "all") q = q.eq("article_type", atype);
+    if (author !== "all") q = q.eq("author_status", author);
     if (lang !== "all") q = q.eq("language", lang);
     const c = cutoff(period);
     if (c) q = q.gte("published_at", c);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []);
     setTotal(count ?? 0);
-  }, [active, status, paywall, atype, lang, period, page]);
+  }, [active, status, paywall, atype, author, lang, period, page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [active, status, paywall, atype, lang, period]);
+  useEffect(() => { setPage(0); }, [active, status, paywall, atype, author, lang, period]);
 
   const toggle = (id: number) => setActive((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
@@ -141,7 +143,8 @@ export default function ArticleDashboard() {
           open={open} setOpen={setOpen} sources={sources}
           active={active} toggle={toggle} setAll={setAll}
           status={status} setStatus={setStatus} paywall={paywall} setPaywall={setPaywall}
-          atype={atype} setAtype={setAtype} lang={lang} setLang={setLang} period={period} setPeriod={setPeriod}
+          atype={atype} setAtype={setAtype} author={author} setAuthor={setAuthor}
+          lang={lang} setLang={setLang} period={period} setPeriod={setPeriod}
         />
       </div>
     </>

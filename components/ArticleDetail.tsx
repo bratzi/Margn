@@ -9,7 +9,7 @@ type Detail = {
   id: number; url: string; title: string | null; description: string | null; og_image: string | null;
   published_at: string | null; modified_at: string | null; paywalled: boolean | null;
   word_count: number | null; reading_min: number | null; article_type: string | null;
-  lang_detected: string | null; first_seen: string | null;
+  lang_detected: string | null; first_seen: string | null; author_status: string | null;
   outlet: string; country: string; base_url: string; depth: number | null;
   revision_count: number | null; extension_count: number | null; edit_count: number | null;
 };
@@ -91,7 +91,13 @@ export default function ArticleDetail({ id }: { id: number }) {
         <Stat k="Erstmals erfasst" v={fmtShort(a.first_seen)} />
       </div>
 
-      {authors.length > 0 && <DL h="Autoren"><div className="row">{authors.map((x) => <span key={x} className="tag a">{x}</span>)}</div></DL>}
+      <DL h="Autoren">
+        {a.author_status === "named" && authors.length > 0
+          ? <div className="row">{authors.map((x) => <span key={x} className="tag a">{x}</span>)}</div>
+          : a.author_status === "anonymous"
+          ? <span className="badge wait">Redaktion / Agentur{authors.length ? ` · ${authors.join(", ")}` : ""}</span>
+          : <span className="badge neutral">Kein Autor genannt</span>}
+      </DL>
       {categories.length > 0 && <DL h="Ressort"><div className="row">{categories.map((x) => <span key={x} className="tag g">{x}</span>)}</div></DL>}
       {keywords.length > 0 && <DL h="Schlagwörter"><div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div></DL>}
 

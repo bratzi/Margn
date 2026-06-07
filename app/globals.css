@@ -190,6 +190,17 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .barrow .track i { display: block; height: 100%; border-radius: 99px; transition: width .6s cubic-bezier(.4,0,.2,1); }
 .barrow .val { font-size: 12px; color: var(--ink); text-align: right; font-weight: 600; }
 
+/* ---------- Autoren-Transparenz (stacked) ---------- */
+.legend { display: flex; gap: 18px; margin-bottom: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.stacks { display: flex; flex-direction: column; gap: 9px; }
+.stackrow { display: grid; grid-template-columns: 110px 1fr 46px; align-items: center; gap: 12px; }
+.stackrow .lbl { font-size: 13px; color: var(--ink); font-weight: 500; }
+.stack { display: flex; height: 12px; border-radius: 99px; overflow: hidden; background: var(--surface-2); }
+.stack i { height: 100%; transition: width .6s cubic-bezier(.4,0,.2,1); }
+.stackrow .val { font-size: 12px; text-align: right; color: var(--green); font-weight: 600; }
+
 /* ---------- Steckbrief-Matrix ---------- */
 .matrix { width: 100%; border-collapse: collapse; }
 .matrix th { text-align: right; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); font-weight: 600; padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }

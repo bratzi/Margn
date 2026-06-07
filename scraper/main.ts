@@ -130,7 +130,26 @@ function extractMeta(html: string, url: string) {
   const categories: string[] = (typeof catRaw === "string" ? catRaw.split(/[,;|]/) : catRaw)
     .map((c: string) => c.trim()).filter((c: string) => c.length > 1 && c.length < 80);
 
-  return { title, description, og_image, published_at, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, authors: authorList, keywords, categories };
+  const author_status = classifyAuthorStatus(authorList);
+
+  return { title, description, og_image, published_at, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, authors: authorList, keywords, categories };
+}
+
+// Autoren-Status: 'named' (echte Person), 'anonymous' (Redaktion/Agentur/Eigenname), 'none' (keiner).
+const GENERIC_AUTHOR = /^(redaktion|red\.?|dpa(-afx)?|afp|reuters|sid|kna|epd|ap|afx|ag|agenturen|online|newsroom|web|t-online|n-?tv|bild(\.de)?|spiegel( online)?|der spiegel|faz|f\.a\.z\.|faz\.net|tagesschau(\.de)?|sportschau|ard|zdf|rnd|le ?monde(\.fr)?)$/i;
+function isPersonName(s: string): boolean {
+  return /\p{Lu}[\p{Ll}.'-]+\s+\p{Lu}[\p{Ll}.'-]+/u.test(s);
+}
+function classifyAuthorStatus(authors: string[]): "named" | "anonymous" | "none" {
+  const cleaned = authors.map((a) => a.trim()).filter(Boolean);
+  if (!cleaned.length) return "none";
+  const named = cleaned.some((a) => {
+    if (GENERIC_AUTHOR.test(a)) return false;
+    if (/\.(de|fr|com|net)$/i.test(a)) return false;     // Domains
+    if (!a.includes(" ")) return false;                   // Einzelwort (meist Agentur/Kürzel)
+    return isPersonName(a.replace(/^(von|par|by)\s+/i, ""));
+  });
+  return named ? "named" : "anonymous";
 }
 
 // Junction-Tabellen (authors/keywords/categories) befüllen.

@@ -15,6 +15,7 @@ type Props = {
   status: string; setStatus: (v: any) => void;
   paywall: string; setPaywall: (v: any) => void;
   atype: string; setAtype: (v: any) => void;
+  author: string; setAuthor: (v: any) => void;
   lang: string; setLang: (v: any) => void;
   period: string; setPeriod: (v: any) => void;
 };
@@ -89,6 +90,7 @@ export default function FilterPanel(p: Props) {
       <Group label="Status" value={p.status} on={p.setStatus} opts={[["all", "Alle"], ["analyzed", "Analysiert"], ["backlog", "Backlog"]]} />
       <Group label="Bezahlschranke" value={p.paywall} on={p.setPaywall} opts={[["all", "Alle"], ["no", "Frei"], ["yes", "Paywall"]]} />
       <Group label="Typ" value={p.atype} on={p.setAtype} opts={[["all", "Alle"], ["news", "News"], ["liveblog", "Liveblog"], ["opinion", "Meinung"]]} />
+      <Group label="Autor" value={p.author} on={p.setAuthor} opts={[["all", "Alle"], ["named", "Namentlich"], ["anonymous", "Anonym"], ["none", "Ohne"]]} />
       <Group label="Sprache" value={p.lang} on={p.setLang} opts={[["all", "Alle"], ["de", "DE"], ["fr", "FR"]]} />
       <Group label="Veröffentlicht" value={p.period} on={p.setPeriod} opts={[["all", "Alle"], ["24h", "24 h"], ["7d", "7 Tage"], ["30d", "30 Tage"]]} />
     </aside>
