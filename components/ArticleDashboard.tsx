@@ -9,7 +9,6 @@ type Row = { id: number; article_id: number | null; url: string; outlet: string;
 type Mode = "all" | "analyzed" | "backlog";
 
 const PAGE = 25;
-const FLAG: Record<string, string> = { DE: "🇩🇪", FR: "🇫🇷" };
 const MODES: { k: Mode; l: string }[] = [
   { k: "all", l: "Alle" }, { k: "analyzed", l: "Analysiert" }, { k: "backlog", l: "Backlog" },
 ];
@@ -20,7 +19,7 @@ function shortUrl(u: string) {
 }
 function fmt(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 export default function ArticleDashboard() {
@@ -33,8 +32,8 @@ export default function ArticleDashboard() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
   const loadStats = useCallback(async () => {
-    const { data: sum } = await supabase.from("article_status_summary").select("*");
-    setSummary((sum as Summary[]) ?? []);
+    const { data } = await supabase.from("article_status_summary").select("*");
+    setSummary((data as Summary[]) ?? []);
     setUpdatedAt(new Date());
   }, []);
 
@@ -50,7 +49,7 @@ export default function ArticleDashboard() {
 
   useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { const t = setInterval(() => { loadStats(); loadRows(); }, 15000); return () => clearInterval(t); }, [loadStats, loadRows]);
+  useEffect(() => { const t = setInterval(() => { loadStats(); loadRows(); }, 20000); return () => clearInterval(t); }, [loadStats, loadRows]);
 
   const totals = useMemo(() => summary.reduce((a, s) => ({ d: a.d + s.discovered, an: a.an + s.analyzed, b: a.b + s.backlog }), { d: 0, an: 0, b: 0 }), [summary]);
   const pct = totals.d ? Math.round((totals.an / totals.d) * 100) : 0;
@@ -58,49 +57,58 @@ export default function ArticleDashboard() {
 
   return (
     <div className="wrap">
-      <div className="h-row">
-        <div>
-          <div className="title">Crawl-Fortschritt & Analyse</div>
-          <div className="subtitle">Entdeckte Artikel je Quelle · analysiert vs. Backlog</div>
-        </div>
-        <div className="live"><span className="dot" /> live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</div>
+      {/* Hero */}
+      <header className="hero">
+        <div className="kicker"><span className="live-dot" /> Live-Beobachtung · aktualisiert {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</div>
+        <h1>Wie Nachrichtenseiten <em>wirklich</em> publizieren.</h1>
+        <p>
+          margn beobachtet, wie deutschsprachige und französische Nachrichtenportale ihre Artikel
+          veröffentlichen, strukturieren und über die Zeit verändern — offen einsehbar für jeden.
+        </p>
+      </header>
+
+      {/* KPI-Kacheln */}
+      <div className="kpi-row" style={{ marginBottom: 24 }}>
+        <div className="kpi-tile"><div className="n">{summary.length}</div><div className="l">beobachtete Quellen</div></div>
+        <div className="kpi-tile"><div className="n">{totals.d.toLocaleString("de-DE")}</div><div className="l">entdeckte Artikel</div></div>
+        <div className="kpi-tile"><div className="n">{totals.an.toLocaleString("de-DE")}</div><div className="l">davon analysiert</div></div>
       </div>
 
-      {/* Gesamtfortschritt + KPIs */}
+      {/* Gesamtfortschritt */}
       <div className="panel pad overall">
         <div>
           <div className="big">{pct}%<small>analysiert</small></div>
           <div className="kpis">
             <div className="kpi"><b>{totals.an.toLocaleString("de-DE")}</b> <span>analysiert</span></div>
-            <div className="kpi"><b>{totals.b.toLocaleString("de-DE")}</b> <span>Backlog</span></div>
-            <div className="kpi"><b>{totals.d.toLocaleString("de-DE")}</b> <span>entdeckt</span></div>
+            <div className="kpi"><b>{totals.b.toLocaleString("de-DE")}</b> <span>im Backlog</span></div>
           </div>
         </div>
-        <div><div className="bar"><i style={{ width: `${pct}%` }} /></div></div>
+        <div className="bar"><i style={{ width: `${pct}%` }} /></div>
       </div>
 
-      {/* Karten je Quelle */}
+      {/* Quellen */}
+      <h2 className="section-h">Quellen <span className="count">{summary.length} Portale</span></h2>
       <div className="grid">
         {summary.map((s) => {
           const p = s.discovered ? Math.round((s.analyzed / s.discovered) * 100) : 0;
           return (
             <div className="card" key={s.source_id}>
               <div className="top">
-                <div className="outlet">{s.outlet}<span className="flag">{FLAG[s.country] ?? s.country}</span></div>
+                <div className="outlet">{s.outlet}<span className="cc">{s.country}</span></div>
                 <div className="pct">{p}%</div>
               </div>
               <div className="bar sm"><i style={{ width: `${p}%` }} /></div>
               <div className="nums">
                 <span><b>{s.analyzed.toLocaleString("de-DE")}</b> analysiert</span>
                 <span><b>{s.backlog.toLocaleString("de-DE")}</b> Backlog</span>
-                <span className="muted">{s.discovered.toLocaleString("de-DE")} gesamt</span>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Filter */}
+      {/* Artikel-Tabelle */}
+      <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer</span></h2>
       <div className="controls">
         <div className="seg">
           {MODES.map((m) => (
@@ -111,11 +119,8 @@ export default function ArticleDashboard() {
           <option value="all">Alle Quellen</option>
           {summary.map((s) => <option key={s.source_id} value={s.outlet}>{s.outlet}</option>)}
         </select>
-        <div className="spacer" />
-        <span className="muted">{total.toLocaleString("de-DE")} Artikel</span>
       </div>
 
-      {/* Tabelle */}
       <div className="panel">
         <table>
           <thead>
@@ -126,10 +131,10 @@ export default function ArticleDashboard() {
               const { host, path } = shortUrl(r.url);
               return (
                 <tr key={r.id}>
-                  <td style={{ whiteSpace: "nowrap" }}>{FLAG[r.country ?? ""] ?? ""} {r.outlet}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{r.outlet} <span className="cc">{r.country}</span></td>
                   <td>
                     {r.article_id ? (
-                      <Link href={`/articles/${r.article_id}`} className="url" title={r.url} style={{ color: "var(--text)" }}>
+                      <Link href={`/articles/${r.article_id}`} className="url" title={r.url}>
                         <span className="mono"><span className="path">{host}</span>{path}</span>
                       </Link>
                     ) : (
@@ -138,12 +143,12 @@ export default function ArticleDashboard() {
                       </a>
                     )}
                   </td>
-                  <td className="mono muted" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
-                  <td>{r.analyzed ? <span className="badge ok"><i />analysiert</span> : <span className="badge wait"><i />Backlog</span>}</td>
+                  <td className="mono faint" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
+                  <td>{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
                 </tr>
               );
             })}
-            {!rows.length && <tr><td colSpan={4} className="muted" style={{ padding: 28, textAlign: "center" }}>Keine Artikel.</td></tr>}
+            {!rows.length && <tr><td colSpan={4} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Artikel.</td></tr>}
           </tbody>
         </table>
       </div>

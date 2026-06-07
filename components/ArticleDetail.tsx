@@ -3,220 +3,172 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil } from "@/components/icons";
 
 type Detail = {
   id: number; url: string; title: string | null; description: string | null; og_image: string | null;
   published_at: string | null; modified_at: string | null; paywalled: boolean | null;
   word_count: number | null; reading_min: number | null; article_type: string | null;
-  lang_detected: string | null; first_seen: string | null; last_seen: string | null;
+  lang_detected: string | null; first_seen: string | null;
   outlet: string; country: string; base_url: string; depth: number | null;
+  revision_count: number | null; extension_count: number | null; edit_count: number | null;
 };
-type Author   = { authors:     { name: string } | null };
-type Keyword  = { keywords:    { term: string } | null };
-type Category = { categories:  { name: string } | null };
+type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number };
 
-const FLAG: Record<string, string> = { DE: "🇩🇪", FR: "🇫🇷", GB: "🇬🇧", US: "🇺🇸" };
-const LANG:  Record<string, string> = { de: "Deutsch", fr: "Français", en: "English" };
+const LANG: Record<string, string> = { de: "Deutsch", fr: "Français", en: "English" };
 const TYPE_LABEL: Record<string, string> = {
-  news: "Nachricht", opinion: "Meinung", analysis: "Analyse", liveblog: "Liveblog",
+  news: "Nachricht", opinion: "Meinung", analysis: "Analyse", liveblog: "Liveblog", timeline: "Timeline-Artikel",
   review: "Rezension", reportage: "Reportage", interactive: "Interaktiv", interview: "Interview",
-};
-const TYPE_COLOR: Record<string, string> = {
-  news: "#5b8cff", opinion: "#f0b429", analysis: "#3ecf8e", liveblog: "#f4607a",
 };
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
-function fmtDateShort(iso: string | null) {
+function fmtShort(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", year: "numeric" });
-}
-function pathSegments(url: string, base: string) {
-  try {
-    const path = new URL(url).pathname.replace(/^\/+|\/+$/g, "");
-    return path.split("/").filter(Boolean);
-  } catch { return []; }
+  return new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", year: "numeric" });
 }
 
 export default function ArticleDetail({ id }: { id: number }) {
-  const [article, setArticle] = useState<Detail | null>(null);
+  const [a, setA] = useState<Detail | null>(null);
   const [authors, setAuthors] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from("article_detail")
-        .select("*")
-        .eq("id", id)
-        .single();
+      const { data } = await supabase.from("article_detail").select("*").eq("id", id).single();
       if (!data) { setLoading(false); return; }
-      setArticle(data as Detail);
-
-      const [au, kw, cat] = await Promise.all([
+      setA(data as Detail);
+      const [au, kw, cat, sn] = await Promise.all([
         supabase.from("article_authors").select("authors(name)").eq("article_id", id),
         supabase.from("article_keywords").select("keywords(term)").eq("article_id", id),
         supabase.from("article_categories").select("categories(name)").eq("article_id", id),
+        supabase.from("article_snapshots").select("*").eq("article_id", id).order("captured_at", { ascending: false }),
       ]);
       setAuthors(((au.data ?? []) as any[]).map((r) => r.authors?.name).filter(Boolean));
       setKeywords(((kw.data ?? []) as any[]).map((r) => r.keywords?.term).filter(Boolean));
       setCategories(((cat.data ?? []) as any[]).map((r) => r.categories?.name).filter(Boolean));
+      setSnaps((sn.data ?? []) as Snapshot[]);
       setLoading(false);
     })();
   }, [id]);
 
-  if (loading) return <div className="wrap"><p className="muted">Lade…</p></div>;
-  if (!article) return <div className="wrap"><p className="muted">Artikel nicht gefunden.</p></div>;
+  if (loading) return <div className="wrap"><p className="faint">Lade…</p></div>;
+  if (!a) return <div className="wrap"><p className="faint">Artikel nicht gefunden.</p></div>;
 
-  const segs = pathSegments(article.url, article.base_url);
-  const typeColor = TYPE_COLOR[article.article_type ?? "news"] ?? "#5b8cff";
+  const segs = (() => { try { return new URL(a.url).pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean); } catch { return []; } })();
+  const type = a.article_type ?? "news";
 
   return (
-    <div className="wrap" style={{ maxWidth: 900 }}>
-      {/* Back */}
-      <Link href="/articles" className="muted" style={{ fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 20 }}>
-        ← Alle Artikel
-      </Link>
+    <div className="wrap detail">
+      <Link href="/articles" className="back"><ArrowLeft size={15} /> Alle Artikel</Link>
 
-      {/* Hero */}
-      {article.og_image && (
-        <div style={{ borderRadius: 12, overflow: "hidden", marginBottom: 24, maxHeight: 340, background: "var(--panel)" }}>
-          <img src={article.og_image} alt="" style={{ width: "100%", objectFit: "cover", maxHeight: 340, display: "block" }} />
-        </div>
-      )}
-
-      {/* Outlet + Type */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-        <a href={article.base_url} target="_blank" rel="noreferrer" style={{ fontWeight: 700, fontSize: 14, color: "var(--accent)" }}>
-          {FLAG[article.country] ?? ""} {article.outlet}
-        </a>
-        <span className="badge" style={{ background: `${typeColor}22`, color: typeColor }}>
-          {TYPE_LABEL[article.article_type ?? "news"] ?? article.article_type}
-        </span>
-        {article.paywalled === true && (
-          <span className="badge" style={{ background: "rgba(244,96,122,.15)", color: "#f4607a" }}>🔒 Paywall</span>
-        )}
-        {article.paywalled === false && (
-          <span className="badge" style={{ background: "rgba(62,207,142,.1)", color: "#3ecf8e" }}>🔓 Frei</span>
-        )}
-        {article.lang_detected && (
-          <span className="badge" style={{ background: "var(--panel-2)", color: "var(--text-dim)" }}>
-            {LANG[article.lang_detected] ?? article.lang_detected}
-          </span>
-        )}
+      {/* Kicker */}
+      <div className="d-kicker">
+        <a href={a.base_url} target="_blank" rel="noreferrer" className="d-outlet">{a.outlet}</a>
+        <span className="cc">{a.country}</span>
+        <TypeBadge type={type} />
+        {a.paywalled === true && <span className="badge lock"><Lock /> Paywall</span>}
+        {a.paywalled === false && <span className="badge free"><LockOpen /> Frei zugänglich</span>}
       </div>
 
-      {/* Titel */}
-      <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.25, marginBottom: 12, color: "var(--text)" }}>
-        {article.title ?? article.url.replace(/^https?:\/\/(www\.)?/, "")}
-      </h1>
+      <h1 className="d-title">{a.title ?? a.url.replace(/^https?:\/\/(www\.)?/, "")}</h1>
+      {a.description && <p className="d-dek">{a.description}</p>}
 
-      {/* Beschreibung */}
-      {article.description && (
-        <p style={{ fontSize: 15, color: "var(--text-dim)", lineHeight: 1.6, marginBottom: 20, borderLeft: "3px solid var(--border)", paddingLeft: 14 }}>
-          {article.description}
-        </p>
-      )}
+      {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
 
-      {/* Stats-Leiste */}
-      <div className="panel pad" style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 20 }}>
-        <Stat label="Veröffentlicht" value={fmtDate(article.published_at)} />
-        {article.modified_at && article.modified_at !== article.published_at && (
-          <Stat label="Aktualisiert" value={fmtDate(article.modified_at)} accent="#f0b429" />
-        )}
-        {article.word_count && <Stat label="Wörter" value={article.word_count.toLocaleString("de-DE")} />}
-        {article.reading_min && <Stat label="Lesezeit" value={`${article.reading_min} Min`} />}
-        <Stat label="Entdeckt" value={fmtDateShort(article.first_seen)} />
+      {/* Stats */}
+      <div className="panel statbar">
+        <Stat k="Veröffentlicht" v={fmtDate(a.published_at)} />
+        {a.modified_at && a.modified_at !== a.published_at && <Stat k="Aktualisiert" v={fmtDate(a.modified_at)} />}
+        {a.word_count ? <Stat k="Umfang" v={`${a.word_count.toLocaleString("de-DE")} Wörter`} /> : null}
+        {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
+        <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
+        <Stat k="Erstmals erfasst" v={fmtShort(a.first_seen)} />
       </div>
 
-      {/* Autoren */}
-      {authors.length > 0 && (
-        <Section title="Autoren">
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {authors.map((a) => <Tag key={a} text={a} color="var(--accent)" />)}
-          </div>
-        </Section>
-      )}
+      {authors.length > 0 && <DL h="Autoren"><div className="row">{authors.map((x) => <span key={x} className="tag a">{x}</span>)}</div></DL>}
+      {categories.length > 0 && <DL h="Ressort"><div className="row">{categories.map((x) => <span key={x} className="tag g">{x}</span>)}</div></DL>}
+      {keywords.length > 0 && <DL h="Schlagwörter"><div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div></DL>}
 
-      {/* Kategorien */}
-      {categories.length > 0 && (
-        <Section title="Ressort / Kategorie">
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {categories.map((c) => <Tag key={c} text={c} color="#3ecf8e" />)}
-          </div>
-        </Section>
-      )}
-
-      {/* Keywords */}
-      {keywords.length > 0 && (
-        <Section title="Keywords">
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {keywords.map((k) => <Tag key={k} text={k} />)}
-          </div>
-        </Section>
-      )}
-
-      {/* Pfad im Seitenbaum */}
+      {/* Seitenbaum */}
       {segs.length > 0 && (
-        <Section title="Position im Seitenbaum">
-          <div style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", fontFamily: "var(--mono)", fontSize: 12.5 }}>
-            <span className="muted">{article.base_url.replace(/^https?:\/\/(www\.)?/, "")}</span>
-            {segs.map((seg, i) => (
-              <span key={i} style={{ display: "flex", alignItems: "center" }}>
-                <span className="muted" style={{ margin: "0 4px" }}>/</span>
-                <span style={{ color: i === segs.length - 1 ? "var(--accent)" : "var(--text-dim)", padding: "2px 6px", background: "var(--panel-2)", borderRadius: 5 }}>{seg}</span>
+        <DL h="Position im Seitenbaum">
+          <div className="crumb">
+            <span className="seg">{a.base_url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+            {segs.map((s, i) => (
+              <span key={i} style={{ display: "inline-flex", alignItems: "center" }}>
+                <span className="sep">/</span><span className={`seg ${i === segs.length - 1 ? "last" : ""}`}>{s}</span>
               </span>
             ))}
           </div>
-          {article.depth != null && (
-            <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>Tiefe im Seitenbaum: {article.depth} Ebenen von der Startseite</p>
-          )}
-        </Section>
+          {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
+        </DL>
       )}
 
-      {/* Ähnliche Artikel (Platzhalter) */}
-      <Section title="Ähnliche Artikel anderer Verlage">
-        <div className="muted" style={{ fontSize: 13, padding: "16px", background: "var(--panel-2)", borderRadius: 8, borderLeft: "3px solid var(--border)" }}>
-          Dieses Feature wird aktiviert, sobald das Cluster-Feature reaktiviert wird. Es zeigt dann
-          Artikel anderer Verlage, die dieselbe Story behandeln — mit Ähnlichkeitswert und Zeitversatz.
-        </div>
-      </Section>
+      {/* Änderungsverlauf / Timeline */}
+      <DL h="Änderungsverlauf">
+        {snaps.length === 0 ? (
+          <div className="empty">
+            Noch keine Änderungen erfasst. Sobald margn den Artikel erneut besucht und sich Text oder
+            Überschrift ändern, erscheint hier eine Zeitleiste — mit Unterscheidung zwischen
+            <strong> Erweiterungen</strong> (neu hinzugefügte Passagen) und <strong> stillen Änderungen</strong> (nachträglich überarbeitete Stellen).
+          </div>
+        ) : (
+          <div className="tl">
+            {snaps.map((s) => <TimelineItem key={s.id} s={s} />)}
+          </div>
+        )}
+      </DL>
 
-      {/* Original öffnen */}
-      <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
-        <a href={article.url} target="_blank" rel="noreferrer"
-          style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "var(--accent)", color: "#fff", padding: "10px 20px", borderRadius: 10, fontWeight: 600, fontSize: 14 }}>
-          Originalartikel öffnen ↗
-        </a>
+      <div style={{ marginTop: 28 }}>
+        <a href={a.url} target="_blank" rel="noreferrer" className="cta">Originalartikel öffnen <External size={15} /></a>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function TypeBadge({ type }: { type: string }) {
+  const label = TYPE_LABEL[type] ?? type;
+  if (type === "liveblog" || type === "timeline") return <span className="badge info"><Clock /> {label}</span>;
+  if (type === "interactive") return <span className="badge media"><Video /> {label}</span>;
+  return <span className="badge neutral"><FileText /> {label}</span>;
+}
+
+function TimelineItem({ s }: { s: Snapshot }) {
+  const kindLabel = s.change_kind === "extension" ? "Erweiterung" : s.change_kind === "edit" ? "Stille Änderung" : "Geändert & erweitert";
+  const Icon = s.change_kind === "edit" ? Pencil : Plus;
+  const cls = s.change_kind === "extension" ? "ok" : s.change_kind === "edit" ? "lock" : "wait";
   return (
-    <div>
-      <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: accent ?? "var(--text)" }}>{value}</div>
+    <div className="tl-item">
+      <span className={`tl-dot ${s.change_kind}`} />
+      <div className="tl-head">
+        <span className={`badge ${cls}`}><Icon /> {kindLabel}</span>
+        <span className="tl-when">{fmtDate(s.captured_at)}</span>
+        {s.word_delta ? <span className="faint" style={{ fontSize: 12.5 }}>{s.word_delta > 0 ? "+" : ""}{s.word_delta} Wörter</span> : null}
+      </div>
+      {s.title_old && s.title_new && (
+        <div className="tl-title-change">
+          <span className="old">{s.title_old}</span><br /><span className="new">{s.title_new}</span>
+        </div>
+      )}
+      {s.added && (
+        <div className="tl-passage add">
+          {s.change_kind === "edit" ? "Geänderte Passage: " : ""}{s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}
+        </div>
+      )}
+      {s.removed_count > 0 && !s.added && <p className="faint" style={{ fontSize: 12.5 }}>{s.removed_count} Passage(n) entfernt</p>}
     </div>
   );
 }
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="panel pad" style={{ marginBottom: 14 }}>
-      <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 12 }}>{title}</div>
-      {children}
-    </div>
-  );
+
+function Stat({ k, v }: { k: string; v: string }) {
+  return <div className="stat"><div className="k">{k}</div><div className="v">{v}</div></div>;
 }
-function Tag({ text, color }: { text: string; color?: string }) {
-  return (
-    <span style={{ fontSize: 12.5, padding: "4px 10px", borderRadius: 99, background: color ? `${color}18` : "var(--panel-2)", color: color ?? "var(--text-dim)", border: `1px solid ${color ? `${color}33` : "var(--border)"}` }}>
-      {text}
-    </span>
-  );
+function DL({ h, children }: { h: string; children: React.ReactNode }) {
+  return <div className="panel pad dl-section" style={{ marginTop: 14 }}><div className="h">{h}</div>{children}</div>;
 }
