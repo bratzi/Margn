@@ -230,29 +230,28 @@ function classifyUrl(url: string): Kind {
   return "unknown";
 }
 
-// Inhaltbasierte Video-Erkennung. Greift auch wenn die URL wie ein Artikel aussieht (z.B. Bild).
-// Signale (eines reicht):
-//   1. JSON-LD @type = VideoObject
-//   2. og:type = video.*
-//   3. twitter:card = player
-//   4. Kein lesbarer Fließtext (Readability < MIN_BODY), aber <video>-Tag vorhanden
+// Inhaltbasierte Video-Erkennung – erkennt reine Video-Seiten.
+// WICHTIG: Artikel mit eingebettetem Video (z.B. Tagesschau) bleiben Artikel.
+// Schlüsselregel: Hat die Seite AUCH einen Article/NewsArticle-Typ im JSON-LD → kein Video.
 function isVideoPage(html: string): boolean {
-  // 1) og:type = video.*
+  const ld = parseJsonLd(html);
+  const allTypes = ld.flatMap((d) => Array.isArray(d["@type"]) ? d["@type"] : [d["@type"]]).filter(Boolean) as string[];
+
+  // Seite mit Article/NewsArticle-Typ ist ein Artikel – auch wenn ein VideoObject eingebettet ist.
+  if (allTypes.some((t) => /article/i.test(t))) return false;
+
+  // og:type = video.* (ohne gleichzeitigen Article-Typ)
   if (/property=["']og:type["'][^>]+content=["']video\./i.test(html) ||
       /content=["']video\.[^"']+["'][^>]+property=["']og:type["']/i.test(html)) return true;
-  // 2) twitter:card = player
+
+  // JSON-LD VideoObject als EINZIGER signifikanter Typ (kein Article daneben)
+  if (allTypes.some((t) => t === "VideoObject")) return true;
+
+  // twitter:card = player + kaum Fließtext (reine Player-Seite)
   if (/name=["']twitter:card["'][^>]+content=["']player["']/i.test(html) ||
-      /content=["']player["'][^>]+name=["']twitter:card["']/i.test(html)) return true;
-  // 3) JSON-LD VideoObject als primärer Typ
-  const ld = parseJsonLd(html);
-  if (ld.some((d) => {
-    const t = d["@type"];
-    return t === "VideoObject" || (Array.isArray(t) && t.includes("VideoObject"));
-  })) return true;
-  // 4) Seite hat <video> oder bekannte Player-Klassen + kaum Text
-  if (/<video[\s>]/i.test(html) || /class=["'][^"']*(jwplayer|video-js|videoPlayer|bc-player)[^"']*["']/i.test(html)) {
-    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    if (text.split(/\s+/).length < 150) return true; // Video-Seite mit wenig Begleittext
+      /content=["']player["'][^>]+name=["']twitter:card["']/i.test(html)) {
+    const wordCount = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().split(/\s+/).length;
+    if (wordCount < 200) return true;
   }
   return false;
 }
