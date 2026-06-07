@@ -52,20 +52,14 @@ async function upsertArticle(sourceId: number, url: string): Promise<number> {
   return data.id;
 }
 
-async function latestVersion(articleId: number) {
-  const { data } = await sb
-    .from("article_versions").select("title,teaser")
-    .eq("article_id", articleId).order("scanned_at", { ascending: false }).limit(1);
-  return data?.[0] ?? null;
-}
+// latestVersion + changed-Flag DEAKTIVIERT: Stille-Edits-Feature auf Eis.
+// Wieder aktivieren wenn das Feature reaktiviert wird.
 
 async function saveVersion(articleId: number, title: string, teaser: string, body: string) {
   const hash = createHash("sha256").update(body ?? "").digest("hex");
-  const prev = await latestVersion(articleId);
-  const changed = !!prev && (prev.title !== title || prev.teaser !== teaser);
   const vector = await embed(`${title}\n\n${teaser}`);
   await sb.from("article_versions").insert({
-    article_id: articleId, title, teaser, body_hash: hash, body_text: body, changed, embedding: toPgVector(vector),
+    article_id: articleId, title, teaser, body_hash: hash, body_text: body, changed: false, embedding: toPgVector(vector),
   });
 }
 

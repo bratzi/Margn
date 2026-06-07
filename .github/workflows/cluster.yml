@@ -1,7 +1,9 @@
 name: cluster
+# DEAKTIVIERT: Echo-Cluster-Feature auf Eis gelegt (DB-Speicher, zu früh).
+# Wieder aktivieren: schedule-Block auskommentieren entfernen.
 on:
-  schedule:
-    - cron: "45 */6 * * *"   # alle 6 Stunden
+  # schedule:
+  #   - cron: "45 */6 * * *"
   workflow_dispatch:
 jobs:
   cluster:

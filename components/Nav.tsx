@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { href: "/articles", label: "Fortschritt" },
-  { href: "/edits", label: "Stille Edits" },
-  { href: "/echoes", label: "Echo-Cluster" },
+  // { href: "/edits", label: "Stille Edits" },   // DEAKTIVIERT – Feature auf Eis
+  // { href: "/echoes", label: "Echo-Cluster" },  // DEAKTIVIERT – Feature auf Eis
 ];
 
 export default function Nav() {
