@@ -41,7 +41,7 @@ export default function ArticleDashboard() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [kwIds, setKwIds] = useState<number[] | null>(null);
-  const [sortCol, setSortCol] = useState<"src" | "type" | "topic" | "author" | "status">("status");
+  const [sortCol, setSortCol] = useState<"recent" | "src" | "type" | "topic" | "author">("recent");
   const [agg, setAgg] = useState({ articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 });
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   useEffect(() => { setUpdatedAt(new Date()); }, [f.ready]);
@@ -79,8 +79,8 @@ export default function ArticleDashboard() {
     if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
     if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
     if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
-    const col = sortCol === "src" ? "outlet" : sortCol === "type" ? "ptype" : sortCol === "topic" ? "topic" : sortCol === "author" ? "author_status" : "analyzed";
-    const { data, count } = await q.order(col, { ascending: sortCol === "status" }).range(page * PAGE, page * PAGE + PAGE - 1);
+    const col = sortCol === "src" ? "outlet" : sortCol === "type" ? "ptype" : sortCol === "topic" ? "topic" : sortCol === "author" ? "author_status" : "discovered_at";
+    const { data, count } = await q.order(col, { ascending: sortCol !== "recent" }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
   }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.lang, f.rangeFrom, f.rangeTo, kwIds, f.keyword, page, sortCol]);
 
@@ -151,7 +151,6 @@ export default function ArticleDashboard() {
               <th style={{ cursor: "pointer" }} onClick={() => setSortCol("type")}>Typ {sortCol === "type" && "↓"}</th>
               <th style={{ cursor: "pointer" }} onClick={() => setSortCol("topic")}>Thema {sortCol === "topic" && "↓"}</th>
               <th style={{ cursor: "pointer" }} onClick={() => setSortCol("author")}>Autor {sortCol === "author" && "↓"}</th>
-              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("status")}>Status {sortCol === "status" && "↓"}</th>
               <th>Veröffentlicht</th><th>Erster Scan</th><th>Letzter Scan</th>
               <th className="num">Wörter</th><th className="num">Lesezeit</th><th>Änderungen</th><th>Sprache</th>
             </tr></thead>
@@ -175,7 +174,6 @@ export default function ArticleDashboard() {
                     <td className="cell-nowrap"><span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span></td>
                     <td className="cell-nowrap faint">{r.topic ? topicLabel(r.topic) : "—"}</td>
                     <td className="cell-nowrap">{r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>}</td>
-                    <td className="cell-nowrap">{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
                     <td className="cell-nowrap mono faint">{fmtD(r.published_at)}</td>
                     <td className="cell-nowrap mono faint">{fmtDT(r.discovered_at)}</td>
                     <td className="cell-nowrap mono faint">{fmtDT(r.last_seen)}</td>
@@ -190,7 +188,7 @@ export default function ArticleDashboard() {
                   </tr>
                 );
               })}
-              {!rows.length && <tr><td colSpan={13} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
+              {!rows.length && <tr><td colSpan={12} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
             </tbody>
           </table>
         </div>

@@ -39,7 +39,6 @@ export default function FilterControls() {
         </div>
       </div>
 
-      <Group label="Status" value={f.status} on={f.setStatus} opts={[["all", "Alle"], ["analyzed", "Analysiert"], ["backlog", "Backlog"]]} />
       <Group label="Bezahlschranke" value={f.paywall} on={f.setPaywall} opts={[["all", "Alle"], ["no", "Frei"], ["yes", "Paywall"]]} />
       <Group label="Autor" value={f.author} on={f.setAuthor} opts={[["all", "Alle"], ["named", "Namentl."], ["anonymous", "Anonym"], ["none", "Ohne"]]} />
 
