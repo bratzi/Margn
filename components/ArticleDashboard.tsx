@@ -8,7 +8,8 @@ import { FileText, Folder, Clock, External } from "@/components/icons";
 import PublisherCompare from "@/components/PublisherCompare";
 import TopicChart from "@/components/TopicChart";
 import RateStats from "@/components/RateStats";
-import TimeRangeFilter from "@/components/TimeRangeFilter";
+import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
+import Donut from "@/components/Donut";
 import FilterPanel, { type Src } from "@/components/FilterPanel";
 import { topicLabel } from "@/lib/topics";
 import FilterPills from "@/components/FilterPills";
@@ -244,6 +245,17 @@ export default function ArticleDashboard() {
             <div className="stat-tile"><div className="l">🔒 Paywall-Anteil</div><div className="n tnum" style={{ color: fpct(agg.paywalled, agg.articles) > 40 ? "var(--red)" : "inherit" }}>{fpct(agg.paywalled, agg.articles)}%</div><div className="sub">{agg.paywalled.toLocaleString("de-DE")} hinter Schranke</div></div>
             <div className="stat-tile"><div className="l">✍️ Namentliche Autoren</div><div className="n tnum" style={{ color: "var(--green)" }}>{fpct(agg.named, agg.au)}%</div><div className="sub">statt Redaktion/Agentur</div></div>
             <div className="stat-tile accent"><div className="l">🎬 Video & Werbung</div><div className="n tnum">{(agg.video + agg.werbung).toLocaleString("de-DE")}</div><div className="bar"><i style={{ width: `${fpct(agg.video + agg.werbung, agg.articles + agg.video + agg.werbung)}%` }} /></div></div>
+          </div>
+
+          {/* Eyecatcher: Verteilungs-Donuts */}
+          <h2 className="section-h">Auf einen Blick <span className="count">{topic !== "all" ? topicLabel(topic) : "Gesamtverteilung"}</span></h2>
+          <div className="donut-grid">
+            <Donut title="Themen-Mix" centerLabel={topicOpts.reduce((s, t) => s + t.n, 0).toLocaleString("de-DE")} centerSub="Artikel"
+              segments={topicOpts.slice(0, 6).map((t, i) => ({ label: t.label, value: t.n, color: PUB_COLORS[i % PUB_COLORS.length] }))} />
+            <Donut title="Bezahlschranke" centerLabel={`${fpct(agg.paywalled, agg.articles)}%`} centerSub="Paywall"
+              segments={[{ label: "Frei zugänglich", value: agg.articles - agg.paywalled, color: "var(--green)" }, { label: "Hinter Paywall", value: agg.paywalled, color: "var(--red)" }]} />
+            <Donut title="Autoren-Transparenz" centerLabel={`${fpct(agg.named, agg.au)}%`} centerSub="namentlich"
+              segments={[{ label: "Namentlich", value: agg.named, color: "var(--green)" }, { label: "Redaktion/Agentur · ohne", value: agg.au - agg.named, color: "var(--line-2)" }]} />
           </div>
 
           <RateStats sources={sources} activeSources={activeArr} />

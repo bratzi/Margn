@@ -83,18 +83,26 @@ export default function EditsDashboard() {
             <button onClick={() => setSortBy("date")} className={sortBy === "date" ? "active" : ""}>Datum</button>
           </span>
         </h2>
-        <div className="panel" style={{ overflowX: "auto" }}>
-          <table className="matrix">
-            <thead><tr><th>Artikel</th><th>Verlag</th><th>Ges.</th><th>Edit</th><th>Erweit.</th><th>Letzte</th></tr></thead>
+        <div className="panel">
+          <table className="arttable">
+            <thead><tr>
+              <th className="c-src">Quelle</th><th className="c-art">Artikel</th>
+              <th className="c-typ">Edits</th><th className="c-topic">Erweit.</th><th className="c-author">Gesamt</th><th className="c-stat">Letzte</th>
+            </tr></thead>
             <tbody>
               {sorted.slice(0, 100).map((e) => (
                 <tr key={e.article_id}>
-                  <td><Link href={`/articles/${e.article_id}`} target="_blank" className="url mono" title={e.title} style={{ maxWidth: "38vw", display: "inline-block" }}>{e.title?.slice(0, 70) || shortUrl(e.url)}</Link></td>
-                  <td className="cell-nowrap">{e.outlet}</td>
-                  <td className="tnum"><strong>{e.change_count}</strong></td>
-                  <td className="tnum"><span style={{ color: e.edit_count > 0 ? "var(--red)" : "var(--faint)" }}>{e.edit_count}</span></td>
-                  <td className="tnum"><span style={{ color: e.extension_count > 0 ? "var(--green)" : "var(--faint)" }}>{e.extension_count}</span></td>
-                  <td className="tnum faint cell-nowrap">{fmt(e.last_change)}</td>
+                  <td className="cell-nowrap c-src">{e.outlet} <span className="cc">{e.country}</span></td>
+                  <td>
+                    <div className="art-row">
+                      <Link href={`/articles/${e.article_id}`} target="_blank" className="url" title={e.title}>{e.title?.slice(0, 90) || shortUrl(e.url)}</Link>
+                      <a href={e.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen" aria-label="Original">↗</a>
+                    </div>
+                  </td>
+                  <td className="c-typ tnum"><span style={{ color: e.edit_count > 0 ? "var(--red)" : "var(--faint)" }}>{e.edit_count}</span></td>
+                  <td className="c-topic tnum"><span style={{ color: e.extension_count > 0 ? "var(--green)" : "var(--faint)" }}>{e.extension_count}</span></td>
+                  <td className="c-author tnum"><strong>{e.change_count}</strong></td>
+                  <td className="cell-nowrap tnum faint">{fmt(e.last_change)}</td>
                 </tr>
               ))}
             </tbody>

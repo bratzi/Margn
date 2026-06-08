@@ -186,6 +186,20 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
   .rail-open { top: 0; height: 100vh; }
 }
 
+/* ---------- Donut-Eyecatcher ---------- */
+.donut-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.donut-card { padding: 16px 18px; }
+.donut-card h3 { font-size: 13px; font-weight: 600; margin: 0 0 12px; color: var(--ink); }
+.donut-body { display: flex; align-items: center; gap: 18px; }
+.donut-svg { width: 116px; height: 116px; flex-shrink: 0; }
+.donut-center { font-size: 22px; font-weight: 700; fill: var(--ink); font-variant-numeric: tabular-nums; }
+.donut-sub { font-size: 9px; fill: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+.donut-legend { display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 0; }
+.dl-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.dl-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.dl-label { color: var(--muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-val { color: var(--ink); font-weight: 600; }
+
 /* ---------- Keyword-Cloud über Tabelle (max 4 Reihen) ---------- */
 .kw-cloud { display: flex; flex-wrap: wrap; gap: 7px; max-height: 132px; overflow-y: auto; padding: 2px; margin-bottom: 4px; }
 .kw-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 12.5px; font-family: inherit; cursor: pointer; transition: all .14s; }
