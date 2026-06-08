@@ -127,6 +127,28 @@ export default function ArticleDashboard() {
       .then(({ data }) => setKwIds((data ?? []).map((r: any) => r.article_id)));
   }, [keyword]);
 
+  // Dynamische Topic-Optionen (abhängig von Zeitraum + Quellen + Sprache)
+  useEffect(() => {
+    supabase.rpc("topic_opts_f", {
+      p_sources: [...active], p_lang: lang === "all" ? null : lang,
+      p_from: rangeFrom, p_to: rangeTo,
+    }).then(({ data }) => {
+      const opts = data ? data.map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n })) : [];
+      setTopicStats(data ?? []);
+    });
+  }, [active, lang, rangeFrom, rangeTo]);
+
+  // Dynamische Keyword-Optionen (abhängig von Zeitraum + Quellen + Thema + Sprache)
+  useEffect(() => {
+    supabase.rpc("keyword_opts_f", {
+      p_sources: [...active], p_topic: topic === "all" ? null : topic,
+      p_lang: lang === "all" ? null : lang,
+      p_from: rangeFrom, p_to: rangeTo,
+    }).then(({ data }) => {
+      setKwStats(data ?? []);
+    });
+  }, [active, topic, lang, rangeFrom, rangeTo]);
+
   const loadRows = useCallback(async () => {
     if (!active.size) { setRows([]); setTotal(0); return; }
     if (keyword !== "all" && kwIds === null) return; // warte auf IDs
