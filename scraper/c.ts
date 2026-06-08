@@ -1,2 +1,0 @@
-import "dotenv/config";import {sb} from "./lib";for(const k of ["sponsored","media","section"]){const {data}=await sb.from("pages").select("url").eq("kind",k).limit(8);console.log("
-=== "+k+" ===");for(const r of data||[])console.log(" ",r.url.slice(0,95));}

@@ -6,3 +6,5 @@ dist/
 *.log
 
 .vercel
+scraper/c.ts
+scraper/diag.ts
