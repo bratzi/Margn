@@ -24,7 +24,7 @@ type Row = {
 const PTYPE: Record<string, { l: string; c: string }> = {
   artikel: { l: "Artikel", c: "neutral" }, paywall: { l: "Paywall", c: "lock" },
   video: { l: "Video", c: "media" }, werbung: { l: "Werbung", c: "wait" },
-  hub: { l: "Hub", c: "neutral" }, blog: { l: "Blog", c: "info" }, timeline: { l: "Timeline", c: "info" },
+  hub: { l: "Hub", c: "neutral" }, blog: { l: "Timeline", c: "info" }, timeline: { l: "Timeline", c: "info" },
 };
 const AUTHOR: Record<string, { l: string; c: string }> = {
   named: { l: "Autor", c: "ok" }, anonymous: { l: "Redaktion", c: "wait" },

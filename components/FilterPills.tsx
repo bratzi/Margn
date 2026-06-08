@@ -14,7 +14,7 @@ export default function FilterPills() {
   if (f.activeArr.length !== f.sources.length) for (const id of f.activeArr) pills.push({ id: `pub-${id}`, label: nameById.get(id) || "?", on: () => f.toggle(id) });
   if (f.status !== "all") pills.push({ id: "st", label: f.status === "analyzed" ? "Analysiert" : "Backlog", on: () => f.setStatus("all") });
   if (f.paywall !== "all") pills.push({ id: "pw", label: f.paywall === "yes" ? "🔒 Paywall" : "🔓 Frei", on: () => f.setPaywall("all") });
-  if (f.atype !== "all") pills.push({ id: "at", label: f.atype, on: () => f.setAtype("all") });
+  if (f.atype !== "all") { const AT: Record<string, string> = { artikel: "Artikel", paywall: "Paywall-Seite", video: "Video", werbung: "Werbung", hub: "Hub", blog: "Timeline", timeline: "Timeline" }; pills.push({ id: "at", label: AT[f.atype] ?? f.atype, on: () => f.setAtype("all") }); }
   if (f.author !== "all") pills.push({ id: "au", label: f.author === "named" ? "Namentlich" : f.author === "anonymous" ? "Anonym" : "Ohne Autor", on: () => f.setAuthor("all") });
   if (f.topic !== "all") pills.push({ id: "tp", label: `📁 ${topicLabel(f.topic)}`, on: () => f.setTopic("all") });
   if (f.keyword !== "all") pills.push({ id: "kw", label: `#${f.keyword}`, on: () => f.setKeyword("all") });
