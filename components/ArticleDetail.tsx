@@ -158,6 +158,31 @@ function TypeBadge({ type }: { type: string }) {
   return <span className="badge neutral"><FileText /> {label}</span>;
 }
 
+// Wort-Diff: markiert im NEUEN Text nur die Tokens, die nicht im alten vorkommen (LCS).
+function DiffTitle({ oldS, newS }: { oldS: string; newS: string }) {
+  const o = oldS.split(/(\s+)/), n = newS.split(/(\s+)/);
+  const m = o.length, k = n.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(k + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) for (let j = k - 1; j >= 0; j--)
+    dp[i][j] = o[i] === n[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const toks: { t: string; ch: boolean; ws: boolean }[] = [];
+  let i = 0, j = 0;
+  while (j < k) {
+    if (i < m && o[i] === n[j]) { toks.push({ t: n[j], ch: false, ws: /^\s+$/.test(n[j]) }); i++; j++; }
+    else if (i < m && dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else { toks.push({ t: n[j], ch: true, ws: /^\s+$/.test(n[j]) }); j++; }
+  }
+  // Whitespace zwischen zwei Änderungen einfärben → durchgehender Marker
+  for (let x = 1; x < toks.length - 1; x++) if (toks[x].ws && toks[x - 1].ch && toks[x + 1].ch) toks[x].ch = true;
+  // benachbarte gleiche Tokens zu Segmenten zusammenfassen
+  const segs: { t: string; ch: boolean }[] = [];
+  for (const tk of toks) {
+    const last = segs[segs.length - 1];
+    if (last && last.ch === tk.ch) last.t += tk.t; else segs.push({ t: tk.t, ch: tk.ch });
+  }
+  return <>{segs.map((sg, x) => sg.ch ? <mark key={x} className="hl">{sg.t}</mark> : <span key={x}>{sg.t}</span>)}</>;
+}
+
 function TimelineItem({ s }: { s: Snapshot }) {
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : s.change_kind === "edit" ? "Stille Änderung" : "Geändert & erweitert";
   const Icon = s.change_kind === "edit" ? Pencil : Plus;
@@ -174,15 +199,13 @@ function TimelineItem({ s }: { s: Snapshot }) {
         <div className="tl-title-change">
           <span className="old">{s.title_old}</span>
           <span className="arrow">↓ geändert zu</span>
-          <span className="new"><span className="hl">{s.title_new}</span></span>
+          <span className="new"><DiffTitle oldS={s.title_old} newS={s.title_new} /></span>
         </div>
       )}
       {s.added && (
         <div className={`tl-passage ${s.change_kind === "edit" ? "edit" : "add"}`}>
           <span className="pk">{s.change_kind === "edit" ? "Geänderte Passage" : "Hinzugefügt"}</span>
-          {s.change_kind === "edit"
-            ? <span className="hl">{s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}</span>
-            : (s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added)}
+          {s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}
         </div>
       )}
       {s.removed_count > 0 && !s.added && <p className="faint" style={{ fontSize: 12.5 }}>{s.removed_count} Passage(n) entfernt</p>}
