@@ -120,7 +120,9 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 @media (max-width: 768px) { .page { padding: var(--s4) var(--s4) 56px; } .topbar { padding: 0 var(--s4); } }
 
 .section-h { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; margin: var(--s8) 0 var(--s3); display: flex; align-items: baseline; gap: 8px; color: var(--ink); }
-.section-h .count { font-size: 12px; color: var(--faint); font-weight: 500; }
+.section-h .count { font-size: 12px; color: var(--faint); font-weight: 500; display: flex; gap: 6px; align-items: center; }
+.section-h .count button { background: none; border: 1px solid var(--line); padding: 3px 8px; border-radius: var(--r-sm); font-size: 11px; color: var(--muted); cursor: pointer; transition: all .15s; }
+.section-h .count button:hover, .section-h .count button.active { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- KPI strip (full width) ---------- */
 .kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); }
@@ -183,6 +185,13 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
   .mini-icons { flex-direction: row; }
   .rail-open { top: 0; height: 100vh; }
 }
+
+/* ---------- Filter-Pills-Leiste ---------- */
+.filter-pills { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.pills-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.pills-list { display: flex; gap: 8px; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 99px; background: var(--accent-sub); color: var(--accent); border: 1px solid var(--accent-sub); font-size: 12px; font-weight: 500; cursor: pointer; transition: all .15s; }
+.pill:hover { background: var(--accent); color: white; border-color: var(--accent); }
 
 /* ---------- Zeit-Range-Filter (unten) ---------- */
 .trf { position: sticky; bottom: 12px; z-index: 15; background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r); box-shadow: var(--shadow); margin-top: 28px; }
