@@ -96,10 +96,15 @@ function extractMeta(html: string, url: string) {
     metaContent(html, "article:modified_time") ??
     article.dateModified ?? null;
 
-  // Paywall: JSON-LD isAccessibleForFree oder CSS-Pattern
-  const paywalled =
-    ld.some((d) => d.isAccessibleForFree === false || d.isAccessibleForFree === "False") ||
-    PAYWALL_CSS.test(html);
+  // Paywall: JSON-LD isAccessibleForFree ist maßgeblich (verlässlich pro Artikel).
+  // CSS-Pattern NUR als Fallback, wenn KEIN JSON-LD-Signal existiert – sonst markiert
+  // das seitenweit geladene Paywall-Framework (z.B. "paywall"/"piano-") jeden freien Artikel.
+  const iaff = ld.map((d) => d.isAccessibleForFree).filter((v) => v !== undefined && v !== null);
+  const isFree = (v: any) => v === true || v === "True" || v === "true";
+  const notFree = (v: any) => v === false || v === "False" || v === "false";
+  const paywalled = iaff.length > 0
+    ? iaff.some(notFree) && !iaff.some(isFree)
+    : PAYWALL_CSS.test(html);
 
   // Artikeltyp aus @type
   const rawType = typeof article["@type"] === "string" ? article["@type"] : "NewsArticle";
