@@ -99,6 +99,12 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .side-foot { border-top: 1px solid var(--line); padding: 14px 10px 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .side-foot .obs { font-size: 11px; color: var(--faint); letter-spacing: .04em; }
 
+.nextrun { display: flex; align-items: center; gap: 7px; padding: 9px 11px; margin: 0 0 8px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface); }
+.nextrun svg { color: var(--accent); flex-shrink: 0; }
+.nextrun .nr-label { font-size: 11px; color: var(--muted); flex: 1; }
+.nextrun .nr-time { font-size: 12.5px; font-weight: 600; color: var(--ink); letter-spacing: .02em; }
+@media (max-width: 860px) { .nextrun { margin: 0; border: 0; background: transparent; padding: 0 6px; } .nextrun .nr-label { display: none; } }
+
 .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; transition: all .15s; }
 .theme-toggle:hover { color: var(--ink); border-color: var(--line-2); }
 

@@ -91,7 +91,7 @@ export default function FilterPanel(p: Props) {
 
       <Group label="Status" value={p.status} on={p.setStatus} opts={[["all", "Alle"], ["analyzed", "Analysiert"], ["backlog", "Backlog"]]} />
       <Group label="Bezahlschranke" value={p.paywall} on={p.setPaywall} opts={[["all", "Alle"], ["no", "Frei"], ["yes", "Paywall"]]} />
-      <Group label="Typ" value={p.atype} on={p.setAtype} opts={[["all", "Alle"], ["news", "News"], ["liveblog", "Liveblog"], ["opinion", "Meinung"]]} />
+      <Group label="Typ" value={p.atype} on={p.setAtype} opts={[["all", "Alle"], ["news", "News"], ["liveblog", "Liveblog"], ["opinion", "Meinung"], ["analysis", "Analyse"], ["timeline", "Timeline"]]} />
       <Group label="Autor" value={p.author} on={p.setAuthor} opts={[["all", "Alle"], ["named", "Namentlich"], ["anonymous", "Anonym"], ["none", "Ohne"]]} />
 
       <div className="fgroup">

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { FileText, Folder, Clock } from "@/components/icons";
 import PublisherCompare from "@/components/PublisherCompare";
 import TopicChart from "@/components/TopicChart";
+import RateStats from "@/components/RateStats";
 import FilterPanel, { type Src } from "@/components/FilterPanel";
 import { topicLabel } from "@/lib/topics";
 
@@ -115,6 +116,8 @@ export default function ArticleDashboard() {
             <div className="stat-tile"><div className="l"><Clock /> Analysiert</div><div className="n tnum">{totals.an.toLocaleString("de-DE")}</div><div className="sub">{totals.b.toLocaleString("de-DE")} im Backlog</div></div>
             <div className="stat-tile accent"><div className="l">Fortschritt</div><div className="n tnum">{pct}%</div><div className="bar"><i style={{ width: `${pct}%` }} /></div></div>
           </div>
+
+          <RateStats sources={sources} activeSources={[...active]} />
 
           <PublisherCompare activeSources={[...active]} />
 

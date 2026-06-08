@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ThemeToggle from "@/components/ThemeToggle";
+import NextRun from "@/components/NextRun";
 import { FileText } from "@/components/icons";
 
 const NAV = [
@@ -29,6 +30,7 @@ export default function Sidebar() {
       })}
 
       <div className="spacer" />
+      <NextRun />
       <div className="side-foot">
         <span className="obs">Medienobservatorium</span>
         <ThemeToggle />

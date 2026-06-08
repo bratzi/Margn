@@ -61,32 +61,6 @@ export default function PublisherCompare({ activeSources }: { activeSources?: nu
         })}
       </div>
 
-      {/* Autoren-Transparenz: gestapelt named/anon/none */}
-      <h2 className="section-h">Autoren-Transparenz <span className="count">namentlich · Redaktion/Agentur · ohne Angabe</span></h2>
-      <div className="panel pad">
-        <div className="legend">
-          <span><i style={{ background: "var(--green)" }} /> Namentlich</span>
-          <span><i style={{ background: "var(--amber)" }} /> Redaktion / Agentur</span>
-          <span><i style={{ background: "var(--line-2)" }} /> Ohne Angabe</span>
-        </div>
-        <div className="stacks">
-          {[...stats].sort((a, b) => pct(b.au_named, b.analyzed) - pct(a.au_named, a.analyzed)).map((s) => {
-            const tot = Math.max(1, s.au_named + s.au_anon + s.au_none);
-            return (
-              <div className="stackrow" key={s.source_id}>
-                <span className="lbl">{short(s.outlet)}</span>
-                <span className="stack">
-                  <i style={{ width: `${(s.au_named / tot) * 100}%`, background: "var(--green)" }} title={`Namentlich: ${s.au_named}`} />
-                  <i style={{ width: `${(s.au_anon / tot) * 100}%`, background: "var(--amber)" }} title={`Redaktion/Agentur: ${s.au_anon}`} />
-                  <i style={{ width: `${(s.au_none / tot) * 100}%`, background: "var(--line-2)" }} title={`Ohne: ${s.au_none}`} />
-                </span>
-                <span className="val tnum">{pct(s.au_named, tot)}%</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Steckbrief */}
       <h2 className="section-h">Steckbrief <span className="count">alle Kennzahlen</span></h2>
       <div className="panel" style={{ overflowX: "auto" }}>
