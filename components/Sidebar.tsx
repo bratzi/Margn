@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ThemeToggle from "@/components/ThemeToggle";
 import NextRun from "@/components/NextRun";
-import { FileText } from "@/components/icons";
+import { FileText, Clock } from "@/components/icons";
 
 const NAV = [
   { href: "/articles", label: "Übersicht", icon: FileText },
+  { href: "/articles/edits", label: "Silent Edits", icon: Clock },
 ];
 
 export default function Sidebar() {

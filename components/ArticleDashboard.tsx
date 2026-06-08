@@ -225,9 +225,7 @@ export default function ArticleDashboard() {
   return (
     <>
       <div className="topbar">
-        <h1>Übersicht
-          <Link href="/articles/edits" style={{ marginLeft: 16, fontSize: 13, fontWeight: 500, color: "var(--muted)" }}>→ Silent Edits</Link>
-        </h1>
+        <h1>Übersicht</h1>
         <span className="live"><span className="live-dot" /> Live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</span>
       </div>
 
