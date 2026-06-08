@@ -1,72 +1,33 @@
 "use client";
 
 import { topicLabel } from "@/lib/topics";
+import { useFilters } from "@/components/FilterProvider";
 
-type Pill = { id: string; label: string; onRemove: () => void };
+const X = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" style={{ marginLeft: 3 }}><path d="M18 6 6 18M6 6 18 18" /></svg>;
+const fmtDay = (ds: string) => new Date(ds + "T00:00:00Z").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 
-export default function FilterPills({
-  sources, activeSources, toggleSource,
-  status, setStatus, paywall, setPaywall,
-  atype, setAtype, author, setAuthor,
-  topic, setTopic, keyword, setKeyword, lang, setLang,
-}: {
-  sources: { id: number; name: string }[];
-  activeSources: number[]; toggleSource: (id: number) => void;
-  status: string; setStatus: (v: string) => void;
-  paywall: string; setPaywall: (v: string) => void;
-  atype: string; setAtype: (v: string) => void;
-  author: string; setAuthor: (v: string) => void;
-  topic: string; setTopic: (v: string) => void;
-  keyword: string; setKeyword: (v: string) => void;
-  lang: string; setLang: (v: string) => void;
-}) {
-  const nameById = new Map(sources.map((s) => [s.id, s.name.replace(" Online", "")]));
-  const pills: Pill[] = [];
+export default function FilterPills() {
+  const f = useFilters();
+  const nameById = new Map(f.sources.map((s) => [s.id, s.name.replace(" Online", "")]));
+  const pills: { id: string; label: string; on: () => void }[] = [];
 
-  // Publizisten
-  for (const id of activeSources) {
-    if (activeSources.length !== sources.length) { // nur wenn nicht alle
-      pills.push({
-        id: `pub-${id}`,
-        label: nameById.get(id) || "?",
-        onRemove: () => toggleSource(id),
-      });
-    }
-  }
-
-  if (status !== "all") pills.push({ id: "status", label: status === "analyzed" ? "✓ Analysiert" : "⏱ Backlog", onRemove: () => setStatus("all") });
-  if (paywall !== "all") pills.push({ id: "paywall", label: paywall === "yes" ? "🔒 Paywall" : "🔓 Frei", onRemove: () => setPaywall("all") });
-  if (atype !== "all") {
-    const labels: Record<string, string> = {
-      artikel: "Artikel", paywall: "Paywall-Seite", video: "Video", werbung: "Werbung",
-      hub: "Hub", blog: "Blog", timeline: "Timeline",
-    };
-    pills.push({ id: "atype", label: labels[atype] || atype, onRemove: () => setAtype("all") });
-  }
-  if (author !== "all") {
-    const labels: Record<string, string> = {
-      named: "Namentlich", anonymous: "Anonym", none: "Ohne Autor",
-    };
-    pills.push({ id: "author", label: labels[author] || author, onRemove: () => setAuthor("all") });
-  }
-  if (topic !== "all") pills.push({ id: "topic", label: `📁 ${topicLabel(topic)}`, onRemove: () => setTopic("all") });
-  if (keyword !== "all") pills.push({ id: "keyword", label: `#${keyword}`, onRemove: () => setKeyword("all") });
-  if (lang !== "all") pills.push({ id: "lang", label: lang === "de" ? "🇩🇪 Deutsch" : "🇫🇷 Français", onRemove: () => setLang("all") });
+  if (f.activeArr.length !== f.sources.length) for (const id of f.activeArr) pills.push({ id: `pub-${id}`, label: nameById.get(id) || "?", on: () => f.toggle(id) });
+  if (f.status !== "all") pills.push({ id: "st", label: f.status === "analyzed" ? "Analysiert" : "Backlog", on: () => f.setStatus("all") });
+  if (f.paywall !== "all") pills.push({ id: "pw", label: f.paywall === "yes" ? "🔒 Paywall" : "🔓 Frei", on: () => f.setPaywall("all") });
+  if (f.atype !== "all") pills.push({ id: "at", label: f.atype, on: () => f.setAtype("all") });
+  if (f.author !== "all") pills.push({ id: "au", label: f.author === "named" ? "Namentlich" : f.author === "anonymous" ? "Anonym" : "Ohne Autor", on: () => f.setAuthor("all") });
+  if (f.topic !== "all") pills.push({ id: "tp", label: `📁 ${topicLabel(f.topic)}`, on: () => f.setTopic("all") });
+  if (f.keyword !== "all") pills.push({ id: "kw", label: `#${f.keyword}`, on: () => f.setKeyword("all") });
+  if (f.lang !== "all") pills.push({ id: "lg", label: f.lang === "de" ? "🇩🇪 DE" : "🇫🇷 FR", on: () => f.setLang("all") });
+  const fullRange = f.rangeIdx.from === 0 && f.rangeIdx.to === f.days.length - 1;
+  if (!fullRange) pills.push({ id: "range", label: `📅 ${fmtDay(f.days[f.rangeIdx.from])} – ${fmtDay(f.days[f.rangeIdx.to])}`, on: () => f.setRangeIdx({ from: 0, to: f.days.length - 1 }) });
 
   if (!pills.length) return null;
-
   return (
     <div className="filter-pills">
-      <span className="pills-label">Filter:</span>
+      <span className="pills-label">Aktiv:</span>
       <div className="pills-list">
-        {pills.map((p) => (
-          <button key={p.id} className="pill" onClick={p.onRemove} title="Entfernen">
-            {p.label}
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" style={{ marginLeft: 4 }}>
-              <path d="M18 6 6 18M6 6 18 18" />
-            </svg>
-          </button>
-        ))}
+        {pills.map((p) => <button key={p.id} className="pill" onClick={p.on} title="Entfernen">{p.label}<X /></button>)}
       </div>
     </div>
   );

@@ -1,20 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { FileText, Folder, Clock, External } from "@/components/icons";
+import { FileText, External } from "@/components/icons";
+import { useFilters } from "@/components/FilterProvider";
+import FilterPills from "@/components/FilterPills";
 import PublisherCompare from "@/components/PublisherCompare";
 import TopicChart from "@/components/TopicChart";
 import RateStats from "@/components/RateStats";
 import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
 import Donut from "@/components/Donut";
-import FilterPanel, { type Src } from "@/components/FilterPanel";
 import { topicLabel } from "@/lib/topics";
-import FilterPills from "@/components/FilterPills";
 
-type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
 type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; analyzed: boolean; paywalled: boolean | null; ptype: string; topic: string | null; author_status: string | null };
 
 const PTYPE: Record<string, { l: string; c: string }> = {
@@ -25,169 +23,62 @@ const PTYPE: Record<string, { l: string; c: string }> = {
 const AUTHOR: Record<string, { l: string; c: string }> = {
   named: { l: "Autor", c: "ok" }, anonymous: { l: "Redaktion", c: "wait" },
 };
-
 const PAGE = 30;
-function shortUrl(u: string) {
-  try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; } catch { return { host: "", path: u }; }
-}
-function makeDays(): string[] {
-  const out: string[] = []; const d = new Date(); d.setUTCHours(0, 0, 0, 0);
-  for (let i = 59; i >= 0; i--) { const x = new Date(d); x.setUTCDate(x.getUTCDate() - i); out.push(x.toISOString().slice(0, 10)); }
-  return out;
-}
+const shortUrl = (u: string) => { try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; } catch { return { host: "", path: u }; } };
 
 export default function ArticleDashboard() {
-  const params = useSearchParams();
-  const [summary, setSummary] = useState<Summary[]>([]);
-  const [sources, setSources] = useState<Src[]>([]);
-  const [active, setActive] = useState<Set<number>>(new Set());
+  const f = useFilters();
   const [rows, setRows] = useState<Row[]>([]);
   const [rowKw, setRowKw] = useState<Record<number, string[]>>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [sortCol, setSortCol] = useState<"src" | "type" | "topic" | "author" | "status">("status");
-
-  // Filter
-  const [open, setOpen] = useState(true);
-  const [status, setStatus] = useState("all");
-  const [paywall, setPaywall] = useState("all");
-  const [atype, setAtype] = useState("all");
-  const [author, setAuthor] = useState("all");
-  const [topic, setTopic] = useState("all");
-  const [keyword, setKeyword] = useState("all");
-  const [lang, setLang] = useState("all");
-  const [topicOpts, setTopicOpts] = useState<{ key: string; label: string; n: number }[]>([]);
-  const [keywordOpts, setKeywordOpts] = useState<{ key: string; label: string; n: number }[]>([]);
   const [kwIds, setKwIds] = useState<number[] | null>(null);
+  const [sortCol, setSortCol] = useState<"src" | "type" | "topic" | "author" | "status">("status");
+  const [agg, setAgg] = useState({ articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 });
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  useEffect(() => { setUpdatedAt(new Date()); }, [f.ready]);
 
-  // Zeit-Range (Brush)
-  const days = useMemo(makeDays, []);
-  const [trfOpen, setTrfOpen] = useState(true);
-  const [rangeIdx, setRangeIdx] = useState<{ from: number; to: number }>({ from: 0, to: 59 });
-  const full = rangeIdx.from === 0 && rangeIdx.to === days.length - 1;
-  const rangeFrom = full ? null : days[rangeIdx.from] + "T00:00:00Z";
-  const rangeTo = full ? null : days[rangeIdx.to] + "T23:59:59Z";
+  const fpct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
-  const savedActiveRef = useRef<number[] | null>(null);
-  const savedPageRef = useRef<number>(0);
-  const skipReset = useRef(false);
-
-  // URL-Query-Params auslesen (z.B. ?source_id=5 von Silent Edits)
+  // Aggregat-Facts
   useEffect(() => {
-    const sourceId = params.get("source_id");
-    const keyword_ = params.get("keyword");
-    const topic_ = params.get("topic");
-    if (sourceId) {
-      const id = parseInt(sourceId, 10);
-      if (!isNaN(id)) setActive((prev) => new Set([...prev, id]));
-    }
-    if (keyword_) setKeyword(keyword_);
-    if (topic_) setTopic(topic_);
-  }, [params]);
+    if (!f.active.size) return;
+    supabase.rpc("publisher_stats_f", { p_sources: f.activeArr, p_topic: f.topic === "all" ? null : f.topic, p_from: f.rangeFrom, p_to: f.rangeTo })
+      .then(({ data }) => {
+        const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
+        for (const r of (data ?? []) as any[]) { a.articles += r.articles; a.paywalled += r.paywalled; a.named += r.au_named; a.au += r.au_named + r.au_anon + r.au_none; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d; }
+        setAgg(a);
+      });
+  }, [f.activeArr.join(","), f.topic, f.rangeFrom, f.rangeTo]);
 
+  // Keyword → Artikel-IDs
   useEffect(() => {
-    try {
-      const f = JSON.parse(localStorage.getItem("margn-filters") || "{}");
-      if (f.status) setStatus(f.status);
-      if (f.paywall) setPaywall(f.paywall);
-      if (f.atype) setAtype(f.atype);
-      if (f.author) setAuthor(f.author);
-      if (f.topic) setTopic(f.topic);
-      if (f.keyword) setKeyword(f.keyword);
-      if (f.lang) setLang(f.lang);
-      if (typeof f.open === "boolean") setOpen(f.open);
-      if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
-      if (f.rangeIdx && typeof f.rangeIdx.from === "number") setRangeIdx(f.rangeIdx);
-      if (typeof f.page === "number") savedPageRef.current = f.page;
-      if (Array.isArray(f.activeIds)) savedActiveRef.current = f.activeIds;
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      const [{ data: srcs }, { data: sum }] = await Promise.all([
-        supabase.from("sources").select("id,name,base_url,country").eq("active", true),
-        supabase.from("article_status_summary").select("*"),
-      ]);
-      const s = (srcs as Src[]) ?? [];
-      const ids = s.map((x) => x.id);
-      const saved = savedActiveRef.current;
-      skipReset.current = true;
-      setSources(s);
-      setActive(new Set(saved && saved.length ? saved.filter((id) => ids.includes(id)) : ids));
-      setPage(savedPageRef.current);
-      setSummary((sum as Summary[]) ?? []);
-      setUpdatedAt(new Date());
-      setTimeout(() => { skipReset.current = false; }, 0);
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!sources.length) return;
-    try {
-      localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topic, keyword, lang, open, trfOpen, rangeIdx, page,
-      }));
-    } catch {}
-  }, [active, status, paywall, atype, author, topic, keyword, lang, open, trfOpen, rangeIdx, page, sources.length]);
-
-  // Keyword → Artikel-IDs für Tabellenfilter
-  useEffect(() => {
-    if (keyword === "all") { setKwIds(null); return; }
-    supabase.from("article_keywords").select("article_id, keywords!inner(term)").eq("keywords.term", keyword)
+    if (f.keyword === "all") { setKwIds(null); return; }
+    supabase.from("article_keywords").select("article_id, keywords!inner(term)").eq("keywords.term", f.keyword)
       .then(({ data }) => setKwIds((data ?? []).map((r: any) => r.article_id)));
-  }, [keyword]);
-
-  // Dynamische Topic-Optionen (abhängig von Zeitraum + Quellen + Sprache)
-  useEffect(() => {
-    if (!active.size) { setTopicOpts([]); return; }
-    supabase.rpc("topic_opts_f", {
-      p_sources: [...active], p_lang: lang === "all" ? null : lang,
-      p_from: rangeFrom, p_to: rangeTo,
-    }).then(({ data }) => {
-      setTopicOpts((data ?? []).filter((r: any) => r.topic !== "sonstiges").map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n })));
-    });
-  }, [active, lang, rangeFrom, rangeTo]);
-
-  // Dynamische Keyword-Optionen (abhängig von Zeitraum + Quellen + Thema + Sprache)
-  useEffect(() => {
-    if (!active.size) { setKeywordOpts([]); return; }
-    supabase.rpc("keyword_opts_f", {
-      p_sources: [...active], p_topic: topic === "all" ? null : topic,
-      p_lang: lang === "all" ? null : lang,
-      p_from: rangeFrom, p_to: rangeTo,
-    }).then(({ data }) => {
-      setKeywordOpts((data ?? []).map((r: any) => ({ key: r.term, label: r.term, n: r.n })));
-    });
-  }, [active, topic, lang, rangeFrom, rangeTo]);
+  }, [f.keyword]);
 
   const loadRows = useCallback(async () => {
-    if (!active.size) { setRows([]); setTotal(0); return; }
-    if (keyword !== "all" && kwIds === null) return; // warte auf IDs
-    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status", { count: "exact" })
-      .in("source_id", [...active]);
-    if (status === "analyzed") q = q.eq("analyzed", true);
-    else if (status === "backlog") q = q.eq("analyzed", false);
-    if (paywall === "yes") q = q.eq("paywalled", true);
-    else if (paywall === "no") q = q.eq("paywalled", false);
-    if (atype !== "all") q = q.eq("ptype", atype);
-    if (author !== "all") q = q.eq("author_status", author);
-    if (topic !== "all") q = q.eq("topic", topic);
-    if (lang !== "all") q = q.eq("language", lang);
-    if (rangeFrom) q = q.gte("published_at", rangeFrom);
-    if (rangeTo) q = q.lte("published_at", rangeTo);
+    if (!f.active.size) { setRows([]); setTotal(0); return; }
+    if (f.keyword !== "all" && kwIds === null) return;
+    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status", { count: "exact" }).in("source_id", f.activeArr);
+    if (f.status === "analyzed") q = q.eq("analyzed", true); else if (f.status === "backlog") q = q.eq("analyzed", false);
+    if (f.paywall === "yes") q = q.eq("paywalled", true); else if (f.paywall === "no") q = q.eq("paywalled", false);
+    if (f.atype !== "all") q = q.eq("ptype", f.atype);
+    if (f.author !== "all") q = q.eq("author_status", f.author);
+    if (f.topic !== "all") q = q.eq("topic", f.topic);
+    if (f.lang !== "all") q = q.eq("language", f.lang);
+    if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
+    if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
     if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
     const col = sortCol === "src" ? "outlet" : sortCol === "type" ? "ptype" : sortCol === "topic" ? "topic" : sortCol === "author" ? "author_status" : "analyzed";
     const { data, count } = await q.order(col, { ascending: sortCol === "status" }).range(page * PAGE, page * PAGE + PAGE - 1);
-    setRows((data as Row[]) ?? []);
-    setTotal(count ?? 0);
-  }, [active, status, paywall, atype, author, topic, lang, rangeFrom, rangeTo, kwIds, keyword, page, sortCol]);
+    setRows((data as Row[]) ?? []); setTotal(count ?? 0);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.lang, f.rangeFrom, f.rangeTo, kwIds, f.keyword, page, sortCol]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { if (skipReset.current) return; setPage(0); }, [active, status, paywall, atype, author, topic, keyword, lang, rangeFrom, rangeTo]);
+  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.keyword, f.lang, f.rangeFrom, f.rangeTo]);
 
-  // Keywords der sichtbaren Zeilen nachladen
   useEffect(() => {
     const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];
     if (!ids.length) { setRowKw({}); return; }
@@ -198,31 +89,8 @@ export default function ArticleDashboard() {
     });
   }, [rows]);
 
-  const toggle = (id: number) => setActive((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
-
-  const visSummary = useMemo(() => summary.filter((s) => active.has(s.source_id)), [summary, active]);
-  const totals = useMemo(() => visSummary.reduce((a, s) => ({ d: a.d + s.discovered, an: a.an + s.analyzed, b: a.b + s.backlog }), { d: 0, an: 0, b: 0 }), [visSummary]);
-  const pct = totals.d ? Math.round((totals.an / totals.d) * 100) : 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
-
-  // Aggregat-Facts (reagieren auf Quellen+Thema+Zeitraum) für die KPI-Karten
-  const [agg, setAgg] = useState({ articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 });
-  useEffect(() => {
-    if (!active.size) return;
-    supabase.rpc("publisher_stats_f", { p_sources: [...active], p_topic: topic === "all" ? null : topic, p_from: rangeFrom, p_to: rangeTo })
-      .then(({ data }) => {
-        const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
-        for (const r of (data ?? []) as any[]) {
-          a.articles += r.articles; a.paywalled += r.paywalled; a.named += r.au_named;
-          a.au += r.au_named + r.au_anon + r.au_none; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d;
-        }
-        setAgg(a);
-      });
-  }, [active, topic, rangeFrom, rangeTo]);
-  const fpct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
-  const activeArr = useMemo(() => [...active], [active]);
-  const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${topic !== "all" ? ` · ${topicLabel(topic)}` : ""}${keyword !== "all" ? ` · #${keyword}` : ""}`;
+  const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${f.topic !== "all" ? ` · ${topicLabel(f.topic)}` : ""}${f.keyword !== "all" ? ` · #${f.keyword}` : ""}`;
 
   return (
     <>
@@ -231,109 +99,88 @@ export default function ArticleDashboard() {
         <span className="live"><span className="live-dot" /> Live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</span>
       </div>
 
-      <FilterPills sources={sources} activeSources={activeArr}
-        status={status} setStatus={setStatus} paywall={paywall} setPaywall={setPaywall}
-        atype={atype} setAtype={setAtype} author={author} setAuthor={setAuthor}
-        topic={topic} setTopic={setTopic} keyword={keyword} setKeyword={setKeyword}
-        lang={lang} setLang={setLang} toggleSource={toggle}
-      />
+      <FilterPills />
 
-      <div className="with-rail">
-        <div className="page">
-          <div className="kpi-strip">
-            <div className="stat-tile"><div className="l"><FileText /> Artikel</div><div className="n tnum">{agg.articles.toLocaleString("de-DE")}</div><div className="sub">{agg.new7d.toLocaleString("de-DE")} neu (7 Tage)</div></div>
-            <div className="stat-tile"><div className="l">🔒 Paywall-Anteil</div><div className="n tnum" style={{ color: fpct(agg.paywalled, agg.articles) > 40 ? "var(--red)" : "inherit" }}>{fpct(agg.paywalled, agg.articles)}%</div><div className="sub">{agg.paywalled.toLocaleString("de-DE")} hinter Schranke</div></div>
-            <div className="stat-tile"><div className="l">✍️ Namentliche Autoren</div><div className="n tnum" style={{ color: "var(--green)" }}>{fpct(agg.named, agg.au)}%</div><div className="sub">statt Redaktion/Agentur</div></div>
-            <div className="stat-tile accent"><div className="l">🎬 Video & Werbung</div><div className="n tnum">{(agg.video + agg.werbung).toLocaleString("de-DE")}</div><div className="bar"><i style={{ width: `${fpct(agg.video + agg.werbung, agg.articles + agg.video + agg.werbung)}%` }} /></div></div>
-          </div>
-
-          {/* Eyecatcher: Verteilungs-Donuts */}
-          <h2 className="section-h">Auf einen Blick <span className="count">{topic !== "all" ? topicLabel(topic) : "Gesamtverteilung"}</span></h2>
-          <div className="donut-grid">
-            <Donut title="Themen-Mix" centerLabel={topicOpts.reduce((s, t) => s + t.n, 0).toLocaleString("de-DE")} centerSub="Artikel"
-              segments={topicOpts.slice(0, 6).map((t, i) => ({ label: t.label, value: t.n, color: PUB_COLORS[i % PUB_COLORS.length] }))} />
-            <Donut title="Bezahlschranke" centerLabel={`${fpct(agg.paywalled, agg.articles)}%`} centerSub="Paywall"
-              segments={[{ label: "Frei zugänglich", value: agg.articles - agg.paywalled, color: "var(--green)" }, { label: "Hinter Paywall", value: agg.paywalled, color: "var(--red)" }]} />
-            <Donut title="Autoren-Transparenz" centerLabel={`${fpct(agg.named, agg.au)}%`} centerSub="namentlich"
-              segments={[{ label: "Namentlich", value: agg.named, color: "var(--green)" }, { label: "Redaktion/Agentur · ohne", value: agg.au - agg.named, color: "var(--line-2)" }]} />
-          </div>
-
-          <RateStats sources={sources} activeSources={activeArr} />
-          <PublisherCompare sources={sources} activeSources={activeArr} topic={topic} from={rangeFrom} to={rangeTo} />
-          <TopicChart activeSources={activeArr} current={topic} onPick={setTopic} />
-
-          {keywordOpts.length > 0 && (
-            <>
-              <h2 className="section-h">Schlagwörter im Filter <span className="count">{topic !== "all" ? topicLabel(topic) : "alle Themen"} · klick zum Filtern</span></h2>
-              <div className="kw-cloud">
-                {keywordOpts.slice(0, 60).map((k) => (
-                  <button key={k.key} className={`kw-pill ${keyword === k.key ? "on" : ""}`} onClick={() => setKeyword(keyword === k.key ? "all" : k.key)}>
-                    {k.label} <span className="kw-n">{k.n}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
-          <div className="panel">
-            <table className="arttable">
-              <thead><tr>
-                <th className="c-src" style={{ cursor: "pointer" }} onClick={() => setSortCol("src")}>Quelle {sortCol === "src" && "↓"}</th>
-                <th className="c-art">Seite</th>
-                <th className="c-typ" style={{ cursor: "pointer" }} onClick={() => setSortCol("type")}>Typ {sortCol === "type" && "↓"}</th>
-                <th className="c-topic" style={{ cursor: "pointer" }} onClick={() => setSortCol("topic")}>Thema {sortCol === "topic" && "↓"}</th>
-                <th className="c-author" style={{ cursor: "pointer" }} onClick={() => setSortCol("author")}>Autor {sortCol === "author" && "↓"}</th>
-                <th className="c-stat" style={{ cursor: "pointer" }} onClick={() => setSortCol("status")}>Status {sortCol === "status" && "↓"}</th>
-              </tr></thead>
-              <tbody>
-                {rows.map((r) => {
-                  const { host, path } = shortUrl(r.url);
-                  const kws = r.article_id ? rowKw[r.article_id] : undefined;
-                  return (
-                    <tr key={r.id}>
-                      <td className="cell-nowrap c-src">{r.outlet} <span className="cc">{r.country}</span></td>
-                      <td>
-                        <div className="art-row">
-                          {r.article_id
-                            ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={`Details: ${r.url}`}><span className="path">{host}</span>{path}</Link>
-                            : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
-                          <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen" aria-label="Original öffnen"><External size={14} /></a>
-                        </div>
-                        {kws && kws.length > 0 && <div className="kw-row">{kws.slice(0, 5).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div>}
-                      </td>
-                      <td className="c-typ cell-nowrap"><span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span></td>
-                      <td className="c-topic cell-nowrap faint">{r.topic ? topicLabel(r.topic) : "—"}</td>
-                      <td className="c-author cell-nowrap">{r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>}</td>
-                      <td className="cell-nowrap">{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
-                    </tr>
-                  );
-                })}
-                {!rows.length && <tr><td colSpan={6} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="pager">
-            <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>← Zurück</button>
-            <span>Seite {page + 1} / {pages}</span>
-            <button disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Weiter →</button>
-          </div>
-
-          <TimeRangeFilter sources={sources} activeSources={activeArr} fromIdx={rangeIdx.from} toIdx={rangeIdx.to}
-            onChange={(f, t) => setRangeIdx({ from: f, to: t })} open={trfOpen} setOpen={setTrfOpen} />
+      <div className="page wide">
+        <div className="kpi-strip">
+          <div className="stat-tile"><div className="l"><FileText /> Artikel</div><div className="n tnum">{agg.articles.toLocaleString("de-DE")}</div><div className="sub">{agg.new7d.toLocaleString("de-DE")} neu (7 Tage)</div></div>
+          <div className="stat-tile"><div className="l">🔒 Paywall-Anteil</div><div className="n tnum" style={{ color: fpct(agg.paywalled, agg.articles) > 40 ? "var(--red)" : "inherit" }}>{fpct(agg.paywalled, agg.articles)}%</div><div className="sub">{agg.paywalled.toLocaleString("de-DE")} hinter Schranke</div></div>
+          <div className="stat-tile"><div className="l">✍️ Namentliche Autoren</div><div className="n tnum" style={{ color: "var(--green)" }}>{fpct(agg.named, agg.au)}%</div><div className="sub">statt Redaktion/Agentur</div></div>
+          <div className="stat-tile accent"><div className="l">🎬 Video & Werbung</div><div className="n tnum">{(agg.video + agg.werbung).toLocaleString("de-DE")}</div><div className="bar"><i style={{ width: `${fpct(agg.video + agg.werbung, agg.articles + agg.video + agg.werbung)}%` }} /></div></div>
         </div>
 
-        <FilterPanel
-          open={open} setOpen={setOpen} sources={sources}
-          active={active} toggle={toggle} setAll={setAll}
-          status={status} setStatus={setStatus} paywall={paywall} setPaywall={setPaywall}
-          atype={atype} setAtype={setAtype} author={author} setAuthor={setAuthor}
-          topic={topic} setTopic={setTopic} topics={topicOpts}
-          keyword={keyword} setKeyword={setKeyword} keywords={keywordOpts}
-          lang={lang} setLang={setLang}
-        />
+        <h2 className="section-h">Auf einen Blick <span className="count">{f.topic !== "all" ? topicLabel(f.topic) : "Gesamtverteilung"}</span></h2>
+        <div className="donut-grid">
+          <Donut title="Themen-Mix" centerLabel={f.topicOpts.reduce((s, t) => s + t.n, 0).toLocaleString("de-DE")} centerSub="Artikel"
+            segments={f.topicOpts.slice(0, 6).map((t, i) => ({ label: t.label, value: t.n, color: PUB_COLORS[i % PUB_COLORS.length] }))} />
+          <Donut title="Bezahlschranke" centerLabel={`${fpct(agg.paywalled, agg.articles)}%`} centerSub="Paywall"
+            segments={[{ label: "Frei zugänglich", value: agg.articles - agg.paywalled, color: "var(--green)" }, { label: "Hinter Paywall", value: agg.paywalled, color: "var(--red)" }]} />
+          <Donut title="Autoren-Transparenz" centerLabel={`${fpct(agg.named, agg.au)}%`} centerSub="namentlich"
+            segments={[{ label: "Namentlich", value: agg.named, color: "var(--green)" }, { label: "Redaktion/Agentur · ohne", value: agg.au - agg.named, color: "var(--line-2)" }]} />
+        </div>
+
+        <RateStats />
+        <PublisherCompare sources={f.sources} activeSources={f.activeArr} topic={f.topic} from={f.rangeFrom} to={f.rangeTo} />
+        <TopicChart activeSources={f.activeArr} current={f.topic} onPick={f.setTopic} />
+
+        {f.keywordOpts.length > 0 && (
+          <>
+            <h2 className="section-h">Schlagwörter im Filter <span className="count">{f.topic !== "all" ? topicLabel(f.topic) : "alle Themen"} · klick zum Filtern</span></h2>
+            <div className="kw-cloud">
+              {f.keywordOpts.slice(0, 60).map((k) => (
+                <button key={k.key} className={`kw-pill ${f.keyword === k.key ? "on" : ""}`} onClick={() => f.setKeyword(f.keyword === k.key ? "all" : k.key)}>{k.label} <span className="kw-n">{k.n}</span></button>
+              ))}
+            </div>
+          </>
+        )}
+
+        <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
+        <div className="panel">
+          <table className="arttable">
+            <thead><tr>
+              <th className="c-src" style={{ cursor: "pointer" }} onClick={() => setSortCol("src")}>Quelle {sortCol === "src" && "↓"}</th>
+              <th className="c-art">Seite</th>
+              <th className="c-typ" style={{ cursor: "pointer" }} onClick={() => setSortCol("type")}>Typ {sortCol === "type" && "↓"}</th>
+              <th className="c-topic" style={{ cursor: "pointer" }} onClick={() => setSortCol("topic")}>Thema {sortCol === "topic" && "↓"}</th>
+              <th className="c-author" style={{ cursor: "pointer" }} onClick={() => setSortCol("author")}>Autor {sortCol === "author" && "↓"}</th>
+              <th className="c-stat" style={{ cursor: "pointer" }} onClick={() => setSortCol("status")}>Status {sortCol === "status" && "↓"}</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => {
+                const { host, path } = shortUrl(r.url);
+                const kws = r.article_id ? rowKw[r.article_id] : undefined;
+                return (
+                  <tr key={r.id}>
+                    <td className="cell-nowrap c-src">{r.outlet} <span className="cc">{r.country}</span></td>
+                    <td>
+                      <div className="art-row">
+                        {r.article_id
+                          ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={`Details: ${r.url}`}><span className="path">{host}</span>{path}</Link>
+                          : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
+                        <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen" aria-label="Original öffnen"><External size={14} /></a>
+                      </div>
+                      {kws && kws.length > 0 && <div className="kw-row">{kws.slice(0, 5).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div>}
+                    </td>
+                    <td className="c-typ cell-nowrap"><span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span></td>
+                    <td className="c-topic cell-nowrap faint">{r.topic ? topicLabel(r.topic) : "—"}</td>
+                    <td className="c-author cell-nowrap">{r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>}</td>
+                    <td className="cell-nowrap">{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
+                  </tr>
+                );
+              })}
+              {!rows.length && <tr><td colSpan={6} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="pager">
+          <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>← Zurück</button>
+          <span>Seite {page + 1} / {pages}</span>
+          <button disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Weiter →</button>
+        </div>
       </div>
+
+      <TimeRangeFilter />
     </>
   );
 }

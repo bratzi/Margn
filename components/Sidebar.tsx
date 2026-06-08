@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ThemeToggle from "@/components/ThemeToggle";
 import NextRun from "@/components/NextRun";
+import FilterControls from "@/components/FilterControls";
 import { FileText, Clock } from "@/components/icons";
 
 const NAV = [
@@ -13,6 +14,7 @@ const NAV = [
 
 export default function Sidebar() {
   const path = usePathname();
+  const showFilters = path === "/articles";
   return (
     <aside className="sidebar">
       <Link href="/articles" className="brand" aria-label="margn">
@@ -21,14 +23,12 @@ export default function Sidebar() {
 
       <div className="nav-label">Observatorium</div>
       {NAV.map((n) => {
-        const on = path === n.href || path.startsWith("/articles");
+        const on = n.href === "/articles" ? path === "/articles" : path.startsWith(n.href);
         const Icon = n.icon;
-        return (
-          <Link key={n.href} href={n.href} className={`nav-item ${on ? "on" : ""}`}>
-            <Icon /> {n.label}
-          </Link>
-        );
+        return <Link key={n.href} href={n.href} className={`nav-item ${on ? "on" : ""}`}><Icon /> {n.label}</Link>;
       })}
+
+      {showFilters && <><div className="nav-label" style={{ marginTop: 18 }}>Filter</div><FilterControls /></>}
 
       <div className="spacer" />
       <NextRun />
