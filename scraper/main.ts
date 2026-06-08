@@ -351,12 +351,25 @@ function looksLikeArticle(url: string): boolean {
   return /\d{5,}/.test(u) || /\/\d{4}\/\d{2}\/\d{2}\//.test(u) || /-\d+\.html?$/.test(u);
 }
 
-// Gerenderte Seite als Artikel lesen (sichtbarer Text). null = eher Übersichtsseite.
+// Positives Artikel-Signal: JSON-LD trägt einen Artikel-Typ ODER og:type=article.
+// Hub-/Landingpages tragen WebPage/CollectionPage/NewsMediaOrganization → kein Signal.
+function hasArticleSignal(html: string): boolean {
+  const types = parseJsonLd(html).flatMap((d) => (Array.isArray(d["@type"]) ? d["@type"] : [d["@type"]])).filter(Boolean) as string[];
+  if (types.some((t) => /(News)?Article|LiveBlogPosting|ReportageNewsArticle|OpinionNewsArticle|ReviewNewsArticle|AnalysisNewsArticle|BlogPosting|Report\b/i.test(t))) return true;
+  if (/property=["']og:type["'][^>]+content=["']article["']/i.test(html) || /content=["']article["'][^>]+property=["']og:type["']/i.test(html)) return true;
+  return false;
+}
+
+// Gerenderte Seite als Artikel lesen (sichtbarer Text). null = eher Übersichtsseite/Hub.
 function asArticle(html: string, url: string): { title: string; teaser: string; body: string } | null {
   try {
     const dom = makeDom(html, url);
     const a = new Readability(dom.window.document).parse();
     if (!a || !a.title?.trim() || (a.textContent?.length ?? 0) < MIN_BODY) return null;
+    // Link-Dichte des EXTRAHIERTEN Inhalts: Hubs liefern Teaser-Linklisten statt Fließtext.
+    const linkCount = (a.content?.match(/<a\b/gi) ?? []).length;
+    const dens = linkCount / Math.max(1, (a.textContent?.length ?? 1) / 100);
+    if (dens > 2.5) return null; // viele Links, wenig Text → Linkliste/Hub, kein Artikel
     return { title: a.title.trim(), teaser: (a.excerpt ?? "").trim(), body: a.textContent ?? "" };
   } catch {
     return null;
@@ -421,13 +434,26 @@ function isVideoPage(html: string): boolean {
 }
 
 // Sichere Klassifikation nach dem Rendern (zieht den Inhalt hinzu).
+// ROBUST gegen Bot-/Consent-Blockseiten (winzig) und Paywall-Teaser (Artikel mit wenig Text):
+//  - Hub nur, wenn SUBSTANZIELLE Seite gerendert wurde UND kein Artikel-Signal UND keine Datums-Artikel-URL.
+//  - Artikel auch bei Paywall-Teaser, sofern JSON-LD Article-Signal ODER klare Datums-Artikel-URL vorliegt.
+const datedArticleUrl = (url: string) => /\/article\/\d{4}\/\d{2}\/\d{2}\//.test(url) || /\/\d{4}\/\d{2}\/\d{2}\//.test(url);
 function classifyRendered(url: string, html: string): { kind: Kind; article: { title: string; teaser: string; body: string } | null } {
   const byUrl = classifyUrl(url);
   if (byUrl !== "article" && byUrl !== "unknown") return { kind: byUrl, article: null };
-  // Inhaltbasierte Checks (überschreiben URL-Schätzung)
   if (isVideoPage(html)) return { kind: "media", article: null };
+
+  const signal = hasArticleSignal(html);
+  const strongUrl = datedArticleUrl(url);
+  const substantial = html.length > 25000; // Block-/Consent-Seiten sind winzig → nicht als Hub verurteilen
+
+  // Eindeutiger Hub: voll geladene Seite, aber kein Artikel-Signal und keine Datums-Artikel-URL.
+  if (substantial && !signal && !strongUrl) return { kind: "section", article: null };
+
   const art = looksLikeArticle(url) ? asArticle(html, url) : null;
   if (art) return { kind: "article", article: art };
+  // Paywall-Teaser/Block: trotzdem Artikel, wenn JSON-LD oder Datums-URL es ausweist (Metadaten via extractMeta).
+  if (signal || strongUrl) return { kind: "article", article: null };
   return { kind: "section", article: null };
 }
 
@@ -614,6 +640,13 @@ async function enrichArticles(sources: Source[]) {
         if (!item) break;
         const { html } = await renderPage(ctx, item.url);
         if (!html) continue;
+        // Selbst-Korrektur: Hub/Übersicht (robust erkannt) → demoten, nicht als Artikel führen.
+        const cls = classifyRendered(item.url, html);
+        if (cls.kind !== "article") {
+          await sb.from("pages").update({ kind: cls.kind }).eq("url", item.url);
+          await sb.from("articles").delete().eq("id", item.id);
+          continue;
+        }
         const meta = extractMeta(html, item.url);
         const art = asArticle(html, item.url);
         try {
