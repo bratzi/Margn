@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { FileText, Folder, Clock, External } from "@/components/icons";
 import PublisherCompare from "@/components/PublisherCompare";
@@ -35,6 +36,7 @@ function makeDays(): string[] {
 }
 
 export default function ArticleDashboard() {
+  const params = useSearchParams();
   const [summary, setSummary] = useState<Summary[]>([]);
   const [sources, setSources] = useState<Src[]>([]);
   const [active, setActive] = useState<Set<number>>(new Set());
@@ -69,6 +71,19 @@ export default function ArticleDashboard() {
   const savedActiveRef = useRef<number[] | null>(null);
   const savedPageRef = useRef<number>(0);
   const skipReset = useRef(false);
+
+  // URL-Query-Params auslesen (z.B. ?source_id=5 von Silent Edits)
+  useEffect(() => {
+    const sourceId = params.get("source_id");
+    const keyword_ = params.get("keyword");
+    const topic_ = params.get("topic");
+    if (sourceId) {
+      const id = parseInt(sourceId, 10);
+      if (!isNaN(id)) setActive((prev) => new Set([...prev, id]));
+    }
+    if (keyword_) setKeyword(keyword_);
+    if (topic_) setTopic(topic_);
+  }, [params]);
 
   useEffect(() => {
     try {

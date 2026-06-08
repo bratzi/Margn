@@ -78,8 +78,8 @@ export default function EditsDashboard() {
             <thead><tr><th>Verlag</th><th>Änderungen</th><th>Edits</th><th>Erweiterungen</th><th>Ø/Artikel</th></tr></thead>
             <tbody>
               {byPublisher.map((p) => (
-                <tr key={p.id}>
-                  <td className="pub">{p.outlet}</td>
+                <tr key={p.id} style={{ cursor: "pointer" }}>
+                  <td className="pub"><Link href={`/articles?source_id=${p.id}`} style={{ color: "var(--accent)" }}>{p.outlet}</Link></td>
                   <td className="tnum">{p.count.toLocaleString("de-DE")}</td>
                   <td className="tnum"><span style={{ color: "var(--red)" }}>{p.edits}</span></td>
                   <td className="tnum"><span style={{ color: "var(--green)" }}>{p.extensions}</span></td>
