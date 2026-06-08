@@ -47,6 +47,17 @@ async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<ty
 // --- Metadaten-Extraktion aus gerendertem HTML ---
 
 const PAYWALL_CSS = /paywall|premium-overlay|piano-|plus-artikel|abo-schranke|metered-wall|subscriber-only|locked-content/i;
+
+// EINDEUTIGE Liveblog-Erkennung aus URL/Titel (präzise, wenig Falschtreffer).
+// Bewusst NICHT erkannt: Rubriken/Tagesformate (n-tv "der_tag", "Transfer-Ticker" = Einzelmeldungen,
+// Spiegel "News des Tages"). Echte, über Zeit wachsende Artikel werden empirisch über
+// extension_count>=2 → 'timeline' erkannt (siehe trackChanges), unabhängig vom URL-Muster.
+function isLiveContent(url: string, title: string | null): boolean {
+  const hay = (url + " " + (title ?? "")).toLowerCase();
+  if (/news?ticker\/.*alle-[a-z-]+-news/.test(hay)) return false; // Bild News-Hubs
+  return /liveblog|live-blog|live-ticker|liveticker|newsblog|en-direct|im[- ]minutentakt/.test(hay)
+    || /\/live\//.test(hay); // Le Monde: /…/live/…
+}
 const TYPE_MAP: Record<string, string> = {
   LiveBlogPosting: "liveblog", OpinionNewsArticle: "opinion", AnalysisNewsArticle: "analysis",
   ReviewNewsArticle: "review", ReportageNewsArticle: "reportage", InteractiveNewsArticle: "interactive",
@@ -110,8 +121,7 @@ function extractMeta(html: string, url: string) {
   // Artikeltyp aus @type … ergänzt um URL/Titel-Erkennung für Liveblogs
   // (FAZ/Spiegel u.a. liefern KEIN LiveBlogPosting-@type, tragen es aber im Pfad/Titel).
   const rawType = typeof article["@type"] === "string" ? article["@type"] : "NewsArticle";
-  const isLiveByText = /liveblog|live-blog|liveticker|live-ticker|newsblog|en-direct/i.test(url + " " + (title ?? ""));
-  const article_type = isLiveByText ? "liveblog" : (TYPE_MAP[rawType] ?? "news");
+  const article_type = isLiveContent(url, title) ? "liveblog" : (TYPE_MAP[rawType] ?? "news");
 
   // Wörter + Lesezeit (sichtbarer Text)
   const visibleText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
