@@ -172,12 +172,17 @@ function TimelineItem({ s }: { s: Snapshot }) {
       </div>
       {s.title_old && s.title_new && (
         <div className="tl-title-change">
-          <span className="old">{s.title_old}</span><br /><span className="new">{s.title_new}</span>
+          <span className="old">{s.title_old}</span>
+          <span className="arrow">↓ geändert zu</span>
+          <span className="new"><span className="hl">{s.title_new}</span></span>
         </div>
       )}
       {s.added && (
-        <div className="tl-passage add">
-          {s.change_kind === "edit" ? "Geänderte Passage: " : ""}{s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}
+        <div className={`tl-passage ${s.change_kind === "edit" ? "edit" : "add"}`}>
+          <span className="pk">{s.change_kind === "edit" ? "Geänderte Passage" : "Hinzugefügt"}</span>
+          {s.change_kind === "edit"
+            ? <span className="hl">{s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}</span>
+            : (s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added)}
         </div>
       )}
       {s.removed_count > 0 && !s.added && <p className="faint" style={{ fontSize: 12.5 }}>{s.removed_count} Passage(n) entfernt</p>}

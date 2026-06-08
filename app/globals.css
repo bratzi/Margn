@@ -19,6 +19,7 @@
 
   --green: #1A7F55; --green-sub: rgba(26,127,85,.10);
   --amber: #B0790C; --amber-sub: rgba(176,121,12,.10);
+  --marker: rgba(250,210,40,.55); --marker-sub: rgba(250,210,40,.12);
   --red:   #CF4035; --red-sub:   rgba(207,64,53,.10);
   --teal:  #0C8F86; --teal-sub:  rgba(12,143,134,.10);
   --info:  #3D63DD; --info-sub:  rgba(61,99,221,.10);
@@ -50,6 +51,7 @@
 
   --green: #34B27B; --green-sub: rgba(52,178,123,.13);
   --amber: #DBA53C; --amber-sub: rgba(219,165,60,.13);
+  --marker: rgba(234,179,8,.42); --marker-sub: rgba(234,179,8,.14);
   --red:   #E5675C; --red-sub:   rgba(229,103,92,.13);
   --teal:  #2BB3A8; --teal-sub:  rgba(43,179,168,.13);
   --info:  #6E8AFF; --info-sub:  rgba(110,138,255,.14);
@@ -402,9 +404,17 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .tl-dot.extension{background:var(--green);} .tl-dot.edit{background:var(--red);} .tl-dot.mixed{background:var(--amber);}
 .tl-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
 .tl-when { font-size:12px; color:var(--faint); font-variant-numeric:tabular-nums; }
-.tl-passage { font-size:13px; line-height:1.55; padding:9px 13px; border-radius:7px; margin-top:6px; background: var(--green-sub); border-left:3px solid var(--green); }
-.tl-title-change .old { color:var(--red); text-decoration:line-through; text-decoration-color: color-mix(in srgb, var(--red) 50%, transparent); }
-.tl-title-change .new { color:var(--ink); font-weight:600; }
+/* Gelber Textmarker-Effekt (Highlighter) für Änderungen */
+.hl { background-image: linear-gradient(180deg, transparent 0 56%, var(--marker) 56% 94%, transparent 94%); padding: 0 3px; border-radius: 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.tl-passage { font-size:13px; line-height:1.6; padding:10px 14px; border-radius:8px; margin-top:7px; }
+.tl-passage.add { background: var(--green-sub); border-left:3px solid var(--green); }
+.tl-passage.edit { background: var(--marker-sub); border-left:3px solid var(--amber); }
+.tl-passage .pk { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--amber); margin-right:6px; }
+.tl-passage.add .pk { color: var(--green); }
+.tl-title-change { padding:10px 14px; border-radius:8px; background: var(--marker-sub); border-left:3px solid var(--amber); }
+.tl-title-change .old { color:var(--muted); text-decoration:line-through; text-decoration-color: color-mix(in srgb, var(--red) 55%, transparent); font-size:13px; }
+.tl-title-change .arrow { color:var(--faint); font-size:11px; margin:2px 0; display:block; }
+.tl-title-change .new { color:var(--ink); font-weight:650; font-size:14px; }
 
 .empty { color: var(--faint); font-size: 13px; padding: 16px; background: var(--surface-2); border-radius: 7px; border-left: 3px solid var(--line-2); line-height: 1.6; }
 
