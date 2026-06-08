@@ -56,8 +56,8 @@ export default function ArticleDashboard() {
   const [topic, setTopic] = useState("all");
   const [keyword, setKeyword] = useState("all");
   const [lang, setLang] = useState("all");
-  const [topicStats, setTopicStats] = useState<{ topic: string; source_id: number; n: number }[]>([]);
-  const [kwStats, setKwStats] = useState<{ term: string; source_id: number; n: number }[]>([]);
+  const [topicOpts, setTopicOpts] = useState<{ key: string; label: string; n: number }[]>([]);
+  const [keywordOpts, setKeywordOpts] = useState<{ key: string; label: string; n: number }[]>([]);
   const [kwIds, setKwIds] = useState<number[] | null>(null);
 
   // Zeit-Range (Brush)
@@ -105,11 +105,9 @@ export default function ArticleDashboard() {
 
   useEffect(() => {
     (async () => {
-      const [{ data: srcs }, { data: sum }, { data: ts }, { data: ks }] = await Promise.all([
+      const [{ data: srcs }, { data: sum }] = await Promise.all([
         supabase.from("sources").select("id,name,base_url,country").eq("active", true),
         supabase.from("article_status_summary").select("*"),
-        supabase.from("topic_stats").select("*"),
-        supabase.from("keyword_stats").select("*"),
       ]);
       const s = (srcs as Src[]) ?? [];
       const ids = s.map((x) => x.id);
@@ -119,8 +117,6 @@ export default function ArticleDashboard() {
       setActive(new Set(saved && saved.length ? saved.filter((id) => ids.includes(id)) : ids));
       setPage(savedPageRef.current);
       setSummary((sum as Summary[]) ?? []);
-      setTopicStats((ts as any[]) ?? []);
-      setKwStats((ks as any[]) ?? []);
       setUpdatedAt(new Date());
       setTimeout(() => { skipReset.current = false; }, 0);
     })();
@@ -144,23 +140,24 @@ export default function ArticleDashboard() {
 
   // Dynamische Topic-Optionen (abhängig von Zeitraum + Quellen + Sprache)
   useEffect(() => {
+    if (!active.size) { setTopicOpts([]); return; }
     supabase.rpc("topic_opts_f", {
       p_sources: [...active], p_lang: lang === "all" ? null : lang,
       p_from: rangeFrom, p_to: rangeTo,
     }).then(({ data }) => {
-      const opts = data ? data.map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n })) : [];
-      setTopicStats(data ?? []);
+      setTopicOpts((data ?? []).filter((r: any) => r.topic !== "sonstiges").map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n })));
     });
   }, [active, lang, rangeFrom, rangeTo]);
 
   // Dynamische Keyword-Optionen (abhängig von Zeitraum + Quellen + Thema + Sprache)
   useEffect(() => {
+    if (!active.size) { setKeywordOpts([]); return; }
     supabase.rpc("keyword_opts_f", {
       p_sources: [...active], p_topic: topic === "all" ? null : topic,
       p_lang: lang === "all" ? null : lang,
       p_from: rangeFrom, p_to: rangeTo,
     }).then(({ data }) => {
-      setKwStats(data ?? []);
+      setKeywordOpts((data ?? []).map((r: any) => ({ key: r.term, label: r.term, n: r.n })));
     });
   }, [active, topic, lang, rangeFrom, rangeTo]);
 
@@ -202,18 +199,6 @@ export default function ArticleDashboard() {
 
   const toggle = (id: number) => setActive((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
-
-  const topicOpts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of topicStats) if (active.has(r.source_id)) m.set(r.topic, (m.get(r.topic) ?? 0) + r.n);
-    return [...m.entries()].filter(([t]) => t !== "sonstiges").sort((a, b) => b[1] - a[1]).map(([key, n]) => ({ key, label: topicLabel(key), n }));
-  }, [topicStats, active]);
-
-  const keywordOpts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of kwStats) if (active.has(r.source_id)) m.set(r.term, (m.get(r.term) ?? 0) + r.n);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 60).map(([key, n]) => ({ key, label: key, n }));
-  }, [kwStats, active]);
 
   const visSummary = useMemo(() => summary.filter((s) => active.has(s.source_id)), [summary, active]);
   const totals = useMemo(() => visSummary.reduce((a, s) => ({ d: a.d + s.discovered, an: a.an + s.analyzed, b: a.b + s.backlog }), { d: 0, an: 0, b: 0 }), [visSummary]);
