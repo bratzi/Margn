@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { FileText, Folder, Clock } from "@/components/icons";
+import { FileText, Folder, Clock, External } from "@/components/icons";
 import PublisherCompare from "@/components/PublisherCompare";
 import TopicChart from "@/components/TopicChart";
 import RateStats from "@/components/RateStats";
@@ -47,6 +47,30 @@ export default function ArticleDashboard() {
   const [period, setPeriod] = useState("all");
   const [topicStats, setTopicStats] = useState<{ topic: string; source_id: number; n: number }[]>([]);
 
+  // Persistenz-Refs
+  const savedActiveRef = useRef<number[] | null>(null);
+  const savedPageRef = useRef<number>(0);
+  const skipReset = useRef(false);
+
+  // Gespeicherte Filter laden (einmalig, vor den Quellen)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("margn-filters");
+      if (!raw) return;
+      const f = JSON.parse(raw);
+      if (f.status) setStatus(f.status);
+      if (f.paywall) setPaywall(f.paywall);
+      if (f.atype) setAtype(f.atype);
+      if (f.author) setAuthor(f.author);
+      if (f.topic) setTopic(f.topic);
+      if (f.lang) setLang(f.lang);
+      if (f.period) setPeriod(f.period);
+      if (typeof f.open === "boolean") setOpen(f.open);
+      if (typeof f.page === "number") savedPageRef.current = f.page;
+      if (Array.isArray(f.activeIds)) savedActiveRef.current = f.activeIds;
+    } catch {}
+  }, []);
+
   // Quellen + Summary laden
   useEffect(() => {
     (async () => {
@@ -56,13 +80,28 @@ export default function ArticleDashboard() {
         supabase.from("topic_stats").select("*"),
       ]);
       const s = (srcs as Src[]) ?? [];
+      const ids = s.map((x) => x.id);
+      const saved = savedActiveRef.current;
+      skipReset.current = true; // Hydration: kein Page-Reset
       setSources(s);
-      setActive(new Set(s.map((x) => x.id)));
+      setActive(new Set(saved && saved.length ? saved.filter((id) => ids.includes(id)) : ids));
+      setPage(savedPageRef.current);
       setSummary((sum as Summary[]) ?? []);
       setTopicStats((ts as any[]) ?? []);
       setUpdatedAt(new Date());
+      setTimeout(() => { skipReset.current = false; }, 0);
     })();
   }, []);
+
+  // Filter persistieren
+  useEffect(() => {
+    if (!sources.length) return;
+    try {
+      localStorage.setItem("margn-filters", JSON.stringify({
+        activeIds: [...active], status, paywall, atype, author, topic, lang, period, open, page,
+      }));
+    } catch {}
+  }, [active, status, paywall, atype, author, topic, lang, period, open, page, sources.length]);
 
   const loadRows = useCallback(async () => {
     if (!active.size) { setRows([]); setTotal(0); return; }
@@ -84,7 +123,7 @@ export default function ArticleDashboard() {
   }, [active, status, paywall, atype, author, topic, lang, period, page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [active, status, paywall, atype, author, topic, lang, period]);
+  useEffect(() => { if (skipReset.current) return; setPage(0); }, [active, status, paywall, atype, author, topic, lang, period]);
 
   const toggle = (id: number) => setActive((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
@@ -125,22 +164,25 @@ export default function ArticleDashboard() {
 
           <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer{topic !== "all" ? ` · ${topicLabel(topic)}` : ""}</span></h2>
           <div className="panel">
-            <table>
-              <thead><tr><th>Quelle</th><th>Artikel</th><th>Entdeckt</th><th>Status</th></tr></thead>
+            <table className="arttable">
+              <thead><tr><th className="c-src">Quelle</th><th className="c-art">Artikel</th><th className="c-seen">Entdeckt</th><th className="c-stat">Status</th></tr></thead>
               <tbody>
                 {rows.map((r) => {
                   const { host, path } = shortUrl(r.url);
                   return (
                     <tr key={r.id}>
-                      <td style={{ whiteSpace: "nowrap" }}>{r.outlet} <span className="cc">{r.country}</span></td>
+                      <td className="cell-nowrap">{r.outlet} <span className="cc">{r.country}</span></td>
                       <td>
-                        {r.article_id
-                          ? <Link href={`/articles/${r.article_id}`} className="url" title={r.url}><span className="mono"><span className="path">{host}</span>{path}</span></Link>
-                          : <a href={r.url} target="_blank" rel="noreferrer" className="url" title={r.url}><span className="mono"><span className="path">{host}</span>{path}</span></a>}
+                        <div className="art-row">
+                          {r.article_id
+                            ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={`Details: ${r.url}`}><span className="path">{host}</span>{path}</Link>
+                            : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
+                          <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original-Artikel öffnen" aria-label="Original öffnen"><External size={14} /></a>
+                        </div>
                       </td>
-                      <td className="mono faint" style={{ whiteSpace: "nowrap" }}>{fmt(r.discovered_at)}</td>
-                      <td>
-                        {r.paywalled ? <span className="badge lock">Paywall</span> : null}
+                      <td className="c-seen mono faint cell-nowrap">{fmt(r.discovered_at)}</td>
+                      <td className="cell-nowrap">
+                        {r.paywalled ? <span className="badge lock">Paywall</span> : null}{" "}
                         {r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}
                       </td>
                     </tr>
