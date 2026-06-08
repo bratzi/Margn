@@ -1,12 +1,12 @@
 name: scrape
 on:
   schedule:
-    - cron: "17 */6 * * *"  # alle 6 Stunden (Budget privates Repo: 2000 Min/Monat)
+    - cron: "0 */3 * * *"  # alle 3 Stunden – kleiner Cap + viel Parallelität = schnell & oft, im 2000-Min-Budget
   workflow_dispatch:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,6 +21,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          CRAWL_MAX_PAGES: "40"   # Seiten/Quelle (Budget privates Repo; re-scannt Front-Artikel für Edit-Erkennung)
+          CRAWL_MAX_PAGES: "25"     # kleiner Cap → schneller Lauf (~5 Min); re-scannt Front-Artikel oft (Edit-Erkennung)
           CRAWL_MAX_DEPTH: "2"
-          CRAWL_DELAY_MS: "300"
+          CRAWL_DELAY_MS: "120"
+          CRAWL_CONCURRENCY: "6"    # 6 parallele Tabs

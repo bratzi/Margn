@@ -1,7 +1,8 @@
 name: signals
+# DEAKTIVIERT (Altlast: Cluster/Edits-Signale auf Eis) – Budget sparen. Manuell auslösbar.
 on:
-  schedule:
-    - cron: "30 4 * * *"   # täglich 04:30 (Rendering ist teurer -> selten)
+  # schedule:
+  #   - cron: "30 4 * * *"
   workflow_dispatch:
 jobs:
   signals:
