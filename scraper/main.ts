@@ -75,10 +75,11 @@ function extractMeta(html: string, url: string) {
   const ld = parseJsonLd(html);
   const article = ld.find((d) => typeof d["@type"] === "string" && d["@type"].includes("Article")) ?? {};
 
-  const title =
+  const titleRaw =
     metaContent(html, "og:title", "twitter:title") ??
     article.headline ??
     html.match(/<title[^>]*>([^<]+)/i)?.[1]?.trim() ?? null;
+  const title = titleRaw ? decodeEntities(titleRaw) : null;
 
   const description =
     metaContent(html, "og:description", "description", "twitter:description") ??
@@ -184,9 +185,21 @@ async function upsertDimensions(articleId: number, authors: string[], keywords: 
 
 // --- Änderungs-Tracking (speicherschonend über Absatz-Fingerprints) ---
 
+// Paywall-/Login-/Cookie-/Navigations-Boilerplate, das je nach Render auf-/abtaucht und
+// sonst als falsche "Änderung" gezählt würde (v.a. Le-Monde-Overlay, Newsletter-CTAs).
+const BOILERPLATE = /cet article vous est offert|réservé aux abonnés|article réservé|pour lire (gratuitement|cet)|connectez-vous|inscrivez-vous|vous n.?êtes pas inscrit|déjà abonné|s.?abonner|abonnez-vous|se connecter|newsletter|cookies? (akzeptieren|zustimmen|verwalten)|alle akzeptieren|datenschutz|jetzt anmelden|mit bild plus|spiegel\+ lesen/i;
+
+// HTML-Entities (v.a. &nbsp;) dekodieren + Whitespace normalisieren – sonst zählt
+// "&nbsp;" vs. Leerzeichen als Titeländerung.
+function decodeEntities(s: string): string {
+  return s.replace(/&nbsp;|&#160;|&#xa0;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/\s+/g, " ").trim();
+}
+
 // Body in normalisierte Absätze (≥60 Zeichen, gegen UI-Rauschen) zerlegen.
 function normalizeParas(body: string): string[] {
-  return body.split(/\n+/).map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p.length >= 60);
+  return body.split(/\n+/).map((p) => decodeEntities(p))
+    .filter((p) => p.length >= 60 && !BOILERPLATE.test(p));
 }
 const fp = (s: string) => createHash("sha1").update(s.toLowerCase()).digest("hex").slice(0, 12);
 
@@ -210,7 +223,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     }).eq("id", articleId);
     return;
   }
-  const titleChanged = !!prev.title && !!newTitle && prev.title !== newTitle;
+  const titleChanged = !!prev.title && !!newTitle && decodeEntities(prev.title) !== decodeEntities(newTitle);
   if (prev.content_hash === contentHash && !titleChanged) return; // nichts geändert
 
   // Absatz-Diff
