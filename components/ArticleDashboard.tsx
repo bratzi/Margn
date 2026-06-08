@@ -10,6 +10,7 @@ import RateStats from "@/components/RateStats";
 import TimeRangeFilter from "@/components/TimeRangeFilter";
 import FilterPanel, { type Src } from "@/components/FilterPanel";
 import { topicLabel } from "@/lib/topics";
+import FilterPills from "@/components/FilterPills";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
 type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; analyzed: boolean; paywalled: boolean | null; ptype: string; topic: string | null; author_status: string | null };
@@ -42,6 +43,7 @@ export default function ArticleDashboard() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [sortCol, setSortCol] = useState<"src" | "type" | "topic" | "author" | "status">("status");
 
   // Filter
   const [open, setOpen] = useState(true);
@@ -141,10 +143,11 @@ export default function ArticleDashboard() {
     if (rangeFrom) q = q.gte("published_at", rangeFrom);
     if (rangeTo) q = q.lte("published_at", rangeTo);
     if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
-    const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
+    const col = sortCol === "src" ? "outlet" : sortCol === "type" ? "ptype" : sortCol === "topic" ? "topic" : sortCol === "author" ? "author_status" : "analyzed";
+    const { data, count } = await q.order(col, { ascending: sortCol === "status" }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []);
     setTotal(count ?? 0);
-  }, [active, status, paywall, atype, author, topic, lang, rangeFrom, rangeTo, kwIds, keyword, page]);
+  }, [active, status, paywall, atype, author, topic, lang, rangeFrom, rangeTo, kwIds, keyword, page, sortCol]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
   useEffect(() => { if (skipReset.current) return; setPage(0); }, [active, status, paywall, atype, author, topic, keyword, lang, rangeFrom, rangeTo]);
@@ -185,9 +188,18 @@ export default function ArticleDashboard() {
   return (
     <>
       <div className="topbar">
-        <h1>Übersicht</h1>
+        <h1>Übersicht
+          <Link href="/articles/edits" style={{ marginLeft: 16, fontSize: 13, fontWeight: 500, color: "var(--muted)" }}>→ Silent Edits</Link>
+        </h1>
         <span className="live"><span className="live-dot" /> Live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</span>
       </div>
+
+      <FilterPills sources={sources} activeSources={activeArr}
+        status={status} setStatus={setStatus} paywall={paywall} setPaywall={setPaywall}
+        atype={atype} setAtype={setAtype} author={author} setAuthor={setAuthor}
+        topic={topic} setTopic={setTopic} keyword={keyword} setKeyword={setKeyword}
+        lang={lang} setLang={setLang} toggleSource={toggle}
+      />
 
       <div className="with-rail">
         <div className="page">
@@ -206,8 +218,12 @@ export default function ArticleDashboard() {
           <div className="panel">
             <table className="arttable">
               <thead><tr>
-                <th className="c-src">Quelle</th><th className="c-art">Seite</th><th className="c-typ">Typ</th>
-                <th className="c-topic">Thema</th><th className="c-author">Autor</th><th className="c-stat">Status</th>
+                <th className="c-src" style={{ cursor: "pointer" }} onClick={() => setSortCol("src")}>Quelle {sortCol === "src" && "↓"}</th>
+                <th className="c-art">Seite</th>
+                <th className="c-typ" style={{ cursor: "pointer" }} onClick={() => setSortCol("type")}>Typ {sortCol === "type" && "↓"}</th>
+                <th className="c-topic" style={{ cursor: "pointer" }} onClick={() => setSortCol("topic")}>Thema {sortCol === "topic" && "↓"}</th>
+                <th className="c-author" style={{ cursor: "pointer" }} onClick={() => setSortCol("author")}>Autor {sortCol === "author" && "↓"}</th>
+                <th className="c-stat" style={{ cursor: "pointer" }} onClick={() => setSortCol("status")}>Status {sortCol === "status" && "↓"}</th>
               </tr></thead>
               <tbody>
                 {rows.map((r) => {
