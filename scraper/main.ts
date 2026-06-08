@@ -188,7 +188,7 @@ function normalizeParas(body: string): string[] {
 }
 const fp = (s: string) => createHash("sha1").update(s.toLowerCase()).digest("hex").slice(0, 12);
 
-type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null } | null;
+type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null } | null;
 
 // Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
 // Unterscheidet "extension" (nur hinzugefügt = valide Erweiterung, z.B. Timeline-Artikel) von
@@ -226,11 +226,17 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     return;
   }
 
-  // Klassifikation: nur hinzugefügt = Erweiterung; nur entfernt/Titel = Änderung; beides = mixed.
-  let kind: "extension" | "edit" | "mixed";
-  if (addedFps.length > 0 && removedCount === 0 && !titleChanged) kind = "extension";
-  else if (addedFps.length === 0 && (removedCount > 0 || titleChanged)) kind = "edit";
-  else kind = "mixed";
+  // Eindeutige Klassifikation (sich gegenseitig ausschließend):
+  //  - Liveblog/Timeline: laufendes Wachstum → IMMER Erweiterung (kein "stiller Edit").
+  //  - Sonst stille Titeländerung → Edit (das journalistisch interessante Signal).
+  //  - Sonst Netto-Zuwachs (mehr hinzu als entfernt) → Erweiterung.
+  //  - Sonst (Umschreiben/Kürzen) → Edit.
+  const isTimeline = isLiveblog || prev.article_type === "timeline" || (prev.extension_count ?? 0) >= 2;
+  let kind: "extension" | "edit";
+  if (isTimeline) kind = "extension";
+  else if (titleChanged) kind = "edit";
+  else if (addedFps.length > removedCount) kind = "extension";
+  else kind = "edit";
 
   await sb.from("article_snapshots").insert({
     article_id: articleId, change_kind: kind,
@@ -241,8 +247,8 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     word_delta: bodyWords - (prev.body_words ?? bodyWords),
   });
 
-  const extCount = (prev.extension_count ?? 0) + (kind === "extension" || kind === "mixed" ? 1 : 0);
-  const editCount = (prev.edit_count ?? 0) + (kind === "edit" || kind === "mixed" ? 1 : 0);
+  const extCount = (prev.extension_count ?? 0) + (kind === "extension" ? 1 : 0);
+  const editCount = (prev.edit_count ?? 0) + (kind === "edit" ? 1 : 0);
   // Kategorie "timeline": mehrfach erweitert (echter, über Tage wachsender Artikel)
   const newType = isLiveblog ? "liveblog" : (extCount >= 2 ? "timeline" : undefined);
   await sb.from("articles").update({
@@ -258,7 +264,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
-    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count")
+    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type")
     .eq("url", url).maybeSingle();
   const id = await upsertArticle(sourceId, url, meta);
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
@@ -335,14 +341,31 @@ function asArticle(html: string, url: string): { title: string; teaser: string; 
 // === Klassifikation der Seiten (Knoten im Baum) ===
 type Kind = "article" | "section" | "media" | "interactive" | "sponsored" | "service" | "unknown";
 
+// Pfad in Segmente; das letzte Segment ist der Headline-Slug (enthält beliebige Wörter
+// wie "be-werbung", "advertorials", "fame-fighting-international") und darf NICHT die
+// Rubrik bestimmen. Klassifikation prüft daher nur die Rubrik-Segmente (alle außer Slug)
+// als ganze Tokens, nicht als Substrings irgendwo in der URL.
+function urlSegments(url: string): { sections: string[]; slug: string } {
+  try {
+    const segs = new URL(url).pathname.toLowerCase().replace(/\/+$/, "").split("/").filter(Boolean);
+    return { sections: segs.slice(0, Math.max(0, segs.length - 1)), slug: segs[segs.length - 1] ?? "" };
+  } catch { return { sections: [], slug: "" }; }
+}
+const SEC = (segs: string[], rx: RegExp) => segs.some((s) => rx.test(s));
+
 // Schätzung allein aus der URL (für entdeckte, noch nicht gerenderte Links).
 function classifyUrl(url: string): Kind {
+  const { sections, slug } = urlSegments(url);
   const u = url.toLowerCase();
-  if (/(anzeige|sponsored|advertorial|promotion|werbung|\/adv\/)/.test(u)) return "sponsored";
-  if (/\/(impressum|kontakt|datenschutz|newsletter|abo|login|konto|hilfe|agb|nutzungsbedingungen|privacy|mentions-legales|cgu)\b/.test(u)) return "service";
-  if (/\/(podcast|video|audio|mediathek|livestream|bilder|fotostrecke|galerie|multimedia|tv)\b/.test(u)) return "media";
-  if (/(boersenkurse|kurse|wetter|horoskop|lotto|gewinnspiel|rechner|tabelle|ergebnisse|spielplan)/.test(u)) return "interactive";
-  if (looksLikeArticle(u)) return "article";
+  // Werbung: nur als eigenes Rubrik-Segment oder Query-Param (nicht "bewerbung"/"umwerbung")
+  if (SEC(sections, /^(anzeige[n]?|sponsored|advertorials?|werbe[a-z-]*|promotion|adv|partner-?content)$/) ||
+      /[?&](sponsored|advertorial|anzeige)=/.test(u)) return "sponsored";
+  if (SEC(sections, /^(impressum|kontakt|datenschutz|newsletter|abo|login|konto|hilfe|agb|nutzungsbedingungen|privacy|mentions-legales|cgu)$/)) return "service";
+  // Medien: Rubrik-Segment ODER Slug-Präfix (tagesschau /video-NNN.html, /audio-NNN)
+  if (SEC(sections, /^(podcast|videos?|audio|mediathek|livestream|bilder|fotostrecke[n]?|galerie|multimedia|tv)$/) ||
+      /^(video|audio|podcast|livestream)-/.test(slug)) return "media";
+  if (SEC(sections, /^(boersenkurse|kurse|wetter|horoskop|lotto|gewinnspiel|rechner|tabelle|ergebnisse|spielplan)$/)) return "interactive";
+  if (looksLikeArticle(url)) return "article";
   return "unknown";
 }
 
@@ -571,7 +594,7 @@ async function enrichArticles(sources: Source[]) {
         try {
           // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
           const { data: prev } = await sb.from("articles")
-            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count")
+            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type")
             .eq("id", item.id).maybeSingle();
           const { authors, keywords, categories, ...fields } = meta;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString() }).eq("id", item.id);

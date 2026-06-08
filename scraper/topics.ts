@@ -15,10 +15,17 @@ export const TOPICS: { key: string; label: string; rx: RegExp }[] = [
   { key: "politik",   label: "Politik",            rx: /(politik|inland|ausland|international|europa|amerika|asien|afrika|ozeanien|nahost|naher-osten|ukraine|wahl|bundestag|politique|étranger|monde|gouvernement|election)/i },
 ];
 
+// Nur Rubriken-Segmente (Pfad ohne Headline-Slug) + JSON-LD-Kategorien werden geprüft.
+// Der Slug (letztes Pfad-Segment = Überschrift) enthält beliebige Wörter ("...-international-...")
+// und darf NICHT die Themen-Zuordnung bestimmen.
 export function topicOf(categories: string[], url: string): string {
-  let path = "";
-  try { path = new URL(url).pathname.toLowerCase(); } catch { path = url.toLowerCase(); }
-  const hay = (categories.join(" ") + " " + path).toLowerCase();
+  let segs: string[] = [];
+  try {
+    segs = new URL(url).pathname.toLowerCase().replace(/\/+$/, "").split("/").filter(Boolean);
+  } catch { segs = []; }
+  // Numerische/Datums-Segmente entfernen, letztes Segment (Slug) weglassen
+  const sections = segs.slice(0, Math.max(0, segs.length - 1)).filter((s) => !/^\d+$/.test(s) && !/-\d{4,}/.test(s));
+  const hay = (categories.join(" ") + " " + sections.join(" ")).toLowerCase();
   for (const t of TOPICS) if (t.rx.test(hay)) return t.key;
   return "sonstiges";
 }
