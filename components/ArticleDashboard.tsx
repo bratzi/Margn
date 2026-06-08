@@ -7,37 +7,38 @@ import { FileText, Folder, Clock, External } from "@/components/icons";
 import PublisherCompare from "@/components/PublisherCompare";
 import TopicChart from "@/components/TopicChart";
 import RateStats from "@/components/RateStats";
+import TimeRangeFilter from "@/components/TimeRangeFilter";
 import FilterPanel, { type Src } from "@/components/FilterPanel";
 import { topicLabel } from "@/lib/topics";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
-type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean; paywalled: boolean | null; ptype: string };
+type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; analyzed: boolean; paywalled: boolean | null; ptype: string; topic: string | null; author_status: string | null };
 
 const PTYPE: Record<string, { l: string; c: string }> = {
   artikel: { l: "Artikel", c: "neutral" }, paywall: { l: "Paywall", c: "lock" },
   video: { l: "Video", c: "media" }, werbung: { l: "Werbung", c: "wait" },
   hub: { l: "Hub", c: "neutral" }, blog: { l: "Blog", c: "info" }, timeline: { l: "Timeline", c: "info" },
 };
+const AUTHOR: Record<string, { l: string; c: string }> = {
+  named: { l: "Autor", c: "ok" }, anonymous: { l: "Redaktion", c: "wait" },
+};
 
 const PAGE = 30;
 function shortUrl(u: string) {
   try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; } catch { return { host: "", path: u }; }
 }
-const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
-const cutoff = (p: string) => {
-  const d = new Date();
-  if (p === "24h") d.setHours(d.getHours() - 24);
-  else if (p === "7d") d.setDate(d.getDate() - 7);
-  else if (p === "30d") d.setDate(d.getDate() - 30);
-  else return null;
-  return d.toISOString();
-};
+function makeDays(): string[] {
+  const out: string[] = []; const d = new Date(); d.setUTCHours(0, 0, 0, 0);
+  for (let i = 59; i >= 0; i--) { const x = new Date(d); x.setUTCDate(x.getUTCDate() - i); out.push(x.toISOString().slice(0, 10)); }
+  return out;
+}
 
 export default function ArticleDashboard() {
   const [summary, setSummary] = useState<Summary[]>([]);
   const [sources, setSources] = useState<Src[]>([]);
   const [active, setActive] = useState<Set<number>>(new Set());
   const [rows, setRows] = useState<Row[]>([]);
+  const [rowKw, setRowKw] = useState<Record<number, string[]>>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -49,69 +50,85 @@ export default function ArticleDashboard() {
   const [atype, setAtype] = useState("all");
   const [author, setAuthor] = useState("all");
   const [topic, setTopic] = useState("all");
+  const [keyword, setKeyword] = useState("all");
   const [lang, setLang] = useState("all");
-  const [period, setPeriod] = useState("all");
   const [topicStats, setTopicStats] = useState<{ topic: string; source_id: number; n: number }[]>([]);
+  const [kwStats, setKwStats] = useState<{ term: string; source_id: number; n: number }[]>([]);
+  const [kwIds, setKwIds] = useState<number[] | null>(null);
 
-  // Persistenz-Refs
+  // Zeit-Range (Brush)
+  const days = useMemo(makeDays, []);
+  const [trfOpen, setTrfOpen] = useState(true);
+  const [rangeIdx, setRangeIdx] = useState<{ from: number; to: number }>({ from: 0, to: 59 });
+  const full = rangeIdx.from === 0 && rangeIdx.to === days.length - 1;
+  const rangeFrom = full ? null : days[rangeIdx.from] + "T00:00:00Z";
+  const rangeTo = full ? null : days[rangeIdx.to] + "T23:59:59Z";
+
   const savedActiveRef = useRef<number[] | null>(null);
   const savedPageRef = useRef<number>(0);
   const skipReset = useRef(false);
 
-  // Gespeicherte Filter laden (einmalig, vor den Quellen)
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("margn-filters");
-      if (!raw) return;
-      const f = JSON.parse(raw);
+      const f = JSON.parse(localStorage.getItem("margn-filters") || "{}");
       if (f.status) setStatus(f.status);
       if (f.paywall) setPaywall(f.paywall);
       if (f.atype) setAtype(f.atype);
       if (f.author) setAuthor(f.author);
       if (f.topic) setTopic(f.topic);
+      if (f.keyword) setKeyword(f.keyword);
       if (f.lang) setLang(f.lang);
-      if (f.period) setPeriod(f.period);
       if (typeof f.open === "boolean") setOpen(f.open);
+      if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
+      if (f.rangeIdx && typeof f.rangeIdx.from === "number") setRangeIdx(f.rangeIdx);
       if (typeof f.page === "number") savedPageRef.current = f.page;
       if (Array.isArray(f.activeIds)) savedActiveRef.current = f.activeIds;
     } catch {}
   }, []);
 
-  // Quellen + Summary laden
   useEffect(() => {
     (async () => {
-      const [{ data: srcs }, { data: sum }, { data: ts }] = await Promise.all([
+      const [{ data: srcs }, { data: sum }, { data: ts }, { data: ks }] = await Promise.all([
         supabase.from("sources").select("id,name,base_url,country").eq("active", true),
         supabase.from("article_status_summary").select("*"),
         supabase.from("topic_stats").select("*"),
+        supabase.from("keyword_stats").select("*"),
       ]);
       const s = (srcs as Src[]) ?? [];
       const ids = s.map((x) => x.id);
       const saved = savedActiveRef.current;
-      skipReset.current = true; // Hydration: kein Page-Reset
+      skipReset.current = true;
       setSources(s);
       setActive(new Set(saved && saved.length ? saved.filter((id) => ids.includes(id)) : ids));
       setPage(savedPageRef.current);
       setSummary((sum as Summary[]) ?? []);
       setTopicStats((ts as any[]) ?? []);
+      setKwStats((ks as any[]) ?? []);
       setUpdatedAt(new Date());
       setTimeout(() => { skipReset.current = false; }, 0);
     })();
   }, []);
 
-  // Filter persistieren
   useEffect(() => {
     if (!sources.length) return;
     try {
       localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topic, lang, period, open, page,
+        activeIds: [...active], status, paywall, atype, author, topic, keyword, lang, open, trfOpen, rangeIdx, page,
       }));
     } catch {}
-  }, [active, status, paywall, atype, author, topic, lang, period, open, page, sources.length]);
+  }, [active, status, paywall, atype, author, topic, keyword, lang, open, trfOpen, rangeIdx, page, sources.length]);
+
+  // Keyword → Artikel-IDs für Tabellenfilter
+  useEffect(() => {
+    if (keyword === "all") { setKwIds(null); return; }
+    supabase.from("article_keywords").select("article_id, keywords!inner(term)").eq("keywords.term", keyword)
+      .then(({ data }) => setKwIds((data ?? []).map((r: any) => r.article_id)));
+  }, [keyword]);
 
   const loadRows = useCallback(async () => {
     if (!active.size) { setRows([]); setTotal(0); return; }
-    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,discovered_at,analyzed,paywalled,ptype", { count: "exact" })
+    if (keyword !== "all" && kwIds === null) return; // warte auf IDs
+    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status", { count: "exact" })
       .in("source_id", [...active]);
     if (status === "analyzed") q = q.eq("analyzed", true);
     else if (status === "backlog") q = q.eq("analyzed", false);
@@ -121,15 +138,27 @@ export default function ArticleDashboard() {
     if (author !== "all") q = q.eq("author_status", author);
     if (topic !== "all") q = q.eq("topic", topic);
     if (lang !== "all") q = q.eq("language", lang);
-    const c = cutoff(period);
-    if (c) q = q.gte("published_at", c);
+    if (rangeFrom) q = q.gte("published_at", rangeFrom);
+    if (rangeTo) q = q.lte("published_at", rangeTo);
+    if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []);
     setTotal(count ?? 0);
-  }, [active, status, paywall, atype, author, topic, lang, period, page]);
+  }, [active, status, paywall, atype, author, topic, lang, rangeFrom, rangeTo, kwIds, keyword, page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { if (skipReset.current) return; setPage(0); }, [active, status, paywall, atype, author, topic, lang, period]);
+  useEffect(() => { if (skipReset.current) return; setPage(0); }, [active, status, paywall, atype, author, topic, keyword, lang, rangeFrom, rangeTo]);
+
+  // Keywords der sichtbaren Zeilen nachladen
+  useEffect(() => {
+    const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];
+    if (!ids.length) { setRowKw({}); return; }
+    supabase.from("article_keywords").select("article_id, keywords(term)").in("article_id", ids).then(({ data }) => {
+      const m: Record<number, string[]> = {};
+      for (const r of (data ?? []) as any[]) { (m[r.article_id] ??= []).push(r.keywords?.term); }
+      setRowKw(m);
+    });
+  }, [rows]);
 
   const toggle = (id: number) => setActive((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
@@ -137,14 +166,21 @@ export default function ArticleDashboard() {
   const topicOpts = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of topicStats) if (active.has(r.source_id)) m.set(r.topic, (m.get(r.topic) ?? 0) + r.n);
-    return [...m.entries()].filter(([t]) => t !== "sonstiges").sort((a, b) => b[1] - a[1])
-      .map(([key, n]) => ({ key, label: topicLabel(key), n }));
+    return [...m.entries()].filter(([t]) => t !== "sonstiges").sort((a, b) => b[1] - a[1]).map(([key, n]) => ({ key, label: topicLabel(key), n }));
   }, [topicStats, active]);
+
+  const keywordOpts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of kwStats) if (active.has(r.source_id)) m.set(r.term, (m.get(r.term) ?? 0) + r.n);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 60).map(([key, n]) => ({ key, label: key, n }));
+  }, [kwStats, active]);
 
   const visSummary = useMemo(() => summary.filter((s) => active.has(s.source_id)), [summary, active]);
   const totals = useMemo(() => visSummary.reduce((a, s) => ({ d: a.d + s.discovered, an: a.an + s.analyzed, b: a.b + s.backlog }), { d: 0, an: 0, b: 0 }), [visSummary]);
   const pct = totals.d ? Math.round((totals.an / totals.d) * 100) : 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
+  const activeArr = useMemo(() => [...active], [active]);
+  const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${topic !== "all" ? ` · ${topicLabel(topic)}` : ""}${keyword !== "all" ? ` · #${keyword}` : ""}`;
 
   return (
     <>
@@ -162,41 +198,41 @@ export default function ArticleDashboard() {
             <div className="stat-tile accent"><div className="l">Fortschritt</div><div className="n tnum">{pct}%</div><div className="bar"><i style={{ width: `${pct}%` }} /></div></div>
           </div>
 
-          <RateStats sources={sources} activeSources={[...active]} />
+          <RateStats sources={sources} activeSources={activeArr} />
+          <PublisherCompare sources={sources} activeSources={activeArr} topic={topic} from={rangeFrom} to={rangeTo} />
+          <TopicChart activeSources={activeArr} current={topic} onPick={setTopic} />
 
-          <PublisherCompare activeSources={[...active]} />
-
-          <TopicChart activeSources={[...active]} current={topic} onPick={setTopic} />
-
-          <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer{topic !== "all" ? ` · ${topicLabel(topic)}` : ""}</span></h2>
+          <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
           <div className="panel">
             <table className="arttable">
-              <thead><tr><th className="c-src">Quelle</th><th className="c-art">Seite</th><th className="c-typ">Typ</th><th className="c-seen">Entdeckt</th><th className="c-stat">Status</th></tr></thead>
+              <thead><tr>
+                <th className="c-src">Quelle</th><th className="c-art">Seite</th><th className="c-typ">Typ</th>
+                <th className="c-topic">Thema</th><th className="c-author">Autor</th><th className="c-stat">Status</th>
+              </tr></thead>
               <tbody>
                 {rows.map((r) => {
                   const { host, path } = shortUrl(r.url);
+                  const kws = r.article_id ? rowKw[r.article_id] : undefined;
                   return (
                     <tr key={r.id}>
-                      <td className="cell-nowrap">{r.outlet} <span className="cc">{r.country}</span></td>
+                      <td className="cell-nowrap c-src">{r.outlet} <span className="cc">{r.country}</span></td>
                       <td>
                         <div className="art-row">
                           {r.article_id
                             ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={`Details: ${r.url}`}><span className="path">{host}</span>{path}</Link>
                             : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
-                          <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original-Artikel öffnen" aria-label="Original öffnen"><External size={14} /></a>
+                          <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen" aria-label="Original öffnen"><External size={14} /></a>
                         </div>
+                        {kws && kws.length > 0 && <div className="kw-row">{kws.slice(0, 5).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div>}
                       </td>
-                      <td className="c-typ cell-nowrap">
-                        <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span>
-                      </td>
-                      <td className="c-seen mono faint cell-nowrap">{fmt(r.discovered_at)}</td>
-                      <td className="cell-nowrap">
-                        {r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}
-                      </td>
+                      <td className="c-typ cell-nowrap"><span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span></td>
+                      <td className="c-topic cell-nowrap faint">{r.topic ? topicLabel(r.topic) : "—"}</td>
+                      <td className="c-author cell-nowrap">{r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>}</td>
+                      <td className="cell-nowrap">{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
                     </tr>
                   );
                 })}
-                {!rows.length && <tr><td colSpan={5} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
+                {!rows.length && <tr><td colSpan={6} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -206,6 +242,9 @@ export default function ArticleDashboard() {
             <span>Seite {page + 1} / {pages}</span>
             <button disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Weiter →</button>
           </div>
+
+          <TimeRangeFilter sources={sources} activeSources={activeArr} fromIdx={rangeIdx.from} toIdx={rangeIdx.to}
+            onChange={(f, t) => setRangeIdx({ from: f, to: t })} open={trfOpen} setOpen={setTrfOpen} />
         </div>
 
         <FilterPanel
@@ -214,7 +253,8 @@ export default function ArticleDashboard() {
           status={status} setStatus={setStatus} paywall={paywall} setPaywall={setPaywall}
           atype={atype} setAtype={setAtype} author={author} setAuthor={setAuthor}
           topic={topic} setTopic={setTopic} topics={topicOpts}
-          lang={lang} setLang={setLang} period={period} setPeriod={setPeriod}
+          keyword={keyword} setKeyword={setKeyword} keywords={keywordOpts}
+          lang={lang} setLang={setLang}
         />
       </div>
     </>

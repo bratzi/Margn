@@ -1,44 +1,53 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { topicLabel } from "@/lib/topics";
 
+type Src = { id: number; name: string; country: string };
 type Stat = {
-  source_id: number; outlet: string; country: string;
-  articles: number; sections: number; media: number; interactive: number; sponsored: number;
-  analyzed: number; paywalled: number; with_image: number; liveblogs: number;
+  source_id: number; articles: number; paywalled: number;
   au_named: number; au_anon: number; au_none: number;
-  new_24h: number; new_7d: number; median_words: number | null; avg_reading: number | null;
+  video: number; werbung: number; hub: number; new_7d: number;
 };
 
 const short = (n: string) => n.replace(" Online", "");
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
-export default function PublisherCompare({ activeSources }: { activeSources?: number[] }) {
-  const [all, setAll] = useState<Stat[]>([]);
-  useEffect(() => { supabase.from("publisher_stats").select("*").then(({ data }) => setAll((data as Stat[]) ?? [])); }, []);
-  const act = activeSources ? new Set(activeSources) : null;
-  const stats = act ? all.filter((s) => act.has(s.source_id)) : all;
+export default function PublisherCompare({ sources, activeSources, topic, from, to }: {
+  sources: Src[]; activeSources: number[]; topic: string; from: string | null; to: string | null;
+}) {
+  const [stats, setStats] = useState<Stat[]>([]);
+  const nameById = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
+
+  useEffect(() => {
+    supabase.rpc("publisher_stats_f", {
+      p_sources: activeSources, p_topic: topic === "all" ? null : topic, p_from: from, p_to: to,
+    }).then(({ data }) => setStats((data as Stat[]) ?? []));
+  }, [activeSources.join(","), topic, from, to]);
+
   if (!stats.length) return null;
+  const nm = (id: number) => short(nameById.get(id)?.name ?? "?");
+  const ctx = topic !== "all" ? ` · Thema: ${topicLabel(topic)}` : "";
 
   const charts: { title: string; desc: string; color: string; fmt?: (n: number) => string; data: { label: string; value: number; raw?: string }[] }[] = [
-    { title: "Artikel gesamt", desc: "Entdeckte Artikelseiten je Portal", color: "var(--accent)",
-      data: stats.map((s) => ({ label: short(s.outlet), value: s.articles })) },
-    { title: "Paywall-Anteil", desc: "Anteil analysierter Artikel hinter Bezahlschranke", color: "var(--red)", fmt: (n) => `${n}%`,
-      data: stats.map((s) => ({ label: short(s.outlet), value: pct(s.paywalled, s.analyzed), raw: `${s.paywalled}/${s.analyzed}` })) },
-    { title: "Namentliche Autoren", desc: "Artikel mit echtem Autorennamen (statt Redaktion/Agentur)", color: "var(--green)", fmt: (n) => `${n}%`,
-      data: stats.map((s) => ({ label: short(s.outlet), value: pct(s.au_named, s.analyzed), raw: `${s.au_named}/${s.analyzed}` })) },
-    { title: "Video-Beiträge", desc: "Als reine Video-Seiten erkannt", color: "#8B5CF6",
-      data: stats.map((s) => ({ label: short(s.outlet), value: s.media })) },
-    { title: "Werbe-/Sponsored-Seiten", desc: "Als Anzeige/Advertorial erkannte Seiten", color: "var(--amber)",
-      data: stats.map((s) => ({ label: short(s.outlet), value: s.sponsored })) },
-    { title: "Neu veröffentlicht (7 Tage)", desc: "Publishing-Frequenz der letzten Woche", color: "var(--teal)",
-      data: stats.map((s) => ({ label: short(s.outlet), value: s.new_7d })) },
+    { title: "Artikel", desc: `Artikel im Filter${ctx}`, color: "var(--accent)",
+      data: stats.map((s) => ({ label: nm(s.source_id), value: s.articles })) },
+    { title: "Paywall-Anteil", desc: `Anteil hinter Bezahlschranke${ctx}`, color: "var(--red)", fmt: (n) => `${n}%`,
+      data: stats.map((s) => ({ label: nm(s.source_id), value: pct(s.paywalled, s.articles), raw: `${s.paywalled}/${s.articles}` })) },
+    { title: "Namentliche Autoren", desc: `Anteil mit echtem Autorennamen${ctx}`, color: "var(--green)", fmt: (n) => `${n}%`,
+      data: stats.map((s) => ({ label: nm(s.source_id), value: pct(s.au_named, s.au_named + s.au_anon + s.au_none), raw: `${s.au_named}` })) },
+    { title: "Video-Beiträge", desc: "Reine Video-Seiten (gesamt)", color: "#8B5CF6",
+      data: stats.map((s) => ({ label: nm(s.source_id), value: s.video })) },
+    { title: "Werbe-/Sponsored-Seiten", desc: "Als Anzeige erkannt (gesamt)", color: "var(--amber)",
+      data: stats.map((s) => ({ label: nm(s.source_id), value: s.werbung })) },
+    { title: "Neu veröffentlicht (7 Tage)", desc: `Publishing-Frequenz${ctx}`, color: "var(--teal)",
+      data: stats.map((s) => ({ label: nm(s.source_id), value: s.new_7d })) },
   ];
 
   return (
     <>
-      <h2 className="section-h">Publizisten im Vergleich <span className="count">{stats.length} Portale</span></h2>
+      <h2 className="section-h">Publizisten im Vergleich <span className="count">{stats.length} Portale{ctx}</span></h2>
       <div className="charts">
         {charts.map((c) => {
           const max = Math.max(1, ...c.data.map((d) => d.value));
@@ -61,32 +70,29 @@ export default function PublisherCompare({ activeSources }: { activeSources?: nu
         })}
       </div>
 
-      {/* Steckbrief */}
-      <h2 className="section-h">Steckbrief <span className="count">alle Kennzahlen</span></h2>
+      <h2 className="section-h">Steckbrief <span className="count">aktueller Filter{ctx}</span></h2>
       <div className="panel" style={{ overflowX: "auto" }}>
         <table className="matrix">
-          <thead>
-            <tr>
-              <th>Portal</th><th>Artikel</th><th>Rubriken</th><th>Video</th><th>Werbung</th>
-              <th>Paywall</th><th>Namentlich</th><th>Anonym</th><th>Ohne</th><th>Ø Lesezeit</th><th>Neu 7T</th>
-            </tr>
-          </thead>
+          <thead><tr>
+            <th>Portal</th><th>Artikel</th><th>Paywall</th><th>Namentlich</th><th>Anonym</th><th>Video</th><th>Werbung</th><th>Hub</th><th>Neu 7T</th>
+          </tr></thead>
           <tbody>
-            {stats.map((s) => (
-              <tr key={s.source_id}>
-                <td className="pub">{short(s.outlet)} <span className="cc">{s.country}</span></td>
-                <td className="tnum">{s.articles.toLocaleString("de-DE")}</td>
-                <td className="tnum">{s.sections}</td>
-                <td className="tnum">{s.media.toLocaleString("de-DE")}</td>
-                <td className="tnum">{s.sponsored}</td>
-                <td className="tnum"><span style={{ color: pct(s.paywalled, s.analyzed) > 40 ? "var(--red)" : "inherit" }}>{pct(s.paywalled, s.analyzed)}%</span></td>
-                <td className="tnum"><span style={{ color: "var(--green)" }}>{pct(s.au_named, s.analyzed)}%</span></td>
-                <td className="tnum">{pct(s.au_anon, s.analyzed)}%</td>
-                <td className="tnum faint">{pct(s.au_none, s.analyzed)}%</td>
-                <td className="tnum">{s.avg_reading ?? "—"} Min</td>
-                <td className="tnum">{s.new_7d}</td>
-              </tr>
-            ))}
+            {stats.map((s) => {
+              const au = s.au_named + s.au_anon + s.au_none;
+              return (
+                <tr key={s.source_id}>
+                  <td className="pub">{nm(s.source_id)} <span className="cc">{nameById.get(s.source_id)?.country}</span></td>
+                  <td className="tnum">{s.articles.toLocaleString("de-DE")}</td>
+                  <td className="tnum"><span style={{ color: pct(s.paywalled, s.articles) > 40 ? "var(--red)" : "inherit" }}>{pct(s.paywalled, s.articles)}%</span></td>
+                  <td className="tnum"><span style={{ color: "var(--green)" }}>{pct(s.au_named, au)}%</span></td>
+                  <td className="tnum">{pct(s.au_anon, au)}%</td>
+                  <td className="tnum">{s.video.toLocaleString("de-DE")}</td>
+                  <td className="tnum">{s.werbung}</td>
+                  <td className="tnum">{s.hub}</td>
+                  <td className="tnum">{s.new_7d}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

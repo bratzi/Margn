@@ -18,8 +18,9 @@ type Props = {
   author: string; setAuthor: (v: any) => void;
   topic: string; setTopic: (v: any) => void;
   topics: { key: string; label: string; n: number }[];
+  keyword: string; setKeyword: (v: any) => void;
+  keywords: { key: string; label: string; n: number }[];
   lang: string; setLang: (v: any) => void;
-  period: string; setPeriod: (v: any) => void;
 };
 
 function Group({ label, value, opts, on }: { label: string; value: string; opts: [string, string][]; on: (v: string) => void }) {
@@ -113,8 +114,15 @@ export default function FilterPanel(p: Props) {
           {p.topics.map((t) => <option key={t.key} value={t.key}>{t.label} ({t.n.toLocaleString("de-DE")})</option>)}
         </select>
       </div>
+      <div className="fgroup">
+        <div className="fglabel">Schlagwort</div>
+        <select value={p.keyword} onChange={(e) => p.setKeyword(e.target.value)} style={{ width: "100%" }}>
+          <option value="all">Alle Schlagwörter</option>
+          {p.keywords.map((t) => <option key={t.key} value={t.key}>{t.label} ({t.n.toLocaleString("de-DE")})</option>)}
+        </select>
+      </div>
       <Group label="Sprache" value={p.lang} on={p.setLang} opts={[["all", "Alle"], ["de", "DE"], ["fr", "FR"]]} />
-      <Group label="Veröffentlicht" value={p.period} on={p.setPeriod} opts={[["all", "Alle"], ["24h", "24 h"], ["7d", "7 Tage"], ["30d", "30 Tage"]]} />
+      <p className="faint" style={{ fontSize: 11, marginTop: 14, lineHeight: 1.5 }}>Zeitraum (Veröffentlichung) wählst du unten am Zeitstrahl.</p>
     </aside>
   );
 }
