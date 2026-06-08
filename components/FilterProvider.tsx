@@ -104,19 +104,21 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     } catch {}
   }, [active, status, paywall, atype, author, topic, keyword, lang, trfOpen, rangeIdx, sources.length]);
 
-  // dynamische Topic-Optionen
+  const nn = (v: string) => (v === "all" ? null : v);
+
+  // dynamische Topic-Optionen (voller Filtersatz)
   useEffect(() => {
     if (!active.size) { setTopicOpts([]); return; }
-    supabase.rpc("topic_opts_f", { p_sources: [...active], p_lang: lang === "all" ? null : lang, p_from: rangeFrom, p_to: rangeTo })
+    supabase.rpc("topic_opts_f", { p_sources: [...active], p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
       .then(({ data }) => setTopicOpts((data ?? []).filter((r: any) => r.topic !== "sonstiges").map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n }))));
-  }, [active, lang, rangeFrom, rangeTo]);
+  }, [active, paywall, author, lang, rangeFrom, rangeTo]);
 
-  // dynamische Keyword-Optionen
+  // dynamische Keyword-Optionen (voller Filtersatz)
   useEffect(() => {
     if (!active.size) { setKeywordOpts([]); return; }
-    supabase.rpc("keyword_opts_f", { p_sources: [...active], p_topic: topic === "all" ? null : topic, p_lang: lang === "all" ? null : lang, p_from: rangeFrom, p_to: rangeTo })
+    supabase.rpc("keyword_opts_f", { p_sources: [...active], p_topic: nn(topic), p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
       .then(({ data }) => setKeywordOpts((data ?? []).map((r: any) => ({ key: r.term, label: r.term, n: r.n }))));
-  }, [active, topic, lang, rangeFrom, rangeTo]);
+  }, [active, topic, paywall, author, lang, rangeFrom, rangeTo]);
 
   const toggle = (id: number) => setActive((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());

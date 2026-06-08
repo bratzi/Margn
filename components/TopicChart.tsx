@@ -1,35 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
+import { useFilters } from "@/components/FilterProvider";
 
-type TS = { topic: string; source_id: number; n: number };
+export default function TopicChart() {
+  const f = useFilters();
+  const [rows, setRows] = useState<{ topic: string; n: number }[]>([]);
 
-export default function TopicChart({ activeSources, onPick, current }: { activeSources: number[]; onPick?: (t: string) => void; current?: string }) {
-  const [rows, setRows] = useState<TS[]>([]);
-  useEffect(() => { supabase.from("topic_stats").select("*").then(({ data }) => setRows((data as TS[]) ?? [])); }, []);
+  // Gefilterte Themen-Verteilung (Quellen + Paywall + Autor + Sprache + Zeitraum)
+  useEffect(() => {
+    if (!f.activeArr.length) { setRows([]); return; }
+    const nn = (v: string) => (v === "all" ? null : v);
+    supabase.rpc("topic_opts_f", { p_sources: f.activeArr, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo })
+      .then(({ data }) => setRows((data ?? []).filter((r: any) => r.topic !== "sonstiges")));
+  }, [f.activeArr.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
-  const act = useMemo(() => new Set(activeSources), [activeSources]);
-  const totals = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of rows) if (act.has(r.source_id)) m.set(r.topic, (m.get(r.topic) ?? 0) + r.n);
-    return [...m.entries()].filter(([t]) => t !== "sonstiges").sort((a, b) => b[1] - a[1]);
-  }, [rows, act]);
-
-  if (!totals.length) return null;
-  const max = Math.max(1, ...totals.map(([, n]) => n));
+  if (!rows.length) return null;
+  const sorted = [...rows].sort((a, b) => b.n - a.n);
+  const max = Math.max(1, ...sorted.map((r) => r.n));
 
   return (
     <>
       <h2 className="section-h">Themen <span className="count">publizistenübergreifend · klick zum Filtern</span></h2>
       <div className="panel pad">
         <div className="bars">
-          {totals.map(([t, n]) => (
-            <button key={t} className={`barrow barrow-btn ${current === t ? "sel" : ""}`} onClick={() => onPick?.(current === t ? "all" : t)} title="Nach Thema filtern">
-              <span className="lbl">{topicLabel(t)}</span>
-              <span className="track"><i style={{ width: `${(n / max) * 100}%`, background: current === t ? "var(--accent)" : "var(--teal)" }} /></span>
-              <span className="val tnum">{n.toLocaleString("de-DE")}</span>
+          {sorted.map((r) => (
+            <button key={r.topic} className={`barrow barrow-btn ${f.topic === r.topic ? "sel" : ""}`} onClick={() => f.setTopic(f.topic === r.topic ? "all" : r.topic)} title="Nach Thema filtern">
+              <span className="lbl">{topicLabel(r.topic)}</span>
+              <span className="track"><i style={{ width: `${(r.n / max) * 100}%`, background: f.topic === r.topic ? "var(--accent)" : "var(--teal)" }} /></span>
+              <span className="val tnum">{r.n.toLocaleString("de-DE")}</span>
             </button>
           ))}
         </div>

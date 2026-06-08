@@ -48,16 +48,17 @@ export default function ArticleDashboard() {
 
   const fpct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
-  // Aggregat-Facts
+  // Aggregat-Facts (voller Filtersatz)
   useEffect(() => {
     if (!f.active.size) return;
-    supabase.rpc("publisher_stats_f", { p_sources: f.activeArr, p_topic: f.topic === "all" ? null : f.topic, p_from: f.rangeFrom, p_to: f.rangeTo })
+    const nn = (v: string) => (v === "all" ? null : v);
+    supabase.rpc("publisher_stats_f", { p_sources: f.activeArr, p_topic: nn(f.topic), p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo })
       .then(({ data }) => {
         const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
         for (const r of (data ?? []) as any[]) { a.articles += r.articles; a.paywalled += r.paywalled; a.named += r.au_named; a.au += r.au_named + r.au_anon + r.au_none; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d; }
         setAgg(a);
       });
-  }, [f.activeArr.join(","), f.topic, f.rangeFrom, f.rangeTo]);
+  }, [f.activeArr.join(","), f.topic, f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   // Keyword → Artikel-IDs
   useEffect(() => {
@@ -128,8 +129,8 @@ export default function ArticleDashboard() {
         </div>
 
         <RateStats />
-        <PublisherCompare sources={f.sources} activeSources={f.activeArr} topic={f.topic} from={f.rangeFrom} to={f.rangeTo} />
-        <TopicChart activeSources={f.activeArr} current={f.topic} onPick={f.setTopic} />
+        <PublisherCompare />
+        <TopicChart />
 
         {f.keywordOpts.length > 0 && (
           <>

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
+import { useFilters } from "@/components/FilterProvider";
 
-type Src = { id: number; name: string; country: string };
 type Stat = {
   source_id: number; articles: number; paywalled: number;
   au_named: number; au_anon: number; au_none: number;
@@ -14,17 +14,18 @@ type Stat = {
 const short = (n: string) => n.replace(" Online", "");
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
-export default function PublisherCompare({ sources, activeSources, topic, from, to }: {
-  sources: Src[]; activeSources: number[]; topic: string; from: string | null; to: string | null;
-}) {
+export default function PublisherCompare() {
+  const f = useFilters();
+  const { sources, activeArr: activeSources, topic } = f;
   const [stats, setStats] = useState<Stat[]>([]);
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
 
   useEffect(() => {
+    const nn = (v: string) => (v === "all" ? null : v);
     supabase.rpc("publisher_stats_f", {
-      p_sources: activeSources, p_topic: topic === "all" ? null : topic, p_from: from, p_to: to,
+      p_sources: activeSources, p_topic: nn(f.topic), p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo,
     }).then(({ data }) => setStats((data as Stat[]) ?? []));
-  }, [activeSources.join(","), topic, from, to]);
+  }, [activeSources.join(","), f.topic, f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   if (!stats.length) return null;
   const nm = (id: number) => short(nameById.get(id)?.name ?? "?");
