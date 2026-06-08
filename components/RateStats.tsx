@@ -28,15 +28,14 @@ export default function RateStats() {
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
-  // Tage-Achse (letzte 60), optional zu Wochen aggregiert
+  // Achse = NUR das im Timeline-Filter unten gewählte Fenster (rangeIdx) → zoomt interaktiv mit.
   const buckets = useMemo(() => {
-    const days: string[] = []; const d = new Date(); d.setUTCHours(0, 0, 0, 0);
-    for (let i = 59; i >= 0; i--) { const x = new Date(d); x.setUTCDate(x.getUTCDate() - i); days.push(x.toISOString().slice(0, 10)); }
+    const days = f.days.slice(f.rangeIdx.from, f.rangeIdx.to + 1);
     if (gran === "day") return days.map((day) => ({ label: day, days: [day] }));
     const weeks: { label: string; days: string[] }[] = [];
     for (let i = 0; i < days.length; i += 7) weeks.push({ label: days[i], days: days.slice(i, i + 7) });
     return weeks;
-  }, [gran]);
+  }, [gran, f.days, f.rangeIdx.from, f.rangeIdx.to]);
 
   const { series, maxTotal } = useMemo(() => {
     const map = new Map<number, Map<string, number>>();
@@ -55,10 +54,12 @@ export default function RateStats() {
   const colW = (VW / NB) * (gran === "day" ? 0.7 : 0.78);
   const fmt = (ds: string) => new Date(ds + "T00:00:00Z").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   const total = series.reduce((s, x) => s + x.vals.reduce((a, b) => a + b, 0), 0);
+  const span = f.rangeIdx.to - f.rangeIdx.from + 1;
+  const fromD = fmt(f.days[f.rangeIdx.from]), toD = fmt(f.days[f.rangeIdx.to]);
 
   return (
     <>
-      <h2 className="section-h" style={{ alignItems: "center" }}>Publikationen über Zeit <span className="count">{total.toLocaleString("de-DE")} Artikel (60 Tage)</span>
+      <h2 className="section-h" style={{ alignItems: "center" }}>Publikationen über Zeit <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD} ({span} {span === 1 ? "Tag" : "Tage"})</span>
         <div className="seg" style={{ marginLeft: "auto" }}>
           <button className={gran === "day" ? "on" : ""} onClick={() => setGran("day")}>Pro Tag</button>
           <button className={gran === "week" ? "on" : ""} onClick={() => setGran("week")}>Pro Woche</button>
