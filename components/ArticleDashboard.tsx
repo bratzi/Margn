@@ -204,6 +204,22 @@ export default function ArticleDashboard() {
   const totals = useMemo(() => visSummary.reduce((a, s) => ({ d: a.d + s.discovered, an: a.an + s.analyzed, b: a.b + s.backlog }), { d: 0, an: 0, b: 0 }), [visSummary]);
   const pct = totals.d ? Math.round((totals.an / totals.d) * 100) : 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
+
+  // Aggregat-Facts (reagieren auf Quellen+Thema+Zeitraum) für die KPI-Karten
+  const [agg, setAgg] = useState({ articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 });
+  useEffect(() => {
+    if (!active.size) return;
+    supabase.rpc("publisher_stats_f", { p_sources: [...active], p_topic: topic === "all" ? null : topic, p_from: rangeFrom, p_to: rangeTo })
+      .then(({ data }) => {
+        const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
+        for (const r of (data ?? []) as any[]) {
+          a.articles += r.articles; a.paywalled += r.paywalled; a.named += r.au_named;
+          a.au += r.au_named + r.au_anon + r.au_none; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d;
+        }
+        setAgg(a);
+      });
+  }, [active, topic, rangeFrom, rangeTo]);
+  const fpct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
   const activeArr = useMemo(() => [...active], [active]);
   const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${topic !== "all" ? ` · ${topicLabel(topic)}` : ""}${keyword !== "all" ? ` · #${keyword}` : ""}`;
 
@@ -224,15 +240,28 @@ export default function ArticleDashboard() {
       <div className="with-rail">
         <div className="page">
           <div className="kpi-strip">
-            <div className="stat-tile"><div className="l"><Folder /> Quellen</div><div className="n tnum">{active.size}<span style={{ fontSize: 14, color: "var(--faint)" }}> / {sources.length}</span></div><div className="sub">ausgewählt</div></div>
-            <div className="stat-tile"><div className="l"><FileText /> Entdeckt</div><div className="n tnum">{totals.d.toLocaleString("de-DE")}</div><div className="sub">Artikel gefunden</div></div>
-            <div className="stat-tile"><div className="l"><Clock /> Analysiert</div><div className="n tnum">{totals.an.toLocaleString("de-DE")}</div><div className="sub">{totals.b.toLocaleString("de-DE")} im Backlog</div></div>
-            <div className="stat-tile accent"><div className="l">Fortschritt</div><div className="n tnum">{pct}%</div><div className="bar"><i style={{ width: `${pct}%` }} /></div></div>
+            <div className="stat-tile"><div className="l"><FileText /> Artikel</div><div className="n tnum">{agg.articles.toLocaleString("de-DE")}</div><div className="sub">{agg.new7d.toLocaleString("de-DE")} neu (7 Tage)</div></div>
+            <div className="stat-tile"><div className="l">🔒 Paywall-Anteil</div><div className="n tnum" style={{ color: fpct(agg.paywalled, agg.articles) > 40 ? "var(--red)" : "inherit" }}>{fpct(agg.paywalled, agg.articles)}%</div><div className="sub">{agg.paywalled.toLocaleString("de-DE")} hinter Schranke</div></div>
+            <div className="stat-tile"><div className="l">✍️ Namentliche Autoren</div><div className="n tnum" style={{ color: "var(--green)" }}>{fpct(agg.named, agg.au)}%</div><div className="sub">statt Redaktion/Agentur</div></div>
+            <div className="stat-tile accent"><div className="l">🎬 Video & Werbung</div><div className="n tnum">{(agg.video + agg.werbung).toLocaleString("de-DE")}</div><div className="bar"><i style={{ width: `${fpct(agg.video + agg.werbung, agg.articles + agg.video + agg.werbung)}%` }} /></div></div>
           </div>
 
           <RateStats sources={sources} activeSources={activeArr} />
           <PublisherCompare sources={sources} activeSources={activeArr} topic={topic} from={rangeFrom} to={rangeTo} />
           <TopicChart activeSources={activeArr} current={topic} onPick={setTopic} />
+
+          {keywordOpts.length > 0 && (
+            <>
+              <h2 className="section-h">Schlagwörter im Filter <span className="count">{topic !== "all" ? topicLabel(topic) : "alle Themen"} · klick zum Filtern</span></h2>
+              <div className="kw-cloud">
+                {keywordOpts.slice(0, 60).map((k) => (
+                  <button key={k.key} className={`kw-pill ${keyword === k.key ? "on" : ""}`} onClick={() => setKeyword(keyword === k.key ? "all" : k.key)}>
+                    {k.label} <span className="kw-n">{k.n}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
           <div className="panel">

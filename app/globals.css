@@ -186,6 +186,14 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
   .rail-open { top: 0; height: 100vh; }
 }
 
+/* ---------- Keyword-Cloud über Tabelle (max 4 Reihen) ---------- */
+.kw-cloud { display: flex; flex-wrap: wrap; gap: 7px; max-height: 132px; overflow-y: auto; padding: 2px; margin-bottom: 4px; }
+.kw-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 12.5px; font-family: inherit; cursor: pointer; transition: all .14s; }
+.kw-pill:hover { border-color: var(--accent); color: var(--ink); }
+.kw-pill.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.kw-pill .kw-n { font-size: 10.5px; opacity: .6; font-variant-numeric: tabular-nums; }
+.kw-pill.on .kw-n { opacity: .85; }
+
 /* ---------- Filter-Pills-Leiste ---------- */
 .filter-pills { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .pills-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
