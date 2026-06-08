@@ -91,7 +91,19 @@ export default function FilterPanel(p: Props) {
 
       <Group label="Status" value={p.status} on={p.setStatus} opts={[["all", "Alle"], ["analyzed", "Analysiert"], ["backlog", "Backlog"]]} />
       <Group label="Bezahlschranke" value={p.paywall} on={p.setPaywall} opts={[["all", "Alle"], ["no", "Frei"], ["yes", "Paywall"]]} />
-      <Group label="Typ" value={p.atype} on={p.setAtype} opts={[["all", "Alle"], ["news", "News"], ["liveblog", "Liveblog"], ["opinion", "Meinung"], ["analysis", "Analyse"], ["timeline", "Timeline"]]} />
+      <div className="fgroup">
+        <div className="fglabel">Seitentyp</div>
+        <select value={p.atype} onChange={(e) => p.setAtype(e.target.value)} style={{ width: "100%" }}>
+          <option value="all">Alle Seiten</option>
+          <option value="artikel">Artikel</option>
+          <option value="paywall">Paywall-Seite</option>
+          <option value="video">Video-Seite</option>
+          <option value="werbung">Werbe-/Sponsored-Seite</option>
+          <option value="hub">Hub-/Rubrikseite</option>
+          <option value="blog">Blog-/Liveblog</option>
+          <option value="timeline">Timeline-Seite</option>
+        </select>
+      </div>
       <Group label="Autor" value={p.author} on={p.setAuthor} opts={[["all", "Alle"], ["named", "Namentlich"], ["anonymous", "Anonym"], ["none", "Ohne"]]} />
 
       <div className="fgroup">

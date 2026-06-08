@@ -11,7 +11,13 @@ import FilterPanel, { type Src } from "@/components/FilterPanel";
 import { topicLabel } from "@/lib/topics";
 
 type Summary = { source_id: number; outlet: string; country: string; discovered: number; analyzed: number; backlog: number };
-type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean; paywalled: boolean | null };
+type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; discovered_at: string; analyzed: boolean; paywalled: boolean | null; ptype: string };
+
+const PTYPE: Record<string, { l: string; c: string }> = {
+  artikel: { l: "Artikel", c: "neutral" }, paywall: { l: "Paywall", c: "lock" },
+  video: { l: "Video", c: "media" }, werbung: { l: "Werbung", c: "wait" },
+  hub: { l: "Hub", c: "neutral" }, blog: { l: "Blog", c: "info" }, timeline: { l: "Timeline", c: "info" },
+};
 
 const PAGE = 30;
 function shortUrl(u: string) {
@@ -105,13 +111,13 @@ export default function ArticleDashboard() {
 
   const loadRows = useCallback(async () => {
     if (!active.size) { setRows([]); setTotal(0); return; }
-    let q = supabase.from("article_status").select("id,article_id,url,outlet,country,discovered_at,analyzed,paywalled", { count: "exact" })
+    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,discovered_at,analyzed,paywalled,ptype", { count: "exact" })
       .in("source_id", [...active]);
     if (status === "analyzed") q = q.eq("analyzed", true);
     else if (status === "backlog") q = q.eq("analyzed", false);
     if (paywall === "yes") q = q.eq("paywalled", true);
     else if (paywall === "no") q = q.eq("paywalled", false);
-    if (atype !== "all") q = q.eq("article_type", atype);
+    if (atype !== "all") q = q.eq("ptype", atype);
     if (author !== "all") q = q.eq("author_status", author);
     if (topic !== "all") q = q.eq("topic", topic);
     if (lang !== "all") q = q.eq("language", lang);
@@ -165,7 +171,7 @@ export default function ArticleDashboard() {
           <h2 className="section-h">Artikel <span className="count">{total.toLocaleString("de-DE")} Treffer{topic !== "all" ? ` · ${topicLabel(topic)}` : ""}</span></h2>
           <div className="panel">
             <table className="arttable">
-              <thead><tr><th className="c-src">Quelle</th><th className="c-art">Artikel</th><th className="c-seen">Entdeckt</th><th className="c-stat">Status</th></tr></thead>
+              <thead><tr><th className="c-src">Quelle</th><th className="c-art">Seite</th><th className="c-typ">Typ</th><th className="c-seen">Entdeckt</th><th className="c-stat">Status</th></tr></thead>
               <tbody>
                 {rows.map((r) => {
                   const { host, path } = shortUrl(r.url);
@@ -180,15 +186,17 @@ export default function ArticleDashboard() {
                           <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original-Artikel öffnen" aria-label="Original öffnen"><External size={14} /></a>
                         </div>
                       </td>
+                      <td className="c-typ cell-nowrap">
+                        <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span>
+                      </td>
                       <td className="c-seen mono faint cell-nowrap">{fmt(r.discovered_at)}</td>
                       <td className="cell-nowrap">
-                        {r.paywalled ? <span className="badge lock">Paywall</span> : null}{" "}
                         {r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}
                       </td>
                     </tr>
                   );
                 })}
-                {!rows.length && <tr><td colSpan={4} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Artikel für diese Filter.</td></tr>}
+                {!rows.length && <tr><td colSpan={5} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
               </tbody>
             </table>
           </div>

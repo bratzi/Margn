@@ -247,10 +247,11 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .arttable tbody tr { transition: background .1s; }
 .arttable tbody tr:hover { background: var(--surface-2); }
 /* Spaltenbreiten (table-layout: fixed) → Artikel-Spalte bekommt den Rest, URL wird abgeschnitten */
-.arttable th.c-src { width: 21%; }
+.arttable th.c-src { width: 16%; }
 .arttable th.c-art { width: auto; }
-.arttable th.c-seen { width: 16%; }
-.arttable th.c-stat { width: 19%; }
+.arttable th.c-typ { width: 10%; }
+.arttable th.c-seen { width: 14%; }
+.arttable th.c-stat { width: 15%; }
 .cell-nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .art-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .url { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
@@ -258,7 +259,8 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .url .path { color: var(--faint); }
 .open-btn { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-sm); border: 1px solid var(--line); color: var(--muted); background: var(--surface); transition: all .15s; }
 .open-btn:hover { color: var(--accent); border-color: var(--accent); }
-@media (max-width: 640px) { .arttable th.c-seen { display: none; } .arttable td.c-seen { display: none; } .arttable th.c-src { width: 28%; } }
+@media (max-width: 760px) { .arttable th.c-seen, .arttable td.c-seen { display: none; } }
+@media (max-width: 560px) { .arttable th.c-src, .arttable td.c-src { display: none; } .arttable th.c-typ { width: 22%; } }
 
 /* ---------- Badges ---------- */
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 5px; white-space: nowrap; line-height: 1.5; }
@@ -282,6 +284,11 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .d-outlet { font-weight: 700; font-size: 12.5px; letter-spacing: .02em; color: var(--accent); }
 .d-title { font-size: clamp(22px, 3.2vw, 32px); font-weight: 700; line-height: 1.18; letter-spacing: -0.02em; margin: 0 0 14px; }
 .d-dek { font-size: 16px; color: var(--muted); line-height: 1.6; margin: 0 0 20px; }
+.badge.topicbadge { background: var(--accent-sub); color: var(--accent); }
+.cat-banner { display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin-bottom: 20px; background: var(--accent-sub); border-radius: var(--r); border: 1px solid transparent; }
+.cat-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+.cat-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.cat-chip { font-size: 13.5px; font-weight: 600; padding: 5px 13px; border-radius: 99px; background: var(--surface); color: var(--ink); border: 1px solid var(--line-2); }
 .d-hero { border-radius: var(--r); overflow: hidden; margin-bottom: 20px; border: 1px solid var(--line); }
 .d-hero img { width: 100%; display: block; object-fit: cover; max-height: 360px; }
 .statbar { display: flex; gap: 28px; flex-wrap: wrap; padding: 16px 20px; }

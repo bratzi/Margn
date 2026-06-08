@@ -121,10 +121,12 @@ function extractMeta(html: string, url: string) {
   const metaAuthor = metaContent(html, "author", "article:author");
   if (metaAuthor && !authorList.includes(metaAuthor)) authorList.push(metaAuthor);
 
-  // Keywords
-  const kwRaw = article.keywords ?? metaContent(html, "keywords", "article:tag") ?? "";
-  const keywords: string[] = (typeof kwRaw === "string" ? kwRaw.split(/[,;|]/) : kwRaw)
-    .map((k: string) => k.trim().toLowerCase()).filter((k: string) => k.length > 1 && k.length < 60);
+  // Keywords (JSON-LD keywords + meta news_keywords/keywords/article:tag)
+  const kwRaw = article.keywords ?? metaContent(html, "news_keywords", "keywords", "article:tag") ?? "";
+  const kwArr = Array.isArray(kwRaw) ? kwRaw : String(kwRaw).split(/[,;|]/);
+  const keywords: string[] = kwArr
+    .map((k: string) => String(k).trim().toLowerCase())
+    .filter((k: string) => k.length > 1 && k.length < 60);
 
   // Kategorien
   const catRaw = article.articleSection ?? metaContent(html, "article:section") ?? "";
@@ -155,20 +157,21 @@ function classifyAuthorStatus(authors: string[]): "named" | "anonymous" | "none"
 }
 
 // Junction-Tabellen (authors/keywords/categories) befüllen.
+// Achtung: keywords nutzt Spalte 'term', authors/categories nutzen 'name'.
 async function upsertDimensions(articleId: number, authors: string[], keywords: string[], categories: string[]) {
-  const save = async (table: string, junctionTable: string, articleCol: string, dimCol: string, values: string[]) => {
+  const save = async (table: string, nameCol: string, junctionTable: string, articleCol: string, dimCol: string, values: string[]) => {
     if (!values.length) return;
-    // Dimensionen upserten
-    await sb.from(table).upsert(values.map((v) => ({ name: v })), { onConflict: "name", ignoreDuplicates: true });
-    const { data } = await sb.from(table).select("id,name").in("name", values);
+    const uniq = [...new Set(values.map((v) => v.trim()).filter(Boolean))].slice(0, 25);
+    await sb.from(table).upsert(uniq.map((v) => ({ [nameCol]: v })), { onConflict: nameCol, ignoreDuplicates: true });
+    const { data } = await sb.from(table).select(`id,${nameCol}`).in(nameCol, uniq);
     if (!data?.length) return;
     const rows = data.map((d: any) => ({ [articleCol]: articleId, [dimCol]: d.id }));
     await sb.from(junctionTable).upsert(rows, { onConflict: `${articleCol},${dimCol}`, ignoreDuplicates: true });
   };
   await Promise.all([
-    save("authors", "article_authors", "article_id", "author_id", authors),
-    save("keywords", "article_keywords", "article_id", "keyword_id", keywords),
-    save("categories", "article_categories", "article_id", "category_id", categories),
+    save("authors", "name", "article_authors", "article_id", "author_id", authors),
+    save("keywords", "term", "article_keywords", "article_id", "keyword_id", keywords),
+    save("categories", "name", "article_categories", "article_id", "category_id", categories),
   ]);
 }
 

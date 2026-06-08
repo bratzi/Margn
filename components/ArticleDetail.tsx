@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil } from "@/components/icons";
+import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder } from "@/components/icons";
+import { topicLabel } from "@/lib/topics";
 
 type Detail = {
   id: number; url: string; title: string | null; description: string | null; og_image: string | null;
   published_at: string | null; modified_at: string | null; paywalled: boolean | null;
   word_count: number | null; reading_min: number | null; article_type: string | null;
-  lang_detected: string | null; first_seen: string | null; author_status: string | null;
+  lang_detected: string | null; first_seen: string | null; author_status: string | null; topic: string | null;
   outlet: string; country: string; base_url: string; depth: number | null;
   revision_count: number | null; extension_count: number | null; edit_count: number | null;
 };
@@ -71,6 +72,7 @@ export default function ArticleDetail({ id }: { id: number }) {
       <div className="d-kicker">
         <a href={a.base_url} target="_blank" rel="noreferrer" className="d-outlet">{a.outlet}</a>
         <span className="cc">{a.country}</span>
+        {a.topic && <span className="badge topicbadge"><Folder /> {topicLabel(a.topic)}</span>}
         <TypeBadge type={type} />
         {a.paywalled === true && <span className="badge lock"><Lock /> Paywall</span>}
         {a.paywalled === false && <span className="badge free"><LockOpen /> Frei zugänglich</span>}
@@ -78,6 +80,14 @@ export default function ArticleDetail({ id }: { id: number }) {
 
       <h1 className="d-title">{a.title ?? a.url.replace(/^https?:\/\/(www\.)?/, "")}</h1>
       {a.description && <p className="d-dek">{a.description}</p>}
+
+      {/* Kategorien prominent */}
+      {categories.length > 0 && (
+        <div className="cat-banner">
+          <span className="cat-label">Ressort</span>
+          <div className="cat-chips">{categories.map((x) => <span key={x} className="cat-chip">{x}</span>)}</div>
+        </div>
+      )}
 
       {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
 
@@ -98,8 +108,11 @@ export default function ArticleDetail({ id }: { id: number }) {
           ? <span className="badge wait">Redaktion / Agentur{authors.length ? ` · ${authors.join(", ")}` : ""}</span>
           : <span className="badge neutral">Kein Autor genannt</span>}
       </DL>
-      {categories.length > 0 && <DL h="Ressort"><div className="row">{categories.map((x) => <span key={x} className="tag g">{x}</span>)}</div></DL>}
-      {keywords.length > 0 && <DL h="Schlagwörter"><div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div></DL>}
+      <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>
+        {keywords.length > 0
+          ? <div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div>
+          : <span className="faint" style={{ fontSize: 13 }}>Keine Schlagwörter im Quelltext gefunden (oder noch nicht erfasst).</span>}
+      </DL>
 
       {/* Seitenbaum */}
       {segs.length > 0 && (
