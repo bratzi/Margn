@@ -106,9 +106,11 @@ function extractMeta(html: string, url: string) {
     ? iaff.some(notFree) && !iaff.some(isFree)
     : PAYWALL_CSS.test(html);
 
-  // Artikeltyp aus @type
+  // Artikeltyp aus @type … ergänzt um URL/Titel-Erkennung für Liveblogs
+  // (FAZ/Spiegel u.a. liefern KEIN LiveBlogPosting-@type, tragen es aber im Pfad/Titel).
   const rawType = typeof article["@type"] === "string" ? article["@type"] : "NewsArticle";
-  const article_type = TYPE_MAP[rawType] ?? "news";
+  const isLiveByText = /liveblog|live-blog|liveticker|live-ticker|newsblog|en-direct/i.test(url + " " + (title ?? ""));
+  const article_type = isLiveByText ? "liveblog" : (TYPE_MAP[rawType] ?? "news");
 
   // Wörter + Lesezeit (sichtbarer Text)
   const visibleText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
