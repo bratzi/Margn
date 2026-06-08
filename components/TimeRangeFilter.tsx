@@ -36,20 +36,19 @@ export default function TimeRangeFilter({
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeSources), [activeSources]);
 
-  const { series, maxV } = useMemo(() => {
+  const { series, maxTotal, totals } = useMemo(() => {
     const map = new Map<number, Map<string, number>>();
     for (const r of rows) { if (!map.has(r.source_id)) map.set(r.source_id, new Map()); map.get(r.source_id)!.set(r.day, r.n); }
-    let mx = 1;
     const ser = sources.filter((s) => act.has(s.id)).map((s) => {
       const m = map.get(s.id); const vals = days.map((d) => m?.get(d) ?? 0);
-      mx = Math.max(mx, ...vals);
       return { id: s.id, color: colorById.get(s.id)!, vals };
     });
-    return { series: ser, maxV: mx };
+    const tot = days.map((_, i) => ser.reduce((sum, s) => sum + s.vals[i], 0));
+    return { series: ser, maxTotal: Math.max(1, ...tot), totals: tot };
   }, [rows, sources, act, days, colorById]);
 
   const X = (i: number) => (i / (N - 1)) * VW;
-  const Y = (v: number) => PADT + (1 - v / maxV) * PH;
+  const colW = (VW / N) * 0.72;
   const pctOf = (i: number) => (i / (N - 1)) * 100;
 
   const idxFromClient = useCallback((clientX: number) => {
@@ -109,10 +108,20 @@ export default function TimeRangeFilter({
       <div className="trf-chart" ref={trackRef}>
         <svg className="trf-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
           <line x1={0} y1={PADT + PH} x2={VW} y2={PADT + PH} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-          {series.map((s) => (
-            <polyline key={s.id} fill="none" stroke={s.color} strokeWidth="1.6" strokeLinejoin="round" vectorEffect="non-scaling-stroke"
-              points={s.vals.map((v, i) => `${X(i)},${Y(v)}`).join(" ")} />
-          ))}
+          {/* Gestapelte Säulen pro Tag (Höhe = veröffentlichte Artikel, Farbe je Publizist) */}
+          {days.map((_, i) => {
+            let yBottom = PADT + PH;
+            return (
+              <g key={i}>
+                {series.map((s) => {
+                  const h = (s.vals[i] / maxTotal) * PH;
+                  if (h <= 0) return null;
+                  const y = yBottom - h; yBottom = y;
+                  return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={h} fill={s.color} opacity={0.92} />;
+                })}
+              </g>
+            );
+          })}
         </svg>
         {/* Overlays */}
         <div className="trf-dim" style={{ left: 0, width: `${pctOf(fromIdx)}%` }} />
