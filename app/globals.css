@@ -340,6 +340,19 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .kw-row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; overflow: hidden; max-height: 22px; }
 .kw-chip { font-size: 10.5px; padding: 1px 7px; border-radius: 99px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
 .cell-nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---------- Scrollbare Wide-Table ---------- */
+.table-scroll { overflow-x: auto; }
+.arttable.wide-table { table-layout: auto; min-width: 1240px; width: 100%; }
+.wide-table thead th { white-space: nowrap; }
+.wide-table thead th.num, .wide-table td.num { text-align: right; }
+.wide-table td { vertical-align: middle; }
+.wide-table .c-art { width: 320px; min-width: 320px; max-width: 320px; }
+.wide-table .c-art .art-row { max-width: 320px; }
+.wide-table .c-art .url { max-width: 100%; }
+.rev-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.rev-badge i { font-style: normal; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 99px; }
+.rev-badge .rev-e { background: var(--red-sub); color: var(--red); }
+.rev-badge .rev-x { background: var(--green-sub); color: var(--green); }
 .art-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .url { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .url:hover { color: var(--accent); }
@@ -406,15 +419,16 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .tl-when { font-size:12px; color:var(--faint); font-variant-numeric:tabular-nums; }
 /* Gelber Textmarker-Effekt (Highlighter) für Änderungen */
 .hl { background-image: linear-gradient(180deg, transparent 0 56%, var(--marker) 56% 94%, transparent 94%); padding: 0 3px; border-radius: 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
-.tl-passage { font-size:13px; line-height:1.6; padding:10px 14px; border-radius:8px; margin-top:7px; }
-.tl-passage.add { background: var(--green-sub); border-left:3px solid var(--green); }
-.tl-passage.edit { background: var(--marker-sub); border-left:3px solid var(--amber); }
-.tl-passage .pk { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--amber); margin-right:6px; }
+/* neutraler Kasten → der gelbe Marker auf dem Text kontrastiert sauber (kein gelb-auf-gelb) */
+.tl-passage { font-size:13px; line-height:1.7; padding:11px 14px; border-radius:8px; margin-top:7px; background: var(--surface-2); border:1px solid var(--line); }
+.tl-passage.add { border-left:3px solid var(--green); }
+.tl-passage.edit { border-left:3px solid var(--amber); }
+.tl-passage .pk { display:block; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--amber); margin-bottom:5px; }
 .tl-passage.add .pk { color: var(--green); }
-.tl-title-change { padding:10px 14px; border-radius:8px; background: var(--marker-sub); border-left:3px solid var(--amber); }
+.tl-title-change { padding:11px 14px; border-radius:8px; background: var(--surface-2); border:1px solid var(--line); border-left:3px solid var(--amber); }
 .tl-title-change .old { color:var(--muted); text-decoration:line-through; text-decoration-color: color-mix(in srgb, var(--red) 55%, transparent); font-size:13px; }
-.tl-title-change .arrow { color:var(--faint); font-size:11px; margin:2px 0; display:block; }
-.tl-title-change .new { color:var(--ink); font-weight:650; font-size:14px; }
+.tl-title-change .arrow { color:var(--faint); font-size:11px; margin:3px 0; display:block; font-weight:500; }
+.tl-title-change .new { color:var(--ink); font-weight:650; font-size:14.5px; line-height:1.7; }
 
 .empty { color: var(--faint); font-size: 13px; padding: 16px; background: var(--surface-2); border-radius: 7px; border-left: 3px solid var(--line-2); line-height: 1.6; }
 

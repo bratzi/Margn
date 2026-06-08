@@ -13,7 +13,13 @@ import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
 import Donut from "@/components/Donut";
 import { topicLabel } from "@/lib/topics";
 
-type Row = { id: number; article_id: number | null; url: string; outlet: string; country: string | null; analyzed: boolean; paywalled: boolean | null; ptype: string; topic: string | null; author_status: string | null };
+type Row = {
+  id: number; article_id: number | null; url: string; outlet: string; country: string | null;
+  analyzed: boolean; paywalled: boolean | null; ptype: string; topic: string | null; author_status: string | null;
+  discovered_at: string | null; last_seen: string | null; published_at: string | null;
+  word_count: number | null; reading_min: number | null; revision_count: number | null;
+  edit_count: number | null; extension_count: number | null; lang_detected: string | null;
+};
 
 const PTYPE: Record<string, { l: string; c: string }> = {
   artikel: { l: "Artikel", c: "neutral" }, paywall: { l: "Paywall", c: "lock" },
@@ -25,6 +31,8 @@ const AUTHOR: Record<string, { l: string; c: string }> = {
 };
 const PAGE = 30;
 const shortUrl = (u: string) => { try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; } catch { return { host: "", path: u }; } };
+const fmtDT = (iso: string | null) => iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+const fmtD = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
 
 export default function ArticleDashboard() {
   const f = useFilters();
@@ -61,7 +69,7 @@ export default function ArticleDashboard() {
   const loadRows = useCallback(async () => {
     if (!f.active.size) { setRows([]); setTotal(0); return; }
     if (f.keyword !== "all" && kwIds === null) return;
-    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status", { count: "exact" }).in("source_id", f.activeArr);
+    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected", { count: "exact" }).in("source_id", f.activeArr);
     if (f.status === "analyzed") q = q.eq("analyzed", true); else if (f.status === "backlog") q = q.eq("analyzed", false);
     if (f.paywall === "yes") q = q.eq("paywalled", true); else if (f.paywall === "no") q = q.eq("paywalled", false);
     if (f.atype !== "all") q = q.eq("ptype", f.atype);
@@ -134,25 +142,27 @@ export default function ArticleDashboard() {
           </>
         )}
 
-        <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
-        <div className="panel">
-          <table className="arttable">
+        <h2 className="section-h">Artikel <span className="count">{ctxLabel} · ↔ scrollbar</span></h2>
+        <div className="panel table-scroll">
+          <table className="arttable wide-table">
             <thead><tr>
-              <th className="c-src" style={{ cursor: "pointer" }} onClick={() => setSortCol("src")}>Quelle {sortCol === "src" && "↓"}</th>
               <th className="c-art">Seite</th>
-              <th className="c-typ" style={{ cursor: "pointer" }} onClick={() => setSortCol("type")}>Typ {sortCol === "type" && "↓"}</th>
-              <th className="c-topic" style={{ cursor: "pointer" }} onClick={() => setSortCol("topic")}>Thema {sortCol === "topic" && "↓"}</th>
-              <th className="c-author" style={{ cursor: "pointer" }} onClick={() => setSortCol("author")}>Autor {sortCol === "author" && "↓"}</th>
-              <th className="c-stat" style={{ cursor: "pointer" }} onClick={() => setSortCol("status")}>Status {sortCol === "status" && "↓"}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("src")}>Quelle {sortCol === "src" && "↓"}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("type")}>Typ {sortCol === "type" && "↓"}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("topic")}>Thema {sortCol === "topic" && "↓"}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("author")}>Autor {sortCol === "author" && "↓"}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("status")}>Status {sortCol === "status" && "↓"}</th>
+              <th>Veröffentlicht</th><th>Erster Scan</th><th>Letzter Scan</th>
+              <th className="num">Wörter</th><th className="num">Lesezeit</th><th>Änderungen</th><th>Sprache</th>
             </tr></thead>
             <tbody>
               {rows.map((r) => {
                 const { host, path } = shortUrl(r.url);
                 const kws = r.article_id ? rowKw[r.article_id] : undefined;
+                const rev = r.revision_count ?? 0;
                 return (
                   <tr key={r.id}>
-                    <td className="cell-nowrap c-src">{r.outlet} <span className="cc">{r.country}</span></td>
-                    <td>
+                    <td className="c-art">
                       <div className="art-row">
                         {r.article_id
                           ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={`Details: ${r.url}`}><span className="path">{host}</span>{path}</Link>
@@ -161,14 +171,26 @@ export default function ArticleDashboard() {
                       </div>
                       {kws && kws.length > 0 && <div className="kw-row">{kws.slice(0, 5).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div>}
                     </td>
-                    <td className="c-typ cell-nowrap"><span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span></td>
-                    <td className="c-topic cell-nowrap faint">{r.topic ? topicLabel(r.topic) : "—"}</td>
-                    <td className="c-author cell-nowrap">{r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>}</td>
+                    <td className="cell-nowrap">{r.outlet} <span className="cc">{r.country}</span></td>
+                    <td className="cell-nowrap"><span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span></td>
+                    <td className="cell-nowrap faint">{r.topic ? topicLabel(r.topic) : "—"}</td>
+                    <td className="cell-nowrap">{r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>}</td>
                     <td className="cell-nowrap">{r.analyzed ? <span className="badge ok">analysiert</span> : <span className="badge wait">Backlog</span>}</td>
+                    <td className="cell-nowrap mono faint">{fmtD(r.published_at)}</td>
+                    <td className="cell-nowrap mono faint">{fmtDT(r.discovered_at)}</td>
+                    <td className="cell-nowrap mono faint">{fmtDT(r.last_seen)}</td>
+                    <td className="num tnum faint">{r.word_count ? r.word_count.toLocaleString("de-DE") : "—"}</td>
+                    <td className="num tnum faint">{r.reading_min ? `${r.reading_min} min` : "—"}</td>
+                    <td className="cell-nowrap">
+                      {rev > 0
+                        ? <span className="rev-badge" title={`${r.edit_count ?? 0} Edits · ${r.extension_count ?? 0} Erweiterungen`}>{rev}× {(r.edit_count ?? 0) > 0 && <i className="rev-e">{r.edit_count}E</i>}{(r.extension_count ?? 0) > 0 && <i className="rev-x">{r.extension_count}+</i>}</span>
+                        : <span className="faint">—</span>}
+                    </td>
+                    <td className="cell-nowrap faint" style={{ textTransform: "uppercase", fontSize: 11 }}>{r.lang_detected || r.country?.toLowerCase() || "—"}</td>
                   </tr>
                 );
               })}
-              {!rows.length && <tr><td colSpan={6} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
+              {!rows.length && <tr><td colSpan={13} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
             </tbody>
           </table>
         </div>
