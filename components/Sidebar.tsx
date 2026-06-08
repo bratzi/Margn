@@ -17,8 +17,12 @@ export default function Sidebar() {
   const showFilters = path === "/articles";
   return (
     <aside className="sidebar">
-      <Link href="/articles" className="brand" aria-label="margn">
-        <span className="word">marg<span className="mark">n</span></span>
+      <Link href="/articles" className="brand" aria-label="margn — Medienobservatorium">
+        <span className="brand-mark">m</span>
+        <span className="brand-text">
+          <span className="brand-name">margn</span>
+          <span className="brand-tag">Medienobservatorium</span>
+        </span>
       </Link>
 
       <div className="nav-label">Observatorium</div>
@@ -33,7 +37,7 @@ export default function Sidebar() {
       <div className="spacer" />
       <NextRun />
       <div className="side-foot">
-        <span className="obs">Medienobservatorium</span>
+        <span className="obs">Erscheinungsbild</span>
         <ThemeToggle />
       </div>
     </aside>

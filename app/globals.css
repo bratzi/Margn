@@ -92,9 +92,11 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .sidebar .filters::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-.brand { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px 18px; }
-.brand .word { font-size: 21px; font-weight: 700; letter-spacing: -0.03em; }
-.brand .word .mark { color: var(--accent); }
+.brand { display: flex; align-items: center; gap: 11px; padding: 6px 8px 20px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.brand-mark { width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 21px; font-weight: 800; letter-spacing: -0.04em; color: #fff; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8B5CF6)); box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 32%, transparent); }
+.brand-text { display: flex; flex-direction: column; line-height: 1.12; }
+.brand-name { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+.brand-tag { font-size: 9.5px; color: var(--faint); letter-spacing: .1em; text-transform: uppercase; margin-top: 2px; font-weight: 600; }
 .nav-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); padding: 14px 10px 6px; font-weight: 600; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); color: var(--muted); font-size: 13.5px; font-weight: 500; cursor: pointer; transition: background .15s, color .15s; }
 .nav-item:hover { background: var(--surface-2); color: var(--ink); }
