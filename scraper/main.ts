@@ -32,13 +32,14 @@ type Seed = { url: string; depth: number };
 
 // embed() DEAKTIVIERT – reaktivieren wenn Cluster-Feature wieder aufgenommen wird.
 
-async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<typeof extractMeta>): Promise<number> {
+async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<typeof extractMeta>, extra?: Record<string, unknown>): Promise<number> {
   const row: Record<string, unknown> = { source_id: sourceId, url, last_seen: new Date().toISOString() };
   if (meta) {
     const { authors, keywords, categories, ...rest } = meta;
     Object.assign(row, rest);
     void authors; void keywords; void categories; // handled separately
   }
+  if (extra) Object.assign(row, extra);
   const { data, error } = await sb.from("articles").upsert(row, { onConflict: "url" }).select("id").single();
   if (error) throw error;
   return data.id;
@@ -289,9 +290,9 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
-    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type")
+    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count")
     .eq("url", url).maybeSingle();
-  const id = await upsertArticle(sourceId, url, meta);
+  const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1 });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   if (art) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
   return id;
@@ -652,10 +653,10 @@ async function enrichArticles(sources: Source[]) {
         try {
           // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
           const { data: prev } = await sb.from("articles")
-            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type")
+            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count")
             .eq("id", item.id).maybeSingle();
           const { authors, keywords, categories, ...fields } = meta;
-          await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString() }).eq("id", item.id);
+          await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1 }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
           if (art) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
           done++;
