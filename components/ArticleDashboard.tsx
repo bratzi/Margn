@@ -116,7 +116,9 @@ export default function ArticleDashboard() {
     { key: "author_status", label: "Autor", width: 110, value: (r) => r.author_status ?? "—", render: (r) => r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span> },
     { key: "keywords", label: "Schlagwörter", width: 220, sortable: false, groupable: false, value: (r) => (r.article_id ? rowKw[r.article_id]?.join(" ") : "") ?? "",
       render: (r) => { const kws = r.article_id ? rowKw[r.article_id] : undefined; return kws && kws.length ? <div className="kw-row">{kws.slice(0, 6).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div> : <span className="faint">—</span>; } },
-    { key: "scan", label: "Erfassung", width: 120, value: (r) => ((r.scan_count ?? 1) <= 1 ? "Neu" : "Wiederholt"), render: (r) => (r.scan_count ?? 1) <= 1 ? <span className="badge info">Neu</span> : <span className="badge neutral">{r.scan_count}× gescannt</span> },
+    { key: "scan", label: "Erfassung", width: 120, value: (r) => ((r.scan_count ?? 1) <= 1 ? "Neu" : "Wiederholt"), render: (r) => (r.scan_count ?? 1) <= 1
+      ? <span className="new-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg>Neu</span>
+      : <span className="badge neutral">{r.scan_count}× gescannt</span> },
     { key: "published_at", label: "Veröffentlicht", width: 110, value: (r) => r.published_at ?? "", render: (r) => <span className="mono faint">{fmtD(r.published_at)}</span> },
     { key: "discovered_at", label: "Erster Scan", width: 125, value: (r) => r.discovered_at ?? "", render: (r) => <span className="mono faint">{fmtDT(r.discovered_at)}</span> },
     { key: "last_seen", label: "Letzter Scan", width: 125, value: (r) => r.last_seen ?? "", render: (r) => <span className="mono faint">{fmtDT(r.last_seen)}</span> },
@@ -170,7 +172,7 @@ export default function ArticleDashboard() {
         )}
 
         <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
-        <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={1700} />
+        <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={1700} rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} />
 
         <div className="pager">
           <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>← Zurück</button>

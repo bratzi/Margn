@@ -360,6 +360,12 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .dt tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .dt tbody tr:hover { background: var(--surface-2); }
+/* Neu erfasste Artikel (erster Scan): dezent grün hinterlegt */
+.dt tbody tr.row-new { background: var(--green-sub); }
+.dt tbody tr.row-new:hover { background: color-mix(in srgb, var(--green-sub) 70%, var(--surface-2)); }
+.dt tbody tr.row-new td:first-child { box-shadow: inset 2px 0 0 var(--green); }
+.new-dot { display: inline-flex; align-items: center; gap: 5px; color: var(--green); font-weight: 600; font-size: 11.5px; }
+.new-dot svg { width: 12px; height: 12px; }
 .dt-filterrow th { padding: 5px 8px; background: var(--surface); }
 .dt-filterrow input { width: 100%; font-size: 11.5px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--ink); font-family: inherit; }
 .dt-group { cursor: pointer; background: var(--accent-sub); }

@@ -14,8 +14,8 @@ export type Col<T> = {
   groupable?: boolean;
 };
 
-export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100 }: {
-  columns: Col<T>[]; rows: T[]; rowKey: (r: T) => string | number; minWidth?: number;
+export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass }: {
+  columns: Col<T>[]; rows: T[]; rowKey: (r: T) => string | number; minWidth?: number; rowClass?: (r: T) => string;
 }) {
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
@@ -111,11 +111,11 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100 }:
             )}
           </thead>
           <tbody>
-            {!groups && view.map((r) => <tr key={rowKey(r)}><Cells r={r} /></tr>)}
+            {!groups && view.map((r) => <tr key={rowKey(r)} className={rowClass?.(r)}><Cells r={r} /></tr>)}
             {groups && groups.map(([g, rs]) => (
               <GroupBlock key={g} g={g} count={rs.length} colSpan={columns.length + 1}
                 collapsed={collapsed.has(g)} onToggle={() => setCollapsed((s) => { const n = new Set(s); n.has(g) ? n.delete(g) : n.add(g); return n; })}>
-                {!collapsed.has(g) && rs.map((r) => <tr key={rowKey(r)}><Cells r={r} /></tr>)}
+                {!collapsed.has(g) && rs.map((r) => <tr key={rowKey(r)} className={rowClass?.(r)}><Cells r={r} /></tr>)}
               </GroupBlock>
             ))}
             {!view.length && <tr><td colSpan={columns.length + 1} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Zeilen.</td></tr>}
