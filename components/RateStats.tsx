@@ -5,76 +5,88 @@ import { supabase } from "@/lib/supabase";
 import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS } from "@/components/TimeRangeFilter";
 
-type TL = { source_id: number; day: string; n: number };
+type B = { source_id: number; bucket: string; n: number };
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000, VH = 200;
 
 export default function RateStats() {
   const f = useFilters();
   const { sources, activeArr } = f;
-  const [rows, setRows] = useState<TL[]>([]);
-  const [gran, setGran] = useState<"day" | "week">("day");
+  const [rows, setRows] = useState<B[]>([]);
+
+  // Fenster aus dem Timeline-Filter
+  const fromIso = f.days[f.rangeIdx.from] + "T00:00:00Z";
+  const toIso = f.days[f.rangeIdx.to] + "T23:59:59Z";
+  const spanDays = f.rangeIdx.to - f.rangeIdx.from + 1;
+  // Zeiteinheit dynamisch: schmales Fenster → Stunden, mittel → Tage, breit → Wochen
+  const unit = spanDays <= 3 ? "hour" : spanDays <= 45 ? "day" : "week";
 
   useEffect(() => {
     if (!activeArr.length) { setRows([]); return; }
-    supabase.rpc("publish_timeline_f", {
-      p_sources: activeArr, p_topic: f.topic === "all" ? null : f.topic,
-      p_paywall: f.paywall === "all" ? null : f.paywall, p_author: f.author === "all" ? null : f.author,
-      p_lang: f.lang === "all" ? null : f.lang,
-    }).then(({ data }) => setRows((data as TL[]) ?? []));
-  }, [activeArr.join(","), f.topic, f.paywall, f.author, f.lang]);
+    const nn = (v: string) => (v === "all" ? null : v);
+    supabase.rpc("publish_buckets_f", {
+      p_sources: activeArr, p_topic: nn(f.topic), p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang),
+      p_from: fromIso, p_to: toIso, p_bucket: unit,
+    }).then(({ data }) => setRows((data as B[]) ?? []));
+  }, [activeArr.join(","), f.topic, f.paywall, f.author, f.lang, fromIso, toIso, unit]);
 
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
-  // Achse = NUR das im Timeline-Filter unten gewählte Fenster (rangeIdx) → zoomt interaktiv mit.
+  // Bucket-Achse generieren (lückenlos) im Fenster
   const buckets = useMemo(() => {
-    const days = f.days.slice(f.rangeIdx.from, f.rangeIdx.to + 1);
-    if (gran === "day") return days.map((day) => ({ label: day, days: [day] }));
-    const weeks: { label: string; days: string[] }[] = [];
-    for (let i = 0; i < days.length; i += 7) weeks.push({ label: days[i], days: days.slice(i, i + 7) });
-    return weeks;
-  }, [gran, f.days, f.rangeIdx.from, f.rangeIdx.to]);
+    const out: string[] = [];
+    const start = new Date(fromIso), end = new Date(toIso);
+    const cur = new Date(start);
+    if (unit === "hour") cur.setUTCMinutes(0, 0, 0);
+    else if (unit === "day") cur.setUTCHours(0, 0, 0, 0);
+    else { cur.setUTCHours(0, 0, 0, 0); cur.setUTCDate(cur.getUTCDate() - ((cur.getUTCDay() + 6) % 7)); } // Wochenstart Mo
+    let guard = 0;
+    while (cur <= end && guard++ < 2000) {
+      out.push(cur.toISOString());
+      if (unit === "hour") cur.setUTCHours(cur.getUTCHours() + 1);
+      else if (unit === "day") cur.setUTCDate(cur.getUTCDate() + 1);
+      else cur.setUTCDate(cur.getUTCDate() + 7);
+    }
+    return out;
+  }, [fromIso, toIso, unit]);
 
   const { series, maxTotal } = useMemo(() => {
     const map = new Map<number, Map<string, number>>();
-    for (const r of rows) { if (!map.has(r.source_id)) map.set(r.source_id, new Map()); map.get(r.source_id)!.set(r.day, r.n); }
-    const ser = sources.filter((s) => act.has(s.id)).map((s) => ({
-      id: s.id, color: colorById.get(s.id)!,
-      vals: buckets.map((b) => b.days.reduce((sum, d) => sum + (map.get(s.id)?.get(d) ?? 0), 0)),
-    }));
+    const keyOf = (iso: string) => { const d = new Date(iso); if (unit === "hour") d.setUTCMinutes(0, 0, 0); else if (unit === "day") d.setUTCHours(0, 0, 0, 0); else { d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); } return d.toISOString(); };
+    for (const r of rows) { if (!map.has(r.source_id)) map.set(r.source_id, new Map()); const m = map.get(r.source_id)!; const k = keyOf(r.bucket); m.set(k, (m.get(k) ?? 0) + r.n); }
+    const ser = sources.filter((s) => act.has(s.id)).map((s) => ({ id: s.id, color: colorById.get(s.id)!, vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0) }));
     const tot = buckets.map((_, i) => ser.reduce((sum, s) => sum + s.vals[i], 0));
     return { series: ser, maxTotal: Math.max(1, ...tot) };
-  }, [rows, sources, act, buckets, colorById]);
+  }, [rows, sources, act, buckets, colorById, unit]);
 
-  if (!rows.length) return null;
   const NB = buckets.length;
   const X = (i: number) => (i / Math.max(1, NB - 1)) * VW;
-  const colW = (VW / NB) * (gran === "day" ? 0.7 : 0.78);
-  const fmt = (ds: string) => new Date(ds + "T00:00:00Z").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
+  const colW = Math.min(40, (VW / Math.max(1, NB)) * 0.72);
+  const unitLabel = unit === "hour" ? "stündlich" : unit === "day" ? "täglich" : "wöchentlich";
+  const fmtAxis = (iso: string) => { const d = new Date(iso); return unit === "hour" ? d.toLocaleTimeString("de-DE", { hour: "2-digit", timeZone: "UTC" }) + "h" : d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" }); };
   const total = series.reduce((s, x) => s + x.vals.reduce((a, b) => a + b, 0), 0);
-  const span = f.rangeIdx.to - f.rangeIdx.from + 1;
-  const fromD = fmt(f.days[f.rangeIdx.from]), toD = fmt(f.days[f.rangeIdx.to]);
+  const fromD = new Date(fromIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
+  const toD = new Date(toIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 
   return (
     <>
-      <h2 className="section-h" style={{ alignItems: "center" }}>Publikationen über Zeit <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD} ({span} {span === 1 ? "Tag" : "Tage"})</span>
-        <div className="seg" style={{ marginLeft: "auto" }}>
-          <button className={gran === "day" ? "on" : ""} onClick={() => setGran("day")}>Pro Tag</button>
-          <button className={gran === "week" ? "on" : ""} onClick={() => setGran("week")}>Pro Woche</button>
-        </div>
+      <h2 className="section-h" style={{ alignItems: "center" }}>Publikationen über Zeit
+        <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD} · <b style={{ color: "var(--accent)" }}>{unitLabel}</b></span>
+        <span className="count" style={{ marginLeft: "auto", fontStyle: "italic" }}>Zeiteinheit passt sich dem Zoom an ↓</span>
       </h2>
       <div className="panel pad">
-        <div className="rate-legend">{series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}</div>
-        <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="rate-svg">
-          <line x1={0} y1={VH} x2={VW} y2={VH} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-          {buckets.map((_, i) => {
-            let yb = VH;
-            return <g key={i}>{series.map((s) => { const h = (s.vals[i] / maxTotal) * (VH - 6); if (h <= 0) return null; const y = yb - h; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={h} fill={s.color} rx={gran === "week" ? 2 : 0}><title>{`${nameById.get(s.id)}: ${s.vals[i]}`}</title></rect>; })}</g>;
-          })}
-        </svg>
-        <div className="rate-axis">{buckets.filter((_, i) => i % Math.ceil(NB / 8) === 0).map((b, k, arr) => <span key={b.label} style={{ left: `${(buckets.indexOf(b) / Math.max(1, NB - 1)) * 100}%`, transform: k === 0 ? "none" : k === arr.length - 1 ? "translateX(-100%)" : "translateX(-50%)" }}>{fmt(b.label)}</span>)}</div>
+        {!rows.length ? <p className="faint" style={{ fontSize: 13 }}>Keine veröffentlichten Artikel im gewählten Zeitraum.</p> : (
+          <>
+            <div className="rate-legend">{series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}</div>
+            <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="rate-svg">
+              <line x1={0} y1={VH} x2={VW} y2={VH} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              {buckets.map((_, i) => { let yb = VH; return <g key={i}>{series.map((s) => { const h = (s.vals[i] / maxTotal) * (VH - 6); if (h <= 0) return null; const y = yb - h; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={h} fill={s.color} rx={NB < 30 ? 2 : 0}><title>{`${nameById.get(s.id)}: ${s.vals[i]}`}</title></rect>; })}</g>; })}
+            </svg>
+            <div className="rate-axis">{buckets.filter((_, i) => i % Math.max(1, Math.ceil(NB / 9)) === 0).map((b) => { const i = buckets.indexOf(b); return <span key={b} style={{ left: `${(i / Math.max(1, NB - 1)) * 100}%`, transform: i === 0 ? "none" : i >= NB - 2 ? "translateX(-100%)" : "translateX(-50%)" }}>{fmtAxis(b)}</span>; })}</div>
+          </>
+        )}
       </div>
     </>
   );
