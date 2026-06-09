@@ -342,6 +342,34 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .kw-row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; overflow: hidden; max-height: 22px; }
 .kw-chip { font-size: 10.5px; padding: 1px 7px; border-radius: 99px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
 .cell-nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---------- DataTable (sortier-/filter-/gruppierbar, resizable, nummeriert) ---------- */
+.dt-wrap { position: relative; }
+.dt-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 4px; flex-wrap: wrap; }
+.dt-tbtn { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 5px 11px; font-size: 12px; color: var(--muted); cursor: pointer; font-family: inherit; transition: all .14s; }
+.dt-tbtn:hover { border-color: var(--accent); color: var(--ink); }
+.dt-tbtn.on { background: var(--accent-sub); border-color: var(--accent); color: var(--accent); }
+.dt-count { margin-left: auto; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.dt-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); }
+table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.dt thead th { position: relative; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; user-select: none; }
+.dt thead th.num { text-align: right; }
+.dt .dt-num { width: 44px; min-width: 44px; text-align: right; color: var(--faint); font-variant-numeric: tabular-nums; padding-right: 12px; }
+.dt-h i { color: var(--accent); font-style: normal; }
+.dt-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; }
+.dt-resize:hover { background: var(--accent); opacity: .3; }
+.dt tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dt tbody tr:hover { background: var(--surface-2); }
+.dt-filterrow th { padding: 5px 8px; background: var(--surface); }
+.dt-filterrow input { width: 100%; font-size: 11.5px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--ink); font-family: inherit; }
+.dt-group { cursor: pointer; background: var(--accent-sub); }
+.dt-group td { padding: 8px 12px; font-weight: 600; font-size: 12.5px; color: var(--accent); border-bottom: 1px solid var(--line); }
+.dt-grp-tog { font-size: 9px; margin-right: 6px; }
+.dt-grp-n { display: inline-block; margin-left: 8px; background: var(--accent); color: #fff; border-radius: 99px; padding: 1px 8px; font-size: 11px; }
+.dt-menu { position: fixed; z-index: 100; background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r-sm); box-shadow: var(--shadow); padding: 5px; min-width: 200px; display: flex; flex-direction: column; }
+.dt-menu button { text-align: left; background: none; border: 0; padding: 8px 11px; font-size: 12.5px; color: var(--ink); cursor: pointer; border-radius: var(--r-sm); font-family: inherit; }
+.dt-menu button:hover { background: var(--accent-sub); color: var(--accent); }
+
 /* ---------- Scrollbare Wide-Table ---------- */
 .table-scroll { overflow-x: auto; }
 .arttable.wide-table { table-layout: auto; min-width: 1240px; width: 100%; }

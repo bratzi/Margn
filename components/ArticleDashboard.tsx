@@ -11,6 +11,7 @@ import TopicChart from "@/components/TopicChart";
 import RateStats from "@/components/RateStats";
 import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
 import Donut from "@/components/Donut";
+import DataTable, { type Col } from "@/components/DataTable";
 import { topicLabel } from "@/lib/topics";
 
 type Row = {
@@ -18,7 +19,7 @@ type Row = {
   analyzed: boolean; paywalled: boolean | null; ptype: string; topic: string | null; author_status: string | null;
   discovered_at: string | null; last_seen: string | null; published_at: string | null;
   word_count: number | null; reading_min: number | null; revision_count: number | null;
-  edit_count: number | null; extension_count: number | null; lang_detected: string | null;
+  edit_count: number | null; extension_count: number | null; lang_detected: string | null; scan_count: number | null;
 };
 
 const PTYPE: Record<string, { l: string; c: string }> = {
@@ -29,7 +30,7 @@ const PTYPE: Record<string, { l: string; c: string }> = {
 const AUTHOR: Record<string, { l: string; c: string }> = {
   named: { l: "Autor", c: "ok" }, anonymous: { l: "Redaktion", c: "wait" },
 };
-const PAGE = 30;
+const PAGE = 100;
 const shortUrl = (u: string) => { try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; } catch { return { host: "", path: u }; } };
 const fmtDT = (iso: string | null) => iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 const fmtD = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
@@ -41,7 +42,6 @@ export default function ArticleDashboard() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [kwIds, setKwIds] = useState<number[] | null>(null);
-  const [sortCol, setSortCol] = useState<"recent" | "src" | "type" | "topic" | "author">("recent");
   const [agg, setAgg] = useState({ articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 });
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   useEffect(() => { setUpdatedAt(new Date()); }, [f.ready]);
@@ -70,8 +70,9 @@ export default function ArticleDashboard() {
   const loadRows = useCallback(async () => {
     if (!f.active.size) { setRows([]); setTotal(0); return; }
     if (f.keyword !== "all" && kwIds === null) return;
-    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected", { count: "exact" }).in("source_id", f.activeArr);
+    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", f.activeArr);
     if (f.status === "analyzed") q = q.eq("analyzed", true); else if (f.status === "backlog") q = q.eq("analyzed", false);
+    if (f.status === "new") q = q.lte("scan_count", 1); else if (f.status === "rescanned") q = q.gte("scan_count", 2);
     if (f.paywall === "yes") q = q.eq("paywalled", true); else if (f.paywall === "no") q = q.eq("paywalled", false);
     if (f.atype !== "all") q = q.eq("ptype", f.atype);
     if (f.author !== "all") q = q.eq("author_status", f.author);
@@ -80,10 +81,9 @@ export default function ArticleDashboard() {
     if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
     if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
     if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
-    const col = sortCol === "src" ? "outlet" : sortCol === "type" ? "ptype" : sortCol === "topic" ? "topic" : sortCol === "author" ? "author_status" : "discovered_at";
-    const { data, count } = await q.order(col, { ascending: sortCol !== "recent" }).range(page * PAGE, page * PAGE + PAGE - 1);
+    const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.lang, f.rangeFrom, f.rangeTo, kwIds, f.keyword, page, sortCol]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.lang, f.rangeFrom, f.rangeTo, kwIds, f.keyword, page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
   useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.keyword, f.lang, f.rangeFrom, f.rangeTo]);
@@ -100,6 +100,32 @@ export default function ArticleDashboard() {
 
   const pages = Math.max(1, Math.ceil(total / PAGE));
   const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${f.topic !== "all" ? ` · ${topicLabel(f.topic)}` : ""}${f.keyword !== "all" ? ` · #${f.keyword}` : ""}`;
+
+  const cols: Col<Row>[] = useMemo(() => [
+    { key: "seite", label: "Seite", width: 300, sortable: false, groupable: false, value: (r) => r.url,
+      render: (r) => { const { host, path } = shortUrl(r.url); return (
+        <div className="art-row">
+          {r.article_id
+            ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={r.url}><span className="path">{host}</span>{path}</Link>
+            : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
+          <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen"><External size={14} /></a>
+        </div>); } },
+    { key: "outlet", label: "Quelle", width: 130, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></> },
+    { key: "ptype", label: "Typ", width: 100, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span> },
+    { key: "topic", label: "Thema", width: 130, value: (r) => (r.topic ? topicLabel(r.topic) : "—"), render: (r) => <span className="faint">{r.topic ? topicLabel(r.topic) : "—"}</span> },
+    { key: "author_status", label: "Autor", width: 110, value: (r) => r.author_status ?? "—", render: (r) => r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span> },
+    { key: "keywords", label: "Schlagwörter", width: 220, sortable: false, groupable: false, value: (r) => (r.article_id ? rowKw[r.article_id]?.join(" ") : "") ?? "",
+      render: (r) => { const kws = r.article_id ? rowKw[r.article_id] : undefined; return kws && kws.length ? <div className="kw-row">{kws.slice(0, 6).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div> : <span className="faint">—</span>; } },
+    { key: "scan", label: "Erfassung", width: 120, value: (r) => ((r.scan_count ?? 1) <= 1 ? "Neu" : "Wiederholt"), render: (r) => (r.scan_count ?? 1) <= 1 ? <span className="badge info">Neu</span> : <span className="badge neutral">{r.scan_count}× gescannt</span> },
+    { key: "published_at", label: "Veröffentlicht", width: 110, value: (r) => r.published_at ?? "", render: (r) => <span className="mono faint">{fmtD(r.published_at)}</span> },
+    { key: "discovered_at", label: "Erster Scan", width: 125, value: (r) => r.discovered_at ?? "", render: (r) => <span className="mono faint">{fmtDT(r.discovered_at)}</span> },
+    { key: "last_seen", label: "Letzter Scan", width: 125, value: (r) => r.last_seen ?? "", render: (r) => <span className="mono faint">{fmtDT(r.last_seen)}</span> },
+    { key: "word_count", label: "Wörter", width: 90, align: "right", value: (r) => r.word_count ?? 0, render: (r) => <span className="faint">{r.word_count ? r.word_count.toLocaleString("de-DE") : "—"}</span> },
+    { key: "reading_min", label: "Lesezeit", width: 90, align: "right", value: (r) => r.reading_min ?? 0, render: (r) => <span className="faint">{r.reading_min ? `${r.reading_min} min` : "—"}</span> },
+    { key: "revision_count", label: "Änderungen", width: 120, align: "right", value: (r) => r.revision_count ?? 0,
+      render: (r) => { const rev = r.revision_count ?? 0; return rev > 0 ? <span className="rev-badge">{rev}× {(r.edit_count ?? 0) > 0 && <i className="rev-e">{r.edit_count}E</i>}{(r.extension_count ?? 0) > 0 && <i className="rev-x">{r.extension_count}+</i>}</span> : <span className="faint">—</span>; } },
+    { key: "lang", label: "Sprache", width: 80, value: (r) => r.lang_detected || r.country?.toLowerCase() || "—", render: (r) => <span className="faint" style={{ textTransform: "uppercase", fontSize: 11 }}>{r.lang_detected || r.country?.toLowerCase() || "—"}</span> },
+  ], [rowKw]);
 
   return (
     <>
@@ -143,56 +169,8 @@ export default function ArticleDashboard() {
           </>
         )}
 
-        <h2 className="section-h">Artikel <span className="count">{ctxLabel} · ↔ scrollbar</span></h2>
-        <div className="panel table-scroll">
-          <table className="arttable wide-table">
-            <thead><tr>
-              <th className="c-art">Seite</th>
-              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("src")}>Quelle {sortCol === "src" && "↓"}</th>
-              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("type")}>Typ {sortCol === "type" && "↓"}</th>
-              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("topic")}>Thema {sortCol === "topic" && "↓"}</th>
-              <th style={{ cursor: "pointer" }} onClick={() => setSortCol("author")}>Autor {sortCol === "author" && "↓"}</th>
-              <th>Veröffentlicht</th><th>Erster Scan</th><th>Letzter Scan</th>
-              <th className="num">Wörter</th><th className="num">Lesezeit</th><th>Änderungen</th><th>Sprache</th>
-            </tr></thead>
-            <tbody>
-              {rows.map((r) => {
-                const { host, path } = shortUrl(r.url);
-                const kws = r.article_id ? rowKw[r.article_id] : undefined;
-                const rev = r.revision_count ?? 0;
-                return (
-                  <tr key={r.id}>
-                    <td className="c-art">
-                      <div className="art-row">
-                        {r.article_id
-                          ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={`Details: ${r.url}`}><span className="path">{host}</span>{path}</Link>
-                          : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
-                        <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen" aria-label="Original öffnen"><External size={14} /></a>
-                      </div>
-                      {kws && kws.length > 0 && <div className="kw-row">{kws.slice(0, 5).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div>}
-                    </td>
-                    <td className="cell-nowrap">{r.outlet} <span className="cc">{r.country}</span></td>
-                    <td className="cell-nowrap"><span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span></td>
-                    <td className="cell-nowrap faint">{r.topic ? topicLabel(r.topic) : "—"}</td>
-                    <td className="cell-nowrap">{r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>}</td>
-                    <td className="cell-nowrap mono faint">{fmtD(r.published_at)}</td>
-                    <td className="cell-nowrap mono faint">{fmtDT(r.discovered_at)}</td>
-                    <td className="cell-nowrap mono faint">{fmtDT(r.last_seen)}</td>
-                    <td className="num tnum faint">{r.word_count ? r.word_count.toLocaleString("de-DE") : "—"}</td>
-                    <td className="num tnum faint">{r.reading_min ? `${r.reading_min} min` : "—"}</td>
-                    <td className="cell-nowrap">
-                      {rev > 0
-                        ? <span className="rev-badge" title={`${r.edit_count ?? 0} Edits · ${r.extension_count ?? 0} Erweiterungen`}>{rev}× {(r.edit_count ?? 0) > 0 && <i className="rev-e">{r.edit_count}E</i>}{(r.extension_count ?? 0) > 0 && <i className="rev-x">{r.extension_count}+</i>}</span>
-                        : <span className="faint">—</span>}
-                    </td>
-                    <td className="cell-nowrap faint" style={{ textTransform: "uppercase", fontSize: 11 }}>{r.lang_detected || r.country?.toLowerCase() || "—"}</td>
-                  </tr>
-                );
-              })}
-              {!rows.length && <tr><td colSpan={12} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Seiten für diese Filter.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+        <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
+        <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={1700} />
 
         <div className="pager">
           <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>← Zurück</button>
