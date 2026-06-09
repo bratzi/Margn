@@ -10,10 +10,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - run: npm install
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scraper/package-lock.json
+      - run: npm ci
         working-directory: scraper
-      - run: npx playwright install --with-deps chromium
+      - name: Cache Playwright-Browser
+        id: pw
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('scraper/package-lock.json') }}
+      - run: npx playwright install chromium
+        working-directory: scraper
+        if: steps.pw.outputs.cache-hit != 'true'
+      - run: npx playwright install-deps chromium
         working-directory: scraper
       - run: npm run scrape
         working-directory: scraper
@@ -21,6 +33,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "enrich"
-          CRAWL_MAX_PAGES: "1500"   # ~250/Quelle pro Tag, Metadaten + Themen + Autoren
+          CRAWL_MAX_PAGES: "1000"
           CRAWL_DELAY_MS: "80"
-          CRAWL_CONCURRENCY: "6"
+          CRAWL_CONCURRENCY: "8"

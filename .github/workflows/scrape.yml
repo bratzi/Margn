@@ -1,19 +1,31 @@
 name: scrape
 on:
   schedule:
-    - cron: "0 */3 * * *"  # alle 3 Stunden – kleiner Cap + viel Parallelität = schnell & oft, im 2000-Min-Budget
+    - cron: "0 */2 * * *"  # alle 2 Stunden (mit Caching im 2000-Min-Budget; Setup ~50s statt ~2,5 Min)
   workflow_dispatch:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - run: npm install
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scraper/package-lock.json
+      - run: npm ci
         working-directory: scraper
-      - run: npx playwright install --with-deps chromium
+      - name: Cache Playwright-Browser
+        id: pw
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('scraper/package-lock.json') }}
+      - run: npx playwright install chromium
+        working-directory: scraper
+        if: steps.pw.outputs.cache-hit != 'true'
+      - run: npx playwright install-deps chromium
         working-directory: scraper
       - run: npm run scrape
         working-directory: scraper
@@ -21,7 +33,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          CRAWL_MAX_PAGES: "25"     # kleiner Cap → schneller Lauf (~5 Min); re-scannt Front-Artikel oft (Edit-Erkennung)
+          CRAWL_MAX_PAGES: "22"
           CRAWL_MAX_DEPTH: "2"
-          CRAWL_DELAY_MS: "120"
-          CRAWL_CONCURRENCY: "6"    # 6 parallele Tabs
+          CRAWL_DELAY_MS: "100"
+          CRAWL_CONCURRENCY: "8"

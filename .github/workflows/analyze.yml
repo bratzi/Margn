@@ -1,7 +1,7 @@
 name: analyze
 on:
   schedule:
-    - cron: "30 */3 * * *"   # alle 3 Stunden (30 Min nach scrape) – Batch, läuft in Sekunden, kein Chromium
+    - cron: "30 */6 * * *"   # alle 6 Stunden – Batch (kein Chromium), arbeitet entdeckte Seiten ab
   workflow_dispatch:
 jobs:
   analyze:
@@ -10,8 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
-      - run: npm install
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scraper/package-lock.json
+      - run: npm ci
         working-directory: scraper
       - run: npm run scrape
         working-directory: scraper
