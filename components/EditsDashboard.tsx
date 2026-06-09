@@ -3,42 +3,40 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { useFilters } from "@/components/FilterProvider";
+import FilterPills from "@/components/FilterPills";
+import TimeRangeFilter from "@/components/TimeRangeFilter";
+import DataTable, { type Col } from "@/components/DataTable";
 
 type Edit = {
   article_id: number; url: string; title: string;
   source_id: number; outlet: string; country: string;
-  change_count: number; edit_count: number; extension_count: number; mixed_count: number;
+  change_count: number; edit_count: number; extension_count: number;
   last_change: string; first_seen: string;
 };
-
 const fmt = (iso: string) => new Date(iso).toLocaleString("de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
 const shortUrl = (u: string) => { try { return new URL(u).host.replace(/^www\./, ""); } catch { return u; } };
 
 export default function EditsDashboard() {
+  const f = useFilters();
   const [edits, setEdits] = useState<Edit[]>([]);
-  const [sortBy, setSortBy] = useState<"changes" | "edits" | "extensions" | "date">("changes");
 
+  // Master-Filter: Quelle + Zeitraum (auf letzte Änderung)
   useEffect(() => {
-    supabase.from("article_edits_summary").select("*").order("change_count", { ascending: false }).limit(500)
-      .then(({ data }) => setEdits((data as Edit[]) ?? []));
-  }, []);
-
-  const sorted = useMemo(() => {
-    const arr = [...edits];
-    if (sortBy === "changes") arr.sort((a, b) => b.change_count - a.change_count);
-    else if (sortBy === "edits") arr.sort((a, b) => b.edit_count - a.edit_count);
-    else if (sortBy === "extensions") arr.sort((a, b) => b.extension_count - a.extension_count);
-    else arr.sort((a, b) => new Date(b.last_change).getTime() - new Date(a.last_change).getTime());
-    return arr;
-  }, [edits, sortBy]);
+    if (!f.activeArr.length) { setEdits([]); return; }
+    let q = supabase.from("article_edits_summary").select("*").in("source_id", f.activeArr);
+    if (f.rangeFrom) q = q.gte("last_change", f.rangeFrom);
+    if (f.rangeTo) q = q.lte("last_change", f.rangeTo);
+    q.order("change_count", { ascending: false }).limit(1000).then(({ data }) => setEdits((data as Edit[]) ?? []));
+  }, [f.activeArr.join(","), f.rangeFrom, f.rangeTo]);
 
   const byPublisher = useMemo(() => {
-    const m = new Map<number, { count: number; edits: number; extensions: number; outlet: string }>();
+    const m = new Map<number, { id: number; outlet: string; count: number; edits: number; extensions: number }>();
     for (const e of edits) {
-      const cur = m.get(e.source_id) || { count: 0, edits: 0, extensions: 0, outlet: e.outlet };
-      m.set(e.source_id, { count: cur.count + Number(e.change_count), edits: cur.edits + e.edit_count, extensions: cur.extensions + e.extension_count, outlet: e.outlet });
+      const cur = m.get(e.source_id) || { id: e.source_id, outlet: e.outlet, count: 0, edits: 0, extensions: 0 };
+      m.set(e.source_id, { ...cur, count: cur.count + Number(e.change_count), edits: cur.edits + e.edit_count, extensions: cur.extensions + e.extension_count });
     }
-    return [...m.entries()].map(([id, s]) => ({ id, ...s })).sort((a, b) => b.count - a.count);
+    return [...m.values()].sort((a, b) => b.count - a.count);
   }, [edits]);
 
   const stats = useMemo(() => ({
@@ -48,9 +46,27 @@ export default function EditsDashboard() {
     articles: edits.length,
   }), [edits]);
 
+  const pubCols: Col<typeof byPublisher[0]>[] = useMemo(() => [
+    { key: "outlet", label: "Verlag", width: 180, value: (p) => p.outlet, render: (p) => <Link href={`/articles?source_id=${p.id}`} style={{ color: "var(--accent)", fontWeight: 600 }}>{p.outlet}</Link> },
+    { key: "count", label: "Änderungen", width: 130, align: "right", value: (p) => p.count, render: (p) => <strong>{p.count.toLocaleString("de-DE")}</strong> },
+    { key: "edits", label: "Stille Edits", width: 130, align: "right", value: (p) => p.edits, render: (p) => <span style={{ color: "var(--red)" }}>{p.edits}</span> },
+    { key: "extensions", label: "Erweiterungen", width: 140, align: "right", value: (p) => p.extensions, render: (p) => <span style={{ color: "var(--green)" }}>{p.extensions}</span> },
+  ], []);
+
+  const artCols: Col<Edit>[] = useMemo(() => [
+    { key: "outlet", label: "Quelle", width: 130, value: (e) => e.outlet, render: (e) => <>{e.outlet} <span className="cc">{e.country}</span></> },
+    { key: "title", label: "Artikel", width: 420, sortable: false, groupable: false, value: (e) => e.title ?? e.url,
+      render: (e) => <div className="art-row"><Link href={`/articles/${e.article_id}`} target="_blank" className="url" title={e.title}>{e.title?.slice(0, 110) || shortUrl(e.url)}</Link><a href={e.url} target="_blank" rel="noreferrer" className="open-btn" title="Original">↗</a></div> },
+    { key: "edit_count", label: "Stille Edits", width: 110, align: "right", value: (e) => e.edit_count, render: (e) => <span style={{ color: e.edit_count > 0 ? "var(--red)" : "var(--faint)", fontWeight: 600 }}>{e.edit_count}</span> },
+    { key: "extension_count", label: "Erweiterungen", width: 120, align: "right", value: (e) => e.extension_count, render: (e) => <span style={{ color: e.extension_count > 0 ? "var(--green)" : "var(--faint)", fontWeight: 600 }}>{e.extension_count}</span> },
+    { key: "change_count", label: "Gesamt", width: 90, align: "right", value: (e) => Number(e.change_count), render: (e) => <strong>{e.change_count}</strong> },
+    { key: "last_change", label: "Letzte Änderung", width: 150, value: (e) => e.last_change, render: (e) => <span className="mono faint">{fmt(e.last_change)}</span> },
+  ], []);
+
   return (
-    <div className="with-rail">
-      <div className="page">
+    <>
+      <FilterPills />
+      <div className="page wide">
         <div className="kpi-strip">
           <div className="stat-tile"><div className="l">Änderungen erfasst</div><div className="n tnum">{stats.changes.toLocaleString("de-DE")}</div><div className="sub">in {stats.articles} Artikeln</div></div>
           <div className="stat-tile"><div className="l">Stille Edits</div><div className="n tnum" style={{ color: "var(--red)" }}>{stats.edits.toLocaleString("de-DE")}</div><div className="sub">nachträgliche Überarbeitungen</div></div>
@@ -59,56 +75,12 @@ export default function EditsDashboard() {
         </div>
 
         <h2 className="section-h">Änderungen pro Publizist</h2>
-        <div className="panel" style={{ overflowX: "auto" }}>
-          <table className="matrix">
-            <thead><tr><th>Verlag</th><th>Änderungen</th><th>Stille Edits</th><th>Erweiterungen</th></tr></thead>
-            <tbody>
-              {byPublisher.map((p) => (
-                <tr key={p.id}>
-                  <td className="pub"><Link href={`/articles?source_id=${p.id}`} style={{ color: "var(--accent)" }}>{p.outlet}</Link></td>
-                  <td className="tnum"><strong>{p.count.toLocaleString("de-DE")}</strong></td>
-                  <td className="tnum"><span style={{ color: "var(--red)" }}>{p.edits}</span></td>
-                  <td className="tnum"><span style={{ color: "var(--green)" }}>{p.extensions}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable columns={pubCols} rows={byPublisher} rowKey={(p) => p.id} minWidth={600} />
 
-        <h2 className="section-h" style={{ alignItems: "center" }}>Artikel mit meisten Änderungen
-          <span className="count" style={{ marginLeft: "auto" }}>
-            <button onClick={() => setSortBy("changes")} className={sortBy === "changes" ? "active" : ""}>Gesamt</button>
-            <button onClick={() => setSortBy("edits")} className={sortBy === "edits" ? "active" : ""}>Edits</button>
-            <button onClick={() => setSortBy("extensions")} className={sortBy === "extensions" ? "active" : ""}>Erweit.</button>
-            <button onClick={() => setSortBy("date")} className={sortBy === "date" ? "active" : ""}>Datum</button>
-          </span>
-        </h2>
-        <div className="panel">
-          <table className="arttable">
-            <thead><tr>
-              <th className="c-src">Quelle</th><th className="c-art">Artikel</th>
-              <th className="c-typ">Edits</th><th className="c-topic">Erweit.</th><th className="c-author">Gesamt</th><th className="c-stat">Letzte</th>
-            </tr></thead>
-            <tbody>
-              {sorted.slice(0, 100).map((e) => (
-                <tr key={e.article_id}>
-                  <td className="cell-nowrap c-src">{e.outlet} <span className="cc">{e.country}</span></td>
-                  <td>
-                    <div className="art-row">
-                      <Link href={`/articles/${e.article_id}`} target="_blank" className="url" title={e.title}>{e.title?.slice(0, 90) || shortUrl(e.url)}</Link>
-                      <a href={e.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen" aria-label="Original">↗</a>
-                    </div>
-                  </td>
-                  <td className="c-typ tnum"><span style={{ color: e.edit_count > 0 ? "var(--red)" : "var(--faint)" }}>{e.edit_count}</span></td>
-                  <td className="c-topic tnum"><span style={{ color: e.extension_count > 0 ? "var(--green)" : "var(--faint)" }}>{e.extension_count}</span></td>
-                  <td className="c-author tnum"><strong>{e.change_count}</strong></td>
-                  <td className="cell-nowrap tnum faint">{fmt(e.last_change)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <h2 className="section-h" style={{ marginTop: 28 }}>Artikel mit Änderungen <span className="count">{stats.articles} Artikel</span></h2>
+        <DataTable columns={artCols} rows={edits} rowKey={(e) => e.article_id} minWidth={1100} />
       </div>
-    </div>
+      <TimeRangeFilter />
+    </>
   );
 }

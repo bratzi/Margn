@@ -14,7 +14,7 @@ const NAV = [
 
 export default function Sidebar() {
   const path = usePathname();
-  const showFilters = path === "/articles";
+  const showFilters = path === "/articles" || path === "/articles/edits";
   return (
     <aside className="sidebar">
       <Link href="/articles" className="brand" aria-label="margn — Medienobservatorium">
