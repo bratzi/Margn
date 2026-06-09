@@ -11,6 +11,7 @@ import TopicChart from "@/components/TopicChart";
 import RateStats from "@/components/RateStats";
 import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
 import Donut from "@/components/Donut";
+import TopicCards from "@/components/TopicCards";
 import DataTable, { type Col } from "@/components/DataTable";
 import { topicLabel } from "@/lib/topics";
 
@@ -156,6 +157,7 @@ export default function ArticleDashboard() {
             segments={[{ label: "Namentlich", value: agg.named, color: "var(--green)" }, { label: "Redaktion/Agentur · ohne", value: agg.au - agg.named, color: "var(--line-2)" }]} />
         </div>
 
+        <TopicCards />
         <RateStats />
         <PublisherCompare />
         <TopicChart />
