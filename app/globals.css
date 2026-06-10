@@ -487,11 +487,14 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .tl-passage { font-size:13px; line-height:1.7; padding:11px 14px; border-radius:8px; margin-top:7px; background: var(--surface-2); border:1px solid var(--line); }
 .tl-passage.add { border-left:3px solid var(--green); }
 .tl-passage.edit { border-left:3px solid var(--amber); }
+.tl-passage.del { border-left:3px solid var(--red); }
 .tl-passage .pk { display:block; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--amber); margin-bottom:5px; }
 .tl-passage.add .pk { color: var(--green); }
+.tl-passage.del .pk { color: var(--red); }
+.diff-body { display:block; line-height:1.78; font-size:13px; }
+.diff-body del, del.hl-rm { text-decoration: line-through; text-decoration-color: var(--red); text-decoration-thickness: 1.5px; }
 .tl-title-change { padding:11px 14px; border-radius:8px; background: var(--surface-2); border:1px solid var(--line); border-left:3px solid var(--amber); }
-.tl-title-change .old { display:block; color:var(--muted); font-size:13.5px; line-height:1.7; }
-.tl-title-change .new { display:block; color:var(--ink); font-weight:650; font-size:14.5px; line-height:1.7; }
+.tl-title-change .new { display:block; color:var(--ink); font-weight:650; font-size:14.5px; line-height:1.7; margin-top:3px; }
 
 .empty { color: var(--faint); font-size: 13px; padding: 16px; background: var(--surface-2); border-radius: 7px; border-left: 3px solid var(--line-2); line-height: 1.6; }
 

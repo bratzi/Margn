@@ -226,12 +226,13 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   const contentHash = fp(fps.join("|"));
   const bodyWords = body.trim().split(/\s+/).length;
 
-  // Erstkontakt: nur Baseline-Fingerprint speichern, kein Snapshot.
+  // Erstkontakt: nur Baseline-Fingerprint + Absätze speichern, kein Snapshot.
   if (!prev || !prev.content_hash) {
     await sb.from("articles").update({
       content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords,
       ...(isLiveblog ? { article_type: "liveblog" } : {}),
     }).eq("id", articleId);
+    await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
   }
   const titleChanged = !!prev.title && !!newTitle && decodeEntities(prev.title) !== decodeEntities(newTitle);
@@ -249,8 +250,15 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   // Absätze sind durch normalizeParas bereits ≥60 Zeichen, daher zählt jeder echte Zugang.
   if (!titleChanged && addedFps.length === 0 && removedCount === 0) {
     await sb.from("articles").update({ content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords }).eq("id", articleId);
+    await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
   }
+
+  // Strukturierter Wort-Diff: geänderte Absätze (entfernt↔hinzugefügt) per Ähnlichkeit paaren.
+  const { data: paraRow } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
+  const oldParas: string[] = Array.isArray(paraRow?.paras) ? (paraRow!.paras as string[]) : [];
+  const removedTexts = oldParas.filter((p) => !newSet.has(fp(p)));
+  const changes = buildChanges(removedTexts, addedTexts);
 
   // Eindeutige Klassifikation (sich gegenseitig ausschließend):
   //  - Liveblog/Timeline: laufendes Wachstum → IMMER Erweiterung (kein "stiller Edit").
@@ -266,11 +274,12 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
 
   await sb.from("article_snapshots").insert({
     article_id: articleId, change_kind: kind,
-    title_old: titleChanged ? prev.title : null,
-    title_new: titleChanged ? newTitle : null,
+    title_old: titleChanged ? decodeEntities(prev.title!) : null,
+    title_new: titleChanged ? decodeEntities(newTitle!) : null,
     added: addedTexts.join("\n\n").slice(0, 8000),
     added_count: addedFps.length, removed_count: removedCount,
     word_delta: bodyWords - (prev.body_words ?? bodyWords),
+    changes,
   });
 
   const extCount = (prev.extension_count ?? 0) + (kind === "extension" ? 1 : 0);
@@ -282,6 +291,36 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     revision_count: (prev.revision_count ?? 0) + 1, extension_count: extCount, edit_count: editCount,
     ...(newType ? { article_type: newType } : {}),
   }).eq("id", articleId);
+  await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
+}
+
+// Absatzliste speicherschonend kappen (große Liveblogs): max 400 Absätze, je 2000 Zeichen.
+function capParas(paras: string[]): string[] {
+  return paras.slice(-400).map((p) => p.slice(0, 2000));
+}
+
+// Token-Ähnlichkeit (Jaccard) zum Paaren geänderter Absätze.
+function tokens(s: string): Set<string> { return new Set(s.toLowerCase().match(/\p{L}+|\p{N}+/gu) ?? []); }
+function similarity(a: string, b: string): number {
+  const A = tokens(a), B = tokens(b); if (!A.size || !B.size) return 0;
+  let inter = 0; for (const t of A) if (B.has(t)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+
+// Entfernte ↔ hinzugefügte Absätze paaren → strukturierter Diff:
+//  {old,new} = geänderter Absatz (Wort-Diff im Frontend), {new} = neu, {old} = entfernt.
+type Change = { old?: string; new?: string };
+function buildChanges(removed: string[], added: string[]): Change[] {
+  const rem = [...removed], usedR = new Set<number>();
+  const out: Change[] = [];
+  for (const a of added) {
+    let best = -1, bestSim = 0;
+    rem.forEach((r, i) => { if (usedR.has(i)) return; const s = similarity(a, r); if (s > bestSim) { bestSim = s; best = i; } });
+    if (best >= 0 && bestSim >= 0.35) { usedR.add(best); out.push({ old: rem[best].slice(0, 1500), new: a.slice(0, 1500) }); }
+    else out.push({ new: a.slice(0, 1500) });
+  }
+  rem.forEach((r, i) => { if (!usedR.has(i)) out.push({ old: r.slice(0, 1500) }); });
+  return out.slice(0, 30);
 }
 
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.

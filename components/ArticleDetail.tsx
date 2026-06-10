@@ -14,7 +14,8 @@ type Detail = {
   outlet: string; country: string; base_url: string; depth: number | null;
   revision_count: number | null; extension_count: number | null; edit_count: number | null;
 };
-type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number };
+type Change = { old?: string; new?: string };
+type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; changes: Change[] | null };
 
 const LANG: Record<string, string> = { de: "Deutsch", fr: "Français", en: "English" };
 const TYPE_LABEL: Record<string, string> = {
@@ -140,9 +141,9 @@ export default function ArticleDetail({ id }: { id: number }) {
         ) : (
           <>
             <div className="diff-legend">
-              <span><mark className="hl">gelb</mark> = geändert</span>
               <span><mark className="hl-add">grün</mark> = neu hinzugekommen</span>
-              <span><mark className="hl-rm">rot</mark> = entfernt</span>
+              <span><mark className="hl">gelb</mark> = ersetzt</span>
+              <span><del className="hl-rm">rot</del> = entfernt</span>
             </div>
             <div className="tl">
               {snaps.map((s) => <TimelineItem key={s.id} s={s} />)}
@@ -165,36 +166,48 @@ function TypeBadge({ type }: { type: string }) {
   return <span className="badge neutral"><FileText /> {label}</span>;
 }
 
-// Beidseitiger Wort-Diff (LCS): liefert für ALT die entfernten und für NEU die
-// hinzugekommenen Token-Segmente — so ist exakt sichtbar, WO sich was geändert hat.
-function diffSegs(oldS: string, newS: string) {
-  const o = oldS.split(/(\s+)/), n = newS.split(/(\s+)/);
+// Inline-Wort-Diff (LCS): EIN durchgehender Text, in dem nur die geänderten Wörter
+// markiert sind — entfernt = rot durchgestrichen, neu = grün, ersetzt = gelb.
+type Op = { t: string; op: "eq" | "del" | "ins" | "repl" };
+function inlineOps(oldS: string, newS: string): Op[] {
+  const o = oldS.split(/(\s+)/).filter((x) => x !== ""), n = newS.split(/(\s+)/).filter((x) => x !== "");
   const m = o.length, k = n.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(k + 1).fill(0));
   for (let i = m - 1; i >= 0; i--) for (let j = k - 1; j >= 0; j--)
     dp[i][j] = o[i] === n[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const oldT: { t: string; ch: boolean }[] = [], newT: { t: string; ch: boolean }[] = [];
-  let i = 0, j = 0;
+  const raw: Op[] = []; let i = 0, j = 0;
   while (i < m || j < k) {
-    if (i < m && j < k && o[i] === n[j]) { oldT.push({ t: o[i], ch: false }); newT.push({ t: n[j], ch: false }); i++; j++; }
-    else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1]?.[j])) { newT.push({ t: n[j], ch: true }); j++; }
-    else if (i < m) { oldT.push({ t: o[i], ch: true }); i++; }
+    if (i < m && j < k && o[i] === n[j]) { raw.push({ t: o[i], op: "eq" }); i++; j++; }
+    else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) { raw.push({ t: n[j], op: "ins" }); j++; }
+    else { raw.push({ t: o[i], op: "del" }); i++; }
   }
-  // Whitespace zwischen zwei Änderungen mitfärben → durchgehender Marker
-  const bridge = (ts: { t: string; ch: boolean }[]) => { for (let x = 1; x < ts.length - 1; x++) if (/^\s+$/.test(ts[x].t) && ts[x - 1].ch && ts[x + 1].ch) ts[x].ch = true; };
-  bridge(oldT); bridge(newT);
-  const merge = (ts: { t: string; ch: boolean }[]) => { const out: { t: string; ch: boolean }[] = []; for (const tk of ts) { const l = out[out.length - 1]; if (l && l.ch === tk.ch) l.t += tk.t; else out.push({ ...tk }); } return out; };
-  return { oldSegs: merge(oldT), newSegs: merge(newT) };
+  // Whitespace zwischen gleichartigen Änderungen mitfärben (durchgehender Marker)
+  for (let x = 1; x < raw.length - 1; x++) if (/^\s+$/.test(raw[x].t) && raw[x].op === "eq" && raw[x - 1].op === raw[x + 1].op && raw[x - 1].op !== "eq") raw[x].op = raw[x - 1].op;
+  // Segmente bilden; del unmittelbar gefolgt von ins = Ersetzung → ins als "repl" (gelb).
+  const segs: Op[] = [];
+  for (const r of raw) { const l = segs[segs.length - 1]; if (l && l.op === r.op) l.t += r.t; else segs.push({ ...r }); }
+  for (let x = 1; x < segs.length; x++) if (segs[x].op === "ins" && segs[x - 1].op === "del") segs[x].op = "repl";
+  return segs;
 }
-function DiffSide({ segs, cls }: { segs: { t: string; ch: boolean }[]; cls: string }) {
-  return <>{segs.map((sg, x) => sg.ch ? <mark key={x} className={cls}>{sg.t}</mark> : <span key={x}>{sg.t}</span>)}</>;
+function InlineDiff({ oldS, newS }: { oldS: string; newS: string }) {
+  return <>{inlineOps(oldS, newS).map((s, x) =>
+    s.op === "del" ? <del key={x} className="hl-rm">{s.t}</del>
+    : s.op === "ins" ? <mark key={x} className="hl-add">{s.t}</mark>
+    : s.op === "repl" ? <mark key={x} className="hl">{s.t}</mark>
+    : <span key={x}>{s.t}</span>)}</>;
+}
+// Eine geänderte/neue/entfernte Passage rendern.
+function ChangePassage({ c }: { c: Change }) {
+  if (c.old && c.new) return <div className="tl-passage edit"><span className="pk">✎ Geändert</span><span className="diff-body"><InlineDiff oldS={c.old} newS={c.new} /></span></div>;
+  if (c.new) return <div className="tl-passage add"><span className="pk">+ Neu hinzugekommen</span><span className="diff-body"><mark className="hl-add">{c.new}</mark></span></div>;
+  return <div className="tl-passage del"><span className="pk">− Entfernt</span><span className="diff-body"><del className="hl-rm">{c.old}</del></span></div>;
 }
 
 function TimelineItem({ s }: { s: Snapshot }) {
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : s.change_kind === "edit" ? "Stille Änderung" : "Geändert & erweitert";
   const Icon = s.change_kind === "edit" ? Pencil : Plus;
   const cls = s.change_kind === "extension" ? "ok" : s.change_kind === "edit" ? "lock" : "wait";
-  const titleDiff = s.title_old && s.title_new ? diffSegs(s.title_old, s.title_new) : null;
+  const changes = (s.changes ?? []).filter((c) => c.old || c.new);
   return (
     <div className="tl-item">
       <span className={`tl-dot ${s.change_kind}`} />
@@ -203,21 +216,18 @@ function TimelineItem({ s }: { s: Snapshot }) {
         <span className="tl-when">{fmtDate(s.captured_at)}</span>
         {s.word_delta ? <span className="faint" style={{ fontSize: 12.5 }}>{s.word_delta > 0 ? "+" : ""}{s.word_delta} Wörter</span> : null}
       </div>
-      {titleDiff && (
-        <div className="tl-title-change">
-          <span className="diff-lbl rm">Vorher</span>
-          <span className="old"><DiffSide segs={titleDiff.oldSegs} cls="hl-rm" /></span>
-          <span className="diff-lbl add" style={{ marginTop: 8 }}>Nachher</span>
-          <span className="new"><DiffSide segs={titleDiff.newSegs} cls="hl" /></span>
-        </div>
+      {s.title_old && s.title_new && (
+        <div className="tl-title-change"><span className="diff-lbl">Überschrift</span><span className="new"><InlineDiff oldS={s.title_old} newS={s.title_new} /></span></div>
       )}
-      {s.added && (
-        <div className={`tl-passage ${s.change_kind === "edit" ? "edit" : "add"}`}>
-          <span className="pk">{s.change_kind === "edit" ? "✎ Geänderte Passage" : "+ Neu hinzugekommen"}</span>
-          <mark className={s.change_kind === "edit" ? "hl" : "hl-add"}>{s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}</mark>
-        </div>
-      )}
-      {s.removed_count > 0 && !s.added && <p className="rm-note">− {s.removed_count} Passage(n) entfernt</p>}
+      {changes.length > 0
+        ? changes.map((c, x) => <ChangePassage key={x} c={c} />)
+        : s.added ? (
+          // Fallback für Altdaten ohne strukturierten Diff: ganze Passage (ohne Vollmarkierung)
+          <div className={`tl-passage ${s.change_kind === "edit" ? "edit" : "add"}`}>
+            <span className="pk">{s.change_kind === "edit" ? "✎ Geänderte Passage" : "+ Neu hinzugekommen"}</span>
+            <span className="diff-body">{s.added.length > 700 ? s.added.slice(0, 700) + "…" : s.added}</span>
+          </div>
+        ) : s.removed_count > 0 ? <p className="rm-note">− {s.removed_count} Passage(n) entfernt</p> : null}
     </div>
   );
 }
