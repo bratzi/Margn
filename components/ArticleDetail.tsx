@@ -138,9 +138,16 @@ export default function ArticleDetail({ id }: { id: number }) {
             <strong> Erweiterungen</strong> (neu hinzugefügte Passagen) und <strong> stillen Änderungen</strong> (nachträglich überarbeitete Stellen).
           </div>
         ) : (
-          <div className="tl">
-            {snaps.map((s) => <TimelineItem key={s.id} s={s} />)}
-          </div>
+          <>
+            <div className="diff-legend">
+              <span><mark className="hl">gelb</mark> = geändert</span>
+              <span><mark className="hl-add">grün</mark> = neu hinzugekommen</span>
+              <span><mark className="hl-rm">rot</mark> = entfernt</span>
+            </div>
+            <div className="tl">
+              {snaps.map((s) => <TimelineItem key={s.id} s={s} />)}
+            </div>
+          </>
         )}
       </DL>
 
@@ -158,35 +165,36 @@ function TypeBadge({ type }: { type: string }) {
   return <span className="badge neutral"><FileText /> {label}</span>;
 }
 
-// Wort-Diff: markiert im NEUEN Text nur die Tokens, die nicht im alten vorkommen (LCS).
-function DiffTitle({ oldS, newS }: { oldS: string; newS: string }) {
+// Beidseitiger Wort-Diff (LCS): liefert für ALT die entfernten und für NEU die
+// hinzugekommenen Token-Segmente — so ist exakt sichtbar, WO sich was geändert hat.
+function diffSegs(oldS: string, newS: string) {
   const o = oldS.split(/(\s+)/), n = newS.split(/(\s+)/);
   const m = o.length, k = n.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(k + 1).fill(0));
   for (let i = m - 1; i >= 0; i--) for (let j = k - 1; j >= 0; j--)
     dp[i][j] = o[i] === n[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const toks: { t: string; ch: boolean; ws: boolean }[] = [];
+  const oldT: { t: string; ch: boolean }[] = [], newT: { t: string; ch: boolean }[] = [];
   let i = 0, j = 0;
-  while (j < k) {
-    if (i < m && o[i] === n[j]) { toks.push({ t: n[j], ch: false, ws: /^\s+$/.test(n[j]) }); i++; j++; }
-    else if (i < m && dp[i + 1][j] >= dp[i][j + 1]) i++;
-    else { toks.push({ t: n[j], ch: true, ws: /^\s+$/.test(n[j]) }); j++; }
+  while (i < m || j < k) {
+    if (i < m && j < k && o[i] === n[j]) { oldT.push({ t: o[i], ch: false }); newT.push({ t: n[j], ch: false }); i++; j++; }
+    else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1]?.[j])) { newT.push({ t: n[j], ch: true }); j++; }
+    else if (i < m) { oldT.push({ t: o[i], ch: true }); i++; }
   }
-  // Whitespace zwischen zwei Änderungen einfärben → durchgehender Marker
-  for (let x = 1; x < toks.length - 1; x++) if (toks[x].ws && toks[x - 1].ch && toks[x + 1].ch) toks[x].ch = true;
-  // benachbarte gleiche Tokens zu Segmenten zusammenfassen
-  const segs: { t: string; ch: boolean }[] = [];
-  for (const tk of toks) {
-    const last = segs[segs.length - 1];
-    if (last && last.ch === tk.ch) last.t += tk.t; else segs.push({ t: tk.t, ch: tk.ch });
-  }
-  return <>{segs.map((sg, x) => sg.ch ? <mark key={x} className="hl">{sg.t}</mark> : <span key={x}>{sg.t}</span>)}</>;
+  // Whitespace zwischen zwei Änderungen mitfärben → durchgehender Marker
+  const bridge = (ts: { t: string; ch: boolean }[]) => { for (let x = 1; x < ts.length - 1; x++) if (/^\s+$/.test(ts[x].t) && ts[x - 1].ch && ts[x + 1].ch) ts[x].ch = true; };
+  bridge(oldT); bridge(newT);
+  const merge = (ts: { t: string; ch: boolean }[]) => { const out: { t: string; ch: boolean }[] = []; for (const tk of ts) { const l = out[out.length - 1]; if (l && l.ch === tk.ch) l.t += tk.t; else out.push({ ...tk }); } return out; };
+  return { oldSegs: merge(oldT), newSegs: merge(newT) };
+}
+function DiffSide({ segs, cls }: { segs: { t: string; ch: boolean }[]; cls: string }) {
+  return <>{segs.map((sg, x) => sg.ch ? <mark key={x} className={cls}>{sg.t}</mark> : <span key={x}>{sg.t}</span>)}</>;
 }
 
 function TimelineItem({ s }: { s: Snapshot }) {
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : s.change_kind === "edit" ? "Stille Änderung" : "Geändert & erweitert";
   const Icon = s.change_kind === "edit" ? Pencil : Plus;
   const cls = s.change_kind === "extension" ? "ok" : s.change_kind === "edit" ? "lock" : "wait";
+  const titleDiff = s.title_old && s.title_new ? diffSegs(s.title_old, s.title_new) : null;
   return (
     <div className="tl-item">
       <span className={`tl-dot ${s.change_kind}`} />
@@ -195,20 +203,21 @@ function TimelineItem({ s }: { s: Snapshot }) {
         <span className="tl-when">{fmtDate(s.captured_at)}</span>
         {s.word_delta ? <span className="faint" style={{ fontSize: 12.5 }}>{s.word_delta > 0 ? "+" : ""}{s.word_delta} Wörter</span> : null}
       </div>
-      {s.title_old && s.title_new && (
+      {titleDiff && (
         <div className="tl-title-change">
-          <span className="old">{s.title_old}</span>
-          <span className="arrow">↓ geändert zu</span>
-          <span className="new"><DiffTitle oldS={s.title_old} newS={s.title_new} /></span>
+          <span className="diff-lbl rm">Vorher</span>
+          <span className="old"><DiffSide segs={titleDiff.oldSegs} cls="hl-rm" /></span>
+          <span className="diff-lbl add" style={{ marginTop: 8 }}>Nachher</span>
+          <span className="new"><DiffSide segs={titleDiff.newSegs} cls="hl" /></span>
         </div>
       )}
       {s.added && (
         <div className={`tl-passage ${s.change_kind === "edit" ? "edit" : "add"}`}>
-          <span className="pk">{s.change_kind === "edit" ? "Geänderte Passage" : "Hinzugefügt"}</span>
-          {s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}
+          <span className="pk">{s.change_kind === "edit" ? "✎ Geänderte Passage" : "+ Neu hinzugekommen"}</span>
+          <mark className={s.change_kind === "edit" ? "hl" : "hl-add"}>{s.added.length > 600 ? s.added.slice(0, 600) + "…" : s.added}</mark>
         </div>
       )}
-      {s.removed_count > 0 && !s.added && <p className="faint" style={{ fontSize: 12.5 }}>{s.removed_count} Passage(n) entfernt</p>}
+      {s.removed_count > 0 && !s.added && <p className="rm-note">− {s.removed_count} Passage(n) entfernt</p>}
     </div>
   );
 }

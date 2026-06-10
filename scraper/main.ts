@@ -298,13 +298,37 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   return id;
 }
 
+// "Mehr laden"-Buttons auf Timeline-/Liveblog-Seiten ausklicken, damit ÄLTERE Meldungen
+// im DOM landen. Ohne das vergleicht das Änderungs-Tracking nur das sichtbare Fenster und
+// meldet falsche "Entfernungen", wenn Meldungen aus dem Erstausschnitt rutschen.
+// Verlagsübergreifende Textmuster (DE+FR); klickt bis nichts mehr wächst (max 12 Runden).
+const LOAD_MORE_RX = /^(mehr laden|mehr anzeigen|weitere (beiträge|meldungen|artikel|einträge)( laden| anzeigen)?|ältere (beiträge|meldungen|einträge)( laden| anzeigen)?|alle (beiträge|meldungen) anzeigen|nachladen|mehr beiträge|load more|show more|charger plus|voir plus|plus de messages|afficher plus|lire la suite du live)$/i;
+async function expandTimeline(page: import("playwright").Page): Promise<void> {
+  for (let round = 0; round < 12; round++) {
+    const before = await page.evaluate(() => document.body?.innerText.length ?? 0);
+    const clicked = await page.evaluate((rxSrc: string) => {
+      const rx = new RegExp(rxSrc, "i");
+      const els = [...document.querySelectorAll<HTMLElement>("button, a[role=button], a.more, [class*='load-more'], [class*='loadmore'], [class*='show-more']")];
+      const btn = els.find((e) => rx.test((e.innerText || "").trim().replace(/\s+/g, " ")) && e.offsetParent !== null);
+      if (btn) { btn.scrollIntoView({ block: "center" }); btn.click(); return true; }
+      return false;
+    }, LOAD_MORE_RX.source).catch(() => false);
+    if (!clicked) break;
+    await page.waitForTimeout(900);
+    const after = await page.evaluate(() => document.body?.innerText.length ?? 0).catch(() => before);
+    if (after <= before + 50) break; // nichts Neues mehr gekommen
+  }
+}
+
 // Eine Seite im echten Browser rendern. Liefert HTTP-Status + gerendertes HTML.
-async function renderPage(ctx: BrowserContext, url: string): Promise<{ status: number; html: string | null }> {
+// expand=true: Timeline-/Liveblog-Seite vorher vollständig ausklappen (ältere Meldungen nachladen).
+async function renderPage(ctx: BrowserContext, url: string, expand = false): Promise<{ status: number; html: string | null }> {
   const page = await ctx.newPage();
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
     const status = resp?.status() ?? 0;
-    const html = await page.content(); // kein waitForTimeout – brauchen nur Links, keinen vollständigen Text
+    if (expand) await expandTimeline(page);
+    const html = await page.content();
     return { status, html };
   } catch {
     return { status: 0, html: null };
@@ -519,7 +543,7 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
     visited.add(s.url);
     pages++;
 
-    const { html } = await renderPage(ctx, s.url);
+    const { html } = await renderPage(ctx, s.url, isLiveContent(s.url, null));
     if (!html) return;
 
     const links = s.depth < MAX_DEPTH ? sameDomainLinks(html, src.base_url, s.url) : [];
@@ -639,7 +663,7 @@ async function enrichArticles(sources: Source[]) {
       while (true) {
         const item = queue.shift();
         if (!item) break;
-        const { html } = await renderPage(ctx, item.url);
+        const { html } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
         if (!html) continue;
         // Selbst-Korrektur: Hub/Übersicht (robust erkannt) → demoten, nicht als Artikel führen.
         const cls = classifyRendered(item.url, html);

@@ -36,7 +36,7 @@ export default function RateStats() {
     supabase.rpc("publish_buckets_f", {
       p_sources: activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang),
       p_from: fromIso, p_to: toIso, p_bucket: unit,
-    }).then(({ data }) => setRows((data as B[]) ?? []));
+    }).limit(6000).then(({ data }) => setRows((data as B[]) ?? []));
   }, [activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, fromIso, toIso, unit]);
 
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
@@ -52,17 +52,31 @@ export default function RateStats() {
     return out;
   }, [fromIso, toIso, unit]);
 
-  const { series, maxTotal } = useMemo(() => {
+  const { series, maxTotal, totals } = useMemo(() => {
     const map = new Map<number, Map<string, number>>();
     for (const r of rows) { if (!map.has(r.source_id)) map.set(r.source_id, new Map()); const m = map.get(r.source_id)!; const k = truncTo(r.bucket, unit).toISOString(); m.set(k, (m.get(k) ?? 0) + r.n); }
     const ser = sources.filter((s) => act.has(s.id)).map((s) => ({ id: s.id, color: colorById.get(s.id)!, vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0) }));
     const tot = buckets.map((_, i) => ser.reduce((sum, s) => sum + s.vals[i], 0));
-    return { series: ser, maxTotal: Math.max(1, ...tot) };
+    return { series: ser, maxTotal: Math.max(1, ...tot), totals: tot };
   }, [rows, sources, act, buckets, unit]);
 
   const NB = buckets.length;
   const X = (i: number) => (i / Math.max(1, NB - 1)) * VW;
-  const colW = Math.min(38, (VW / Math.max(1, NB)) * 0.72);
+  const Y = (v: number) => VH - (v / maxTotal) * (VH - 18);
+
+  // Gestapelte Flächen: je Serie kumulierte Ober-/Unterkante, als geschlossener Pfad.
+  const stacked = useMemo(() => {
+    const base = new Array(NB).fill(0);
+    return series.map((s) => {
+      const lower = [...base];
+      for (let i = 0; i < NB; i++) base[i] += s.vals[i];
+      const upper = [...base];
+      const fwd = upper.map((v, i) => `${i === 0 ? "M" : "L"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+      const back = [...lower].reverse().map((v, j) => `L${X(NB - 1 - j).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+      const line = upper.map((v, i) => `${i === 0 ? "M" : "L"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+      return { ...s, area: `${fwd} ${back} Z`, line, upper };
+    });
+  }, [series, NB, maxTotal]);
 
   // Tagestrennlinien (im Stunden-Modus an Tageswechseln)
   const dayDividers = useMemo(() => {
@@ -103,9 +117,19 @@ export default function RateStats() {
               <span style={{ marginLeft: "auto", color: "var(--faint)" }}>Einheit: <b style={{ color: "var(--accent)" }}>{unitLabel}</b>{manual === "auto" ? " (dynamisch)" : ""}</span>
             </div>
             <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="rate-svg">
-              {dayDividers.map((i) => <line key={i} x1={X(i) - (VW / NB) / 2} y1={0} x2={X(i) - (VW / NB) / 2} y2={VH} stroke="var(--line-2)" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />)}
+              {dayDividers.map((i) => <line key={i} x1={X(i)} y1={0} x2={X(i)} y2={VH} stroke="var(--line-2)" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />)}
               <line x1={0} y1={VH} x2={VW} y2={VH} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-              {buckets.map((_, i) => { let yb = VH; return <g key={i}>{series.map((s) => { const h = (s.vals[i] / maxTotal) * (VH - 6); if (h <= 0) return null; const y = yb - h; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={h} fill={s.color} rx={NB < 30 ? 2 : 0}><title>{`${nameById.get(s.id)}: ${s.vals[i]}`}</title></rect>; })}</g>; })}
+              {/* Gefüllte Kurven (gestapelt, leicht transparent) + Konturlinie */}
+              {stacked.map((s) => <path key={`a${s.id}`} d={s.area} fill={s.color} opacity={0.28} />)}
+              {stacked.map((s) => <path key={`l${s.id}`} d={s.line} fill="none" stroke={s.color} strokeWidth="1.8" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />)}
+              {/* Dots auf den Wertepunkten (bei lesbarer Dichte) */}
+              {NB <= 70 && stacked.map((s) => s.upper.map((v, i) => s.vals[i] > 0 ? (
+                <circle key={`${s.id}-${i}`} cx={X(i)} cy={Y(v)} r={NB <= 24 ? 3 : 2} fill={s.color} stroke="var(--surface)" strokeWidth="1">
+                  <title>{`${nameById.get(s.id)}: ${s.vals[i]} (${fmtAxis(buckets[i])})`}</title>
+                </circle>
+              ) : null))}
+              {/* Dezente Gesamt-Beschriftung über den Spitzen */}
+              {NB <= 24 && totals.map((t, i) => t > 0 ? <text key={i} x={X(i)} y={Y(t) - 7} textAnchor="middle" fontSize="9.5" fill="var(--faint)">{t}</text> : null)}
             </svg>
             <div className="rate-axis">{buckets.map((b, i) => i % axisStep === 0 ? <span key={b} style={{ left: `${(i / Math.max(1, NB - 1)) * 100}%`, transform: i === 0 ? "none" : i >= NB - 2 ? "translateX(-100%)" : "translateX(-50%)" }}>{fmtAxis(b)}</span> : null)}</div>
           </>

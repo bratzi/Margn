@@ -49,16 +49,22 @@ export default function ArticleDashboard() {
 
   const fpct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
-  // Aggregat-Facts (voller Filtersatz)
+  // Aggregat-Facts. WICHTIG: Autoren-Verteilung wird OHNE den Autor-Filter berechnet —
+  // sonst kollabiert die Transparenz-Anzeige bei gesetztem Filter zirkulär auf 100 %/0 %.
   useEffect(() => {
     if (!f.active.size) return;
     const nn = (v: string) => (v === "all" ? null : v);
-    supabase.rpc("publisher_stats_f", { p_sources: f.activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo })
-      .then(({ data }) => {
-        const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
-        for (const r of (data ?? []) as any[]) { a.articles += r.articles; a.paywalled += r.paywalled; a.named += r.au_named; a.au += r.au_named + r.au_anon + r.au_none; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d; }
-        setAgg(a);
-      });
+    const base = { p_sources: f.activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo };
+    Promise.all([
+      supabase.rpc("publisher_stats_f", { ...base, p_author: nn(f.author) }),
+      f.author === "all" ? null : supabase.rpc("publisher_stats_f", base), // ungefiltert für au-Anteile
+    ]).then(([main, auFree]) => {
+      const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
+      for (const r of (main.data ?? []) as any[]) { a.articles += r.articles; a.paywalled += r.paywalled; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d; }
+      const auSrc = (auFree?.data ?? main.data ?? []) as any[];
+      for (const r of auSrc) { a.named += r.au_named; a.au += r.au_named + r.au_anon + r.au_none; }
+      setAgg(a);
+    });
   }, [f.activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   // Keyword → Artikel-IDs
@@ -141,12 +147,7 @@ export default function ArticleDashboard() {
       <FilterPills />
 
       <div className="page wide">
-        <div className="kpi-strip">
-          <div className="stat-tile"><div className="l"><FileText /> Artikel</div><div className="n tnum">{agg.articles.toLocaleString("de-DE")}</div><div className="sub">{agg.new7d.toLocaleString("de-DE")} neu (7 Tage)</div></div>
-          <div className="stat-tile"><div className="l">🔒 Paywall-Anteil</div><div className="n tnum" style={{ color: fpct(agg.paywalled, agg.articles) > 40 ? "var(--red)" : "inherit" }}>{fpct(agg.paywalled, agg.articles)}%</div><div className="sub">{agg.paywalled.toLocaleString("de-DE")} hinter Schranke</div></div>
-          <div className="stat-tile"><div className="l">✍️ Namentliche Autoren</div><div className="n tnum" style={{ color: "var(--green)" }}>{fpct(agg.named, agg.au)}%</div><div className="sub">statt Redaktion/Agentur</div></div>
-          <div className="stat-tile accent"><div className="l">🎬 Video & Werbung</div><div className="n tnum">{(agg.video + agg.werbung).toLocaleString("de-DE")}</div><div className="bar"><i style={{ width: `${fpct(agg.video + agg.werbung, agg.articles + agg.video + agg.werbung)}%` }} /></div></div>
-        </div>
+        <TopicCards />
 
         <h2 className="section-h">Auf einen Blick <span className="count">{topicLbl || "Gesamtverteilung"}</span></h2>
         <div className="donut-grid">
@@ -158,7 +159,6 @@ export default function ArticleDashboard() {
             segments={[{ label: "Namentlich", value: agg.named, color: "var(--green)" }, { label: "Redaktion/Agentur · ohne", value: agg.au - agg.named, color: "var(--line-2)" }]} />
         </div>
 
-        <TopicCards />
         <RateStats />
         <PublisherCompare />
         <TopicChart />
