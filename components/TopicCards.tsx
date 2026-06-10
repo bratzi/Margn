@@ -11,6 +11,7 @@ const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 export default function TopicCards() {
   const f = useFilters();
   const [rows, setRows] = useState<K[]>([]);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!f.activeArr.length) { setRows([]); return; }
@@ -20,16 +21,20 @@ export default function TopicCards() {
   }, [f.activeArr.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   if (!rows.length) return null;
+  const VISIBLE = 3;
+  const shown = expanded ? rows : rows.slice(0, VISIBLE);
 
   return (
     <>
-      <h2 className="section-h">Themen-Kennzahlen <span className="count">↔ scrollen · klick zum Filtern</span></h2>
-      <div className="topic-cards">
-        {rows.map((r) => {
+      <h2 className="section-h" style={{ alignItems: "center" }}>Themen-Kennzahlen <span className="count">klick zum Filtern</span>
+        {rows.length > VISIBLE && <button className="tc-toggle" onClick={() => setExpanded((e) => !e)}>{expanded ? "Weniger ▲" : `Alle ${rows.length} Themen ▼`}</button>}
+      </h2>
+      <div className={`topic-cards ${expanded ? "grid" : ""}`}>
+        {shown.map((r) => {
           const pw = pct(r.paywalled, r.articles), nm = pct(r.au_named, r.au_total);
-          const on = f.topic === r.topic;
+          const on = f.topics.includes(r.topic);
           return (
-            <button key={r.topic} className={`tcard ${on ? "on" : ""}`} onClick={() => f.setTopic(on ? "all" : r.topic)}>
+            <button key={r.topic} className={`tcard ${on ? "on" : ""}`} onClick={() => f.toggleTopic(r.topic)}>
               <div className="tc-head"><span className="tc-name">{topicLabel(r.topic)}</span><span className="tc-art tnum">{r.articles.toLocaleString("de-DE")}</span></div>
               <div className="tc-sub">{r.new_7d} neu (7T) · {r.outlets} Quellen</div>
               <div className="tc-metrics">

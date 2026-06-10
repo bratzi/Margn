@@ -53,16 +53,21 @@ export default function FilterControls() {
         </select>
       </div>
 
-      {/* Themen als scrollbare Toggle-Liste */}
+      {/* Themen als scrollbare Multiselect-Toggle-Liste */}
       <div className="fgroup">
-        <div className="fglabel">Thema</div>
+        <div className="fglabel">Themen
+          <span className="fg-actions">{f.topics.length > 0 && <button onClick={() => f.setTopics([])}>zurücksetzen</button>}</span>
+        </div>
         <div className="topic-toggles">
-          <button className={`tg ${f.topic === "all" ? "on" : ""}`} onClick={() => f.setTopic("all")}>Alle Themen</button>
-          {f.topicOpts.map((t) => (
-            <button key={t.key} className={`tg ${f.topic === t.key ? "on" : ""}`} onClick={() => f.setTopic(f.topic === t.key ? "all" : t.key)}>
-              <span>{t.label}</span><span className="tg-n">{t.n}</span>
-            </button>
-          ))}
+          <button className={`tg ${f.topics.length === 0 ? "on" : ""}`} onClick={() => f.setTopics([])}>Alle Themen</button>
+          {f.topicOpts.map((t) => {
+            const on = f.topics.includes(t.key);
+            return (
+              <button key={t.key} className={`tg ${on ? "on" : ""}`} onClick={() => f.toggleTopic(t.key)}>
+                <span className="tg-check">{on ? "✓" : ""}</span><span>{t.label}</span><span className="tg-n">{t.n}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 

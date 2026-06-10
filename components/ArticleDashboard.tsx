@@ -53,13 +53,13 @@ export default function ArticleDashboard() {
   useEffect(() => {
     if (!f.active.size) return;
     const nn = (v: string) => (v === "all" ? null : v);
-    supabase.rpc("publisher_stats_f", { p_sources: f.activeArr, p_topic: nn(f.topic), p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo })
+    supabase.rpc("publisher_stats_f", { p_sources: f.activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo })
       .then(({ data }) => {
         const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
         for (const r of (data ?? []) as any[]) { a.articles += r.articles; a.paywalled += r.paywalled; a.named += r.au_named; a.au += r.au_named + r.au_anon + r.au_none; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d; }
         setAgg(a);
       });
-  }, [f.activeArr.join(","), f.topic, f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
+  }, [f.activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   // Keyword → Artikel-IDs
   useEffect(() => {
@@ -77,17 +77,17 @@ export default function ArticleDashboard() {
     if (f.paywall === "yes") q = q.eq("paywalled", true); else if (f.paywall === "no") q = q.eq("paywalled", false);
     if (f.atype !== "all") q = q.eq("ptype", f.atype);
     if (f.author !== "all") q = q.eq("author_status", f.author);
-    if (f.topic !== "all") q = q.eq("topic", f.topic);
+    if (f.topics.length) q = q.in("topic", f.topics);
     if (f.lang !== "all") q = q.eq("language", f.lang);
     if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
     if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
     if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.lang, f.rangeFrom, f.rangeTo, kwIds, f.keyword, page]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.rangeFrom, f.rangeTo, kwIds, f.keyword, page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topic, f.keyword, f.lang, f.rangeFrom, f.rangeTo]);
+  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.keyword, f.lang, f.rangeFrom, f.rangeTo]);
 
   useEffect(() => {
     const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];
@@ -100,7 +100,8 @@ export default function ArticleDashboard() {
   }, [rows]);
 
   const pages = Math.max(1, Math.ceil(total / PAGE));
-  const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${f.topic !== "all" ? ` · ${topicLabel(f.topic)}` : ""}${f.keyword !== "all" ? ` · #${f.keyword}` : ""}`;
+  const topicLbl = f.topics.length === 0 ? "" : f.topics.length === 1 ? topicLabel(f.topics[0]) : `${f.topics.length} Themen`;
+  const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${topicLbl ? ` · ${topicLbl}` : ""}${f.keyword !== "all" ? ` · #${f.keyword}` : ""}`;
 
   const cols: Col<Row>[] = useMemo(() => [
     { key: "seite", label: "Seite", width: 300, sortable: false, groupable: false, value: (r) => r.url,
@@ -147,7 +148,7 @@ export default function ArticleDashboard() {
           <div className="stat-tile accent"><div className="l">🎬 Video & Werbung</div><div className="n tnum">{(agg.video + agg.werbung).toLocaleString("de-DE")}</div><div className="bar"><i style={{ width: `${fpct(agg.video + agg.werbung, agg.articles + agg.video + agg.werbung)}%` }} /></div></div>
         </div>
 
-        <h2 className="section-h">Auf einen Blick <span className="count">{f.topic !== "all" ? topicLabel(f.topic) : "Gesamtverteilung"}</span></h2>
+        <h2 className="section-h">Auf einen Blick <span className="count">{topicLbl || "Gesamtverteilung"}</span></h2>
         <div className="donut-grid">
           <Donut title="Themen-Mix" centerLabel={f.topicOpts.reduce((s, t) => s + t.n, 0).toLocaleString("de-DE")} centerSub="Artikel"
             segments={f.topicOpts.slice(0, 6).map((t, i) => ({ label: t.label, value: t.n, color: PUB_COLORS[i % PUB_COLORS.length] }))} />
@@ -164,7 +165,7 @@ export default function ArticleDashboard() {
 
         {f.keywordOpts.length > 0 && (
           <>
-            <h2 className="section-h">Schlagwörter im Filter <span className="count">{f.topic !== "all" ? topicLabel(f.topic) : "alle Themen"} · klick zum Filtern</span></h2>
+            <h2 className="section-h">Schlagwörter im Filter <span className="count">{topicLbl || "alle Themen"} · klick zum Filtern</span></h2>
             <div className="kw-cloud">
               {f.keywordOpts.slice(0, 60).map((k) => (
                 <button key={k.key} className={`kw-pill ${f.keyword === k.key ? "on" : ""}`} onClick={() => f.setKeyword(f.keyword === k.key ? "all" : k.key)}>{k.label} <span className="kw-n">{k.n}</span></button>

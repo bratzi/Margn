@@ -23,11 +23,11 @@ export default function TimeRangeFilter() {
   useEffect(() => {
     if (!activeArr.length) { setRows([]); return; }
     supabase.rpc("publish_timeline_f", {
-      p_sources: activeArr, p_topic: f.topic === "all" ? null : f.topic,
+      p_sources: activeArr, p_topics: f.topics.length ? f.topics : null,
       p_paywall: f.paywall === "all" ? null : f.paywall, p_author: f.author === "all" ? null : f.author,
       p_lang: f.lang === "all" ? null : f.lang,
     }).then(({ data }) => setRows((data as TL[]) ?? []));
-  }, [activeArr.join(","), f.topic, f.paywall, f.author, f.lang]);
+  }, [activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang]);
 
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);

@@ -26,13 +26,13 @@ export default function TopicChart() {
       <h2 className="section-h">Themen <span className="count">publizistenübergreifend · klick zum Filtern</span></h2>
       <div className="panel pad">
         <div className="bars">
-          {sorted.map((r) => (
-            <button key={r.topic} className={`barrow barrow-btn ${f.topic === r.topic ? "sel" : ""}`} onClick={() => f.setTopic(f.topic === r.topic ? "all" : r.topic)} title="Nach Thema filtern">
+          {sorted.map((r) => { const on = f.topics.includes(r.topic); return (
+            <button key={r.topic} className={`barrow barrow-btn ${on ? "sel" : ""}`} onClick={() => f.toggleTopic(r.topic)} title="Nach Thema filtern">
               <span className="lbl">{topicLabel(r.topic)}</span>
-              <span className="track"><i style={{ width: `${(r.n / max) * 100}%`, background: f.topic === r.topic ? "var(--accent)" : "var(--teal)" }} /></span>
+              <span className="track"><i style={{ width: `${(r.n / max) * 100}%`, background: on ? "var(--accent)" : "var(--teal)" }} /></span>
               <span className="val tnum">{r.n.toLocaleString("de-DE")}</span>
             </button>
-          ))}
+          ); })}
         </div>
       </div>
     </>

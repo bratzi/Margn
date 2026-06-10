@@ -21,7 +21,7 @@ type Ctx = {
   paywall: string; setPaywall: (v: string) => void;
   atype: string; setAtype: (v: string) => void;
   author: string; setAuthor: (v: string) => void;
-  topic: string; setTopic: (v: string) => void;
+  topics: string[]; toggleTopic: (t: string) => void; setTopics: (a: string[]) => void;
   keyword: string; setKeyword: (v: string) => void;
   lang: string; setLang: (v: string) => void;
   topicOpts: Opt[]; keywordOpts: Opt[];
@@ -42,8 +42,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [paywall, setPaywall] = useState("all");
   const [atype, setAtype] = useState("all");
   const [author, setAuthor] = useState("all");
-  const [topic, setTopic] = useState("all");
+  const [topics, setTopics] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("all");
+  const toggleTopic = (t: string) => setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]);
   const [lang, setLang] = useState("all");
   const [topicOpts, setTopicOpts] = useState<Opt[]>([]);
   const [keywordOpts, setKeywordOpts] = useState<Opt[]>([]);
@@ -63,7 +64,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     const sid = params.get("source_id"); const kw = params.get("keyword"); const tp = params.get("topic");
     if (sid) { const id = parseInt(sid, 10); if (!isNaN(id)) setActive((p) => new Set([...p, id])); }
     if (kw) setKeyword(kw);
-    if (tp) setTopic(tp);
+    if (tp) setTopics([tp]);
   }, [params]);
 
   // gespeicherte Filter laden
@@ -74,7 +75,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (f.paywall) setPaywall(f.paywall);
       if (f.atype) setAtype(f.atype);
       if (f.author) setAuthor(f.author);
-      if (f.topic) setTopic(f.topic);
+      if (Array.isArray(f.topics)) setTopics(f.topics); else if (f.topic && f.topic !== "all") setTopics([f.topic]);
       if (f.keyword) setKeyword(f.keyword);
       if (f.lang) setLang(f.lang);
       if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
@@ -99,10 +100,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!sources.length) return;
     try {
       localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topic, keyword, lang, trfOpen, rangeIdx,
+        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, trfOpen, rangeIdx,
       }));
     } catch {}
-  }, [active, status, paywall, atype, author, topic, keyword, lang, trfOpen, rangeIdx, sources.length]);
+  }, [active, status, paywall, atype, author, topics, keyword, lang, trfOpen, rangeIdx, sources.length]);
 
   const nn = (v: string) => (v === "all" ? null : v);
 
@@ -116,9 +117,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // dynamische Keyword-Optionen (voller Filtersatz)
   useEffect(() => {
     if (!active.size) { setKeywordOpts([]); return; }
-    supabase.rpc("keyword_opts_f", { p_sources: [...active], p_topic: nn(topic), p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
+    supabase.rpc("keyword_opts_f", { p_sources: [...active], p_topics: topics.length ? topics : null, p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
       .then(({ data }) => setKeywordOpts((data ?? []).map((r: any) => ({ key: r.term, label: r.term, n: r.n }))));
-  }, [active, topic, paywall, author, lang, rangeFrom, rangeTo]);
+  }, [active, topics.join(","), paywall, author, lang, rangeFrom, rangeTo]);
 
   const toggle = (id: number) => setActive((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
@@ -127,7 +128,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const value: Ctx = {
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
-    topic, setTopic, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts,
+    topics, toggleTopic, setTopics, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts,
     days, rangeIdx, setRangeIdx, rangeFrom, rangeTo, trfOpen, setTrfOpen, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;

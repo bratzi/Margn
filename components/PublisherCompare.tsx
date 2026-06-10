@@ -16,20 +16,20 @@ const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
 export default function PublisherCompare() {
   const f = useFilters();
-  const { sources, activeArr: activeSources, topic } = f;
+  const { sources, activeArr: activeSources, topics } = f;
   const [stats, setStats] = useState<Stat[]>([]);
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
 
   useEffect(() => {
     const nn = (v: string) => (v === "all" ? null : v);
     supabase.rpc("publisher_stats_f", {
-      p_sources: activeSources, p_topic: nn(f.topic), p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo,
+      p_sources: activeSources, p_topics: topics.length ? topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo,
     }).then(({ data }) => setStats((data as Stat[]) ?? []));
-  }, [activeSources.join(","), f.topic, f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
+  }, [activeSources.join(","), topics.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   if (!stats.length) return null;
   const nm = (id: number) => short(nameById.get(id)?.name ?? "?");
-  const ctx = topic !== "all" ? ` · Thema: ${topicLabel(topic)}` : "";
+  const ctx = topics.length === 1 ? ` · Thema: ${topicLabel(topics[0])}` : topics.length > 1 ? ` · ${topics.length} Themen` : "";
 
   const charts: { title: string; desc: string; color: string; fmt?: (n: number) => string; data: { label: string; value: number; raw?: string }[] }[] = [
     { title: "Artikel", desc: `Artikel im Filter${ctx}`, color: "var(--accent)",

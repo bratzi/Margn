@@ -34,10 +34,10 @@ export default function RateStats() {
     if (!activeArr.length) { setRows([]); return; }
     const nn = (v: string) => (v === "all" ? null : v);
     supabase.rpc("publish_buckets_f", {
-      p_sources: activeArr, p_topic: nn(f.topic), p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang),
+      p_sources: activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang),
       p_from: fromIso, p_to: toIso, p_bucket: unit,
     }).then(({ data }) => setRows((data as B[]) ?? []));
-  }, [activeArr.join(","), f.topic, f.paywall, f.author, f.lang, fromIso, toIso, unit]);
+  }, [activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, fromIso, toIso, unit]);
 
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
