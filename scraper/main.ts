@@ -214,6 +214,12 @@ function normalizeParas(body: string): string[] {
 }
 const fp = (s: string) => createHash("sha1").update(s.toLowerCase()).digest("hex").slice(0, 12);
 
+// Scan-Zeitstempel anhängen, auf die letzten 150 gekappt (Detail-Timeline).
+function appendScan(prev: unknown): string[] {
+  const arr = Array.isArray(prev) ? (prev as string[]) : [];
+  return [...arr, new Date().toISOString()].slice(-150);
+}
+
 type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null } | null;
 
 // Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
@@ -329,9 +335,9 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
-    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count")
+    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times")
     .eq("url", url).maybeSingle();
-  const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1 });
+  const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   if (art) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
   return id;
@@ -716,10 +722,10 @@ async function enrichArticles(sources: Source[]) {
         try {
           // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
           const { data: prev } = await sb.from("articles")
-            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count")
+            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times")
             .eq("id", item.id).maybeSingle();
           const { authors, keywords, categories, ...fields } = meta;
-          await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1 }).eq("id", item.id);
+          await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
           if (art) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
           done++;

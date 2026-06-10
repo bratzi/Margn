@@ -5,14 +5,16 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder } from "@/components/icons";
 import { topicLabel } from "@/lib/topics";
+import ScanTimeline from "@/components/ScanTimeline";
 
 type Detail = {
   id: number; url: string; title: string | null; description: string | null; og_image: string | null;
   published_at: string | null; modified_at: string | null; paywalled: boolean | null;
   word_count: number | null; reading_min: number | null; article_type: string | null;
-  lang_detected: string | null; first_seen: string | null; author_status: string | null; topic: string | null;
+  lang_detected: string | null; first_seen: string | null; last_seen: string | null; author_status: string | null; topic: string | null;
   outlet: string; country: string; base_url: string; depth: number | null;
   revision_count: number | null; extension_count: number | null; edit_count: number | null;
+  scan_count: number | null; scan_times: string[] | null;
 };
 type Change = { old?: string; new?: string };
 type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; changes: Change[] | null };
@@ -99,8 +101,13 @@ export default function ArticleDetail({ id }: { id: number }) {
         {a.word_count ? <Stat k="Umfang" v={`${a.word_count.toLocaleString("de-DE")} Wörter`} /> : null}
         {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
         <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
-        <Stat k="Erstmals erfasst" v={fmtShort(a.first_seen)} />
       </div>
+
+      {/* Scan-Timeline */}
+      <DL h="Scan-Verlauf">
+        <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
+          changeTimes={snaps.map((s) => s.captured_at)} />
+      </DL>
 
       <DL h="Autoren">
         {a.author_status === "named" && authors.length > 0
