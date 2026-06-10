@@ -302,7 +302,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
 // im DOM landen. Ohne das vergleicht das Änderungs-Tracking nur das sichtbare Fenster und
 // meldet falsche "Entfernungen", wenn Meldungen aus dem Erstausschnitt rutschen.
 // Verlagsübergreifende Textmuster (DE+FR); klickt bis nichts mehr wächst (max 12 Runden).
-const LOAD_MORE_RX = /^(mehr laden|mehr anzeigen|weitere (beiträge|meldungen|artikel|einträge)( laden| anzeigen)?|ältere (beiträge|meldungen|einträge)( laden| anzeigen)?|alle (beiträge|meldungen) anzeigen|nachladen|mehr beiträge|load more|show more|charger plus|voir plus|plus de messages|afficher plus|lire la suite du live)$/i;
+const LOAD_MORE_RX = /^(mehr laden|mehr anzeigen|weitere (beiträge|meldungen|artikel|einträge)( laden| anzeigen)?|(ältere|frühere) (beiträge|meldungen|einträge)( laden| anzeigen)?|alle (beiträge|meldungen) anzeigen|nachladen|mehr beiträge|weiterlesen|load more|show more|charger plus|voir plus|plus de messages|afficher plus|lire la suite du live)$/i;
 async function expandTimeline(page: import("playwright").Page): Promise<void> {
   for (let round = 0; round < 12; round++) {
     const before = await page.evaluate(() => document.body?.innerText.length ?? 0);
