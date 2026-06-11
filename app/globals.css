@@ -335,11 +335,17 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .chart-card h3 { font-size: 13.5px; font-weight: 650; margin: 0 0 2px; letter-spacing: -0.01em; }
 .chart-card .desc { font-size: 12px; color: var(--faint); margin-bottom: 14px; }
 .bars { display: flex; flex-direction: column; gap: 7px; }
-.barrow { display: grid; grid-template-columns: 78px 1fr 52px; align-items: center; gap: 10px; }
+.barrow { display: grid; grid-template-columns: 78px 1fr 64px; align-items: center; gap: 10px; }
 .barrow .lbl { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .barrow .track { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
 .barrow .track i { display: block; height: 100%; border-radius: 99px; transition: width .6s cubic-bezier(.4,0,.2,1); }
 .barrow .val { font-size: 12px; color: var(--ink); text-align: right; font-weight: 600; }
+.pc-val-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.pc-delta { font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pc-delta.up { color: var(--green); }
+.pc-delta.down { color: var(--red); }
+.pc-delta.neutral { color: var(--faint); }
+.pc-delta-pct { opacity: .75; }
 .barrow-btn { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; width: 100%; }
 .barrow-btn:hover .lbl { color: var(--ink); }
 .barrow-btn.sel .lbl { color: var(--accent); font-weight: 600; }
