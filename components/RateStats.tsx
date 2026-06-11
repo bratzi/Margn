@@ -12,6 +12,7 @@ const VW = 1000, VH = 220;
 const PAD_L = 44, PAD_B = 24, PAD_T = 18, PAD_R = 12;
 const CW = VW - PAD_L - PAD_R;
 const CH = VH - PAD_T - PAD_B;
+const ZOOM_MIN = 1, ZOOM_MAX = 14;
 
 function isoWeek(d: Date): number {
   const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -25,28 +26,23 @@ export default function RateStats() {
   const { sources, activeArr } = f;
   const [rows, setRows] = useState<B[]>([]);
   const [manual, setManual] = useState<"auto" | Unit>("auto");
-  const [cursor, setCursor] = useState<{ x: number; bucketIdx: number } | null>(null);
-  const [scrollLeft, setScrollLeft] = useState(0);
+  // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
+  const [hoverDot, setHoverDot] = useState<{ sid: number; idx: number; x: number; y: number } | null>(null);
   const [containerW, setContainerW] = useState(0);
+  // Zoom-Faktor (Mausrad) + Drag-to-Zoom-Auswahl in Pixeln
+  const [zoom, setZoom] = useState(1);
+  const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const axisRef = useRef<HTMLDivElement>(null);
   const roRef = useRef<ResizeObserver | null>(null);
+  const dragStartRef = useRef<number | null>(null);
 
-  // Container-Breite messen → SVG rendert immer in ECHTEN Pixeln (kein preserveAspectRatio-
-  // Stretch, das die Datenpunkte zu Ellipsen verzerrt und teils nur ~60% Breite füllte).
-  // WICHTIG: Callback-Ref statt useEffect([]) — der scroll-Container existiert erst NACH dem
-  // Daten-Load (vorher Platzhalter-Text). Ein einmaliger Mount-Effect würde ihn nie messen
-  // → containerW bliebe 0 → Fallback-Breite statt voller Containerbreite.
+  // Container-Breite via Callback-Ref messen (Container existiert erst nach Daten-Load).
   const measure = (el: HTMLDivElement | null) => {
     scrollRef.current = el;
     roRef.current?.disconnect();
     if (!el) return;
-    const ro = new ResizeObserver(() => {
-      // clientWidth = Innenbreite inkl. Padding-Box minus Scrollbar → exakt der Platz,
-      // den das SVG füllen soll (contentRect zieht das 4px-Padding ab und ließe Lücken).
-      const w = el.clientWidth;
-      if (w > 0) setContainerW(w);
-    });
+    const ro = new ResizeObserver(() => { const w = el.clientWidth; if (w > 0) setContainerW(w); });
     ro.observe(el);
     roRef.current = ro;
     setContainerW(el.clientWidth);
@@ -58,6 +54,9 @@ export default function RateStats() {
   const spanDays = f.rangeIdx.to - f.rangeIdx.from + 1;
   const autoUnit: Unit = spanDays <= 3 ? "hour" : spanDays <= 45 ? "day" : "week";
   const unit: Unit = manual === "auto" ? autoUnit : manual;
+
+  // Zoom zurücksetzen, wenn sich Einheit oder Zeitraum ändert
+  useEffect(() => { setZoom(1); setDrag(null); setHoverDot(null); }, [unit, fromIso, toIso]);
 
   useEffect(() => {
     if (!activeArr.length) { setRows([]); return; }
@@ -106,29 +105,27 @@ export default function RateStats() {
       id: s.id, color: colorById.get(s.id)!,
       vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0),
     }));
-    // max ist das Maximum einer einzelnen Serie (nicht gestapelt)
     const mx = Math.max(1, ...ser.flatMap((s) => s.vals));
     return { series: ser, maxVal: mx };
   }, [rows, sources, act, buckets, unit]);
 
   const NB = buckets.length;
-  // Mindest-Pixel pro Bucket für horizontales Scrollen
   const minPxPerBucket = unit === "hour" ? 28 : unit === "day" ? 18 : 40;
-  // Verfügbare Zeichenfläche = echte Containerbreite minus Achsen-Padding.
-  // Fallback auf VW solange noch nicht gemessen.
   const availW = (containerW > 0 ? containerW : VW) - PAD_L - PAD_R;
-  const dataWidth = NB * minPxPerBucket;
-  // naturalWidth: füllt mindestens die volle Containerbreite; wächst nur, wenn die
-  // Datendichte mehr Platz braucht (→ dann scrollen).
+  // Zoom multipliziert die Datendichte → X-Achse wird breiter (scrollbar)
+  const dataWidth = NB * minPxPerBucket * zoom;
   const naturalWidth = Math.max(availW, dataWidth);
   const totalSvgW = naturalWidth + PAD_L + PAD_R;
-  // Muss gescrollt werden? Nur wenn die Daten breiter sind als der Container.
-  const needsScroll = dataWidth > availW;
+  const zoomed = zoom > 1.001;
 
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
   const Y = (v: number) => PAD_T + CH - (v / maxVal) * CH;
+  // Pixel→Bucket-Index (SVG-Koordinaten)
+  const idxAtX = (svgX: number) => {
+    const cx = svgX - PAD_L;
+    return Math.max(0, Math.min(NB - 1, Math.round((cx / naturalWidth) * (NB - 1))));
+  };
 
-  // Nicht-gestapelte Serien: Smooth Monotone Cubic (cardinal spline)
   function smoothPath(vals: number[]): string {
     if (vals.length < 2) return "";
     const pts = vals.map((v, i) => [X(i), Y(v)] as [number, number]);
@@ -149,7 +146,6 @@ export default function RateStats() {
     return `${line} L${last.toFixed(1)},${base.toFixed(1)} L${PAD_L.toFixed(1)},${base.toFixed(1)} Z`;
   }
 
-  // Tagestrennlinien (Stunden-Modus)
   const dayDividers = useMemo(() => {
     if (unit !== "hour") return [];
     const out: { idx: number; label: string }[] = [];
@@ -168,14 +164,20 @@ export default function RateStats() {
     if (unit === "week") return "KW " + isoWeek(d);
     return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   };
+  // Volles Datum+Zeit für den Dot-Tooltip
+  const fmtFull = (iso: string) => {
+    const d = new Date(iso);
+    if (unit === "hour") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " Uhr";
+    if (unit === "week") return "KW " + isoWeek(d) + " · " + d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
+    return d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
+  };
 
   const unitLabel = unit === "hour" ? "Stunden" : unit === "day" ? "Tage" : "Kalenderwochen";
   const total = series.reduce((s, x) => s + x.vals.reduce((a, b) => a + b, 0), 0);
   const fromD = new Date(fromIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   const toD = new Date(toIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
-  const axisStep = Math.max(1, Math.ceil(NB / 10));
+  const axisStep = Math.max(1, Math.ceil(NB / (zoomed ? 18 : 10)));
 
-  // Y-Achsen-Ticks
   const yTicks = useMemo(() => {
     const nTicks = 4;
     const step = Math.ceil(maxVal / nTicks) || 1;
@@ -185,26 +187,86 @@ export default function RateStats() {
     return ticks;
   }, [maxVal]);
 
-  // Cursor-Bucket-Info
-  const cursorInfo = useMemo(() => {
-    if (cursor === null || cursor.bucketIdx < 0 || cursor.bucketIdx >= NB) return null;
-    const idx = cursor.bucketIdx;
-    return {
-      label: fmtAxis(buckets[idx]),
-      entries: series.map((s) => ({ name: nameById.get(s.id)!, color: s.color, val: s.vals[idx] })).filter((e) => e.val > 0),
-      total: series.reduce((sum, s) => sum + s.vals[idx], 0),
-    };
-  }, [cursor, series, buckets, NB]);
+  const hoverInfo = useMemo(() => {
+    if (!hoverDot) return null;
+    const s = series.find((x) => x.id === hoverDot.sid);
+    if (!s) return null;
+    return { name: nameById.get(s.id)!, color: s.color, val: s.vals[hoverDot.idx], when: fmtFull(buckets[hoverDot.idx]) };
+  }, [hoverDot, series, buckets]);
 
-  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+  // SVG-X aus einem Maus-Event (für Drag-to-Zoom)
+  const svgXFromEvent = (e: React.MouseEvent<SVGSVGElement> | React.WheelEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    // Maus-X auf SVG-viewBox skalieren (korrekt für beide Modi: feste Breite + stretched)
-    const svgX = ((e.clientX - rect.left) / rect.width) * totalSvgW;
-    const chartX = svgX - PAD_L;
-    if (chartX < 0 || chartX > naturalWidth) { setCursor(null); return; }
-    const idx = Math.round((chartX / naturalWidth) * (NB - 1));
-    setCursor({ x: X(idx), bucketIdx: idx });
+    return ((e.clientX - rect.left) / rect.width) * totalSvgW;
+  };
+
+  // Mausrad → Zoom (Position unter dem Cursor bleibt fixiert)
+  function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
+    if (!scrollRef.current) return;
+    e.preventDefault();
+    const el = scrollRef.current;
+    const rect = el.getBoundingClientRect();
+    const pointerInContainer = e.clientX - rect.left;     // px im sichtbaren Container
+    const contentX = el.scrollLeft + pointerInContainer;  // px im (skalierten) Inhalt
+    const ratio = contentX / totalSvgW;                   // relative Position [0..1]
+    const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+    const nextZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
+    if (nextZoom === zoom) return;
+    setZoom(nextZoom);
+    // Nach Re-Render Scrollposition so setzen, dass der Punkt unter dem Cursor bleibt
+    const nextTotal = Math.max(availW, NB * minPxPerBucket * nextZoom) + PAD_L + PAD_R;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        const sl = ratio * nextTotal - pointerInContainer;
+        scrollRef.current.scrollLeft = sl;
+        if (axisRef.current) axisRef.current.scrollLeft = sl;
+      }
+    });
   }
+
+  // Drag-to-Zoom: gedrückt ziehen markiert Bereich, Loslassen zoomt rein
+  function handleDown(e: React.MouseEvent<SVGSVGElement>) {
+    if (e.button !== 0) return;
+    const x = svgXFromEvent(e);
+    if (x < PAD_L || x > totalSvgW - PAD_R) return;
+    dragStartRef.current = x;
+    setHoverDot(null);
+  }
+  function handleMove(e: React.MouseEvent<SVGSVGElement>) {
+    if (dragStartRef.current === null) return;
+    const x = svgXFromEvent(e);
+    setDrag({ x0: dragStartRef.current, x1: Math.max(PAD_L, Math.min(totalSvgW - PAD_R, x)) });
+  }
+  function handleUp() {
+    const sel = drag;
+    dragStartRef.current = null;
+    setDrag(null);
+    if (!sel) return;
+    const lo = Math.min(sel.x0, sel.x1), hi = Math.max(sel.x0, sel.x1);
+    if (hi - lo < 12) return; // zu kleine Auswahl = Klick, ignorieren
+    const iLo = idxAtX(lo), iHi = idxAtX(hi);
+    const span = Math.max(1, iHi - iLo);
+    // Ziel: der gewählte Bereich soll die volle Breite füllen → Zoom = NB/span
+    const targetZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, (NB - 1) / span));
+    setZoom(targetZoom);
+    const nextTotal = Math.max(availW, NB * minPxPerBucket * targetZoom) + PAD_L + PAD_R;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        const sl = PAD_L + (iLo / Math.max(1, NB - 1)) * (nextTotal - PAD_L - PAD_R) - PAD_L;
+        scrollRef.current.scrollLeft = Math.max(0, sl);
+        if (axisRef.current) axisRef.current.scrollLeft = Math.max(0, sl);
+      }
+    });
+  }
+
+  const resetZoom = () => {
+    setZoom(1); setDrag(null);
+    if (scrollRef.current) scrollRef.current.scrollLeft = 0;
+    if (axisRef.current) axisRef.current.scrollLeft = 0;
+  };
+
+  // Dots nur zeigen, wenn nicht zu dicht (sonst Linie pur)
+  const showDots = NB / Math.max(1, zoom) <= 120 || zoomed;
 
   return (
     <>
@@ -225,18 +287,18 @@ export default function RateStats() {
           <>
             <div className="rate-legend">
               {series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}
-              <span style={{ marginLeft: "auto", color: "var(--faint)" }}>
+              <span className="rate-hint">Mausrad zoomt · Bereich ziehen zoomt rein</span>
+              {zoomed && <button className="rate-zoomreset" onClick={resetZoom} title="Zoom zurücksetzen">⤢ {zoom.toFixed(1)}× · zurücksetzen</button>}
+              <span style={{ marginLeft: zoomed ? 0 : "auto", color: "var(--faint)" }}>
                 Einheit: <b style={{ color: "var(--accent)" }}>{unitLabel}</b>{manual === "auto" ? " (dynamisch)" : ""}
               </span>
             </div>
 
-            {/* Scrollbarer Chart-Container */}
             <div
               ref={measure}
-              className="rate-scroll"
+              className={`rate-scroll ${dragStartRef.current !== null ? "is-selecting" : ""}`}
               onScroll={(e) => {
                 const sl = (e.target as HTMLDivElement).scrollLeft;
-                setScrollLeft(sl);
                 if (axisRef.current) axisRef.current.scrollLeft = sl;
               }}
             >
@@ -246,11 +308,13 @@ export default function RateStats() {
                 width={totalSvgW}
                 height={VH}
                 className="rate-svg-inner data-fade-in"
-                style={{ display: "block" }}
-                onMouseMove={handleMouseMove}
-                onMouseLeave={() => setCursor(null)}
+                style={{ display: "block", touchAction: "pan-x" }}
+                onWheel={handleWheel}
+                onMouseDown={handleDown}
+                onMouseMove={handleMove}
+                onMouseUp={handleUp}
+                onMouseLeave={() => { handleUp(); setHoverDot(null); }}
               >
-                {/* Y-Achsen-Linien + Labels */}
                 {yTicks.map((v) => (
                   <g key={v}>
                     <line x1={PAD_L} y1={Y(v)} x2={totalSvgW - PAD_R} y2={Y(v)}
@@ -260,7 +324,6 @@ export default function RateStats() {
                   </g>
                 ))}
 
-                {/* Tagestrennlinien mit Datum-Label */}
                 {dayDividers.map(({ idx, label }) => (
                   <g key={idx}>
                     <line x1={X(idx)} y1={PAD_T} x2={X(idx)} y2={PAD_T + CH}
@@ -269,61 +332,62 @@ export default function RateStats() {
                   </g>
                 ))}
 
-                {/* Baseline */}
                 <line x1={PAD_L} y1={PAD_T + CH} x2={totalSvgW - PAD_R} y2={PAD_T + CH}
                   stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
 
-                {/* Flächen (transparent, einzeln — nicht gestapelt) */}
                 {series.map((s) => (
                   <path key={`a${s.id}`} d={areaPath(s.vals)} fill={s.color} opacity={0.12} />
                 ))}
-
-                {/* Linien (abgerundet smooth) */}
                 {series.map((s) => (
                   <path key={`l${s.id}`} d={smoothPath(s.vals)} fill="none"
                     stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                     vectorEffect="non-scaling-stroke" />
                 ))}
 
-                {/* Pulsierende Datenpunkte — Wert nur bei Hover sichtbar */}
-                {NB <= 120 && series.map((s) => s.vals.map((v, i) => v > 0 ? (
-                  <g key={`${s.id}-${i}`}>
-                    {/* Pulsier-Ring */}
-                    <circle cx={X(i)} cy={Y(v)} r="6" fill={s.color} opacity="0.18" className="rate-pulse" />
-                    {/* Kern-Dot */}
-                    <circle cx={X(i)} cy={Y(v)} r="3.5" fill={s.color}
-                      stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
-                      className="rate-dot" />
-                  </g>
-                ) : null))}
+                {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot */}
+                {showDots && series.map((s) => s.vals.map((v, i) => {
+                  if (v <= 0) return null;
+                  const isHover = hoverDot?.sid === s.id && hoverDot?.idx === i;
+                  return (
+                    <g key={`${s.id}-${i}`}>
+                      {/* dezenter Pulsier-Ring (stärker als zuvor, mit Stil) */}
+                      <circle cx={X(i)} cy={Y(v)} r="4" fill={s.color} className="rate-pulse" style={{ ["--c" as any]: s.color }} />
+                      {/* Kern-Dot */}
+                      <circle cx={X(i)} cy={Y(v)} r={isHover ? 5.5 : 3.4} fill={s.color}
+                        stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
+                        className="rate-dot" />
+                      {/* unsichtbare große Hitbox für leichtes Treffen */}
+                      <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: "pointer" }}
+                        onMouseEnter={() => dragStartRef.current === null && setHoverDot({ sid: s.id, idx: i, x: X(i), y: Y(v) })}
+                        onMouseLeave={() => setHoverDot((h) => (h?.sid === s.id && h?.idx === i ? null : h))} />
+                    </g>
+                  );
+                }))}
 
-                {/* Interaktiver Cursor */}
-                {cursor !== null && (
-                  <line x1={cursor.x} y1={PAD_T} x2={cursor.x} y2={PAD_T + CH}
-                    stroke="var(--accent)" strokeWidth="1" opacity="0.5"
-                    strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+                {/* Drag-to-Zoom-Auswahl */}
+                {drag && (
+                  <rect
+                    x={Math.min(drag.x0, drag.x1)} y={PAD_T}
+                    width={Math.abs(drag.x1 - drag.x0)} height={CH}
+                    fill="var(--accent)" opacity="0.12" stroke="var(--accent)" strokeWidth="1"
+                    strokeDasharray="3 2" vectorEffect="non-scaling-stroke" pointerEvents="none"
+                  />
                 )}
               </svg>
 
-              {/* Hover-Tooltip (außerhalb SVG für einfacheres Styling) */}
-              {cursor !== null && cursorInfo && (
-                <div className="rate-cursor-tip" style={{ left: cursor.x }}>
-                  <div className="rct-label">{cursorInfo.label}</div>
-                  {cursorInfo.entries.map((e) => (
-                    <div key={e.name} className="rct-row">
-                      <i style={{ background: e.color }} />
-                      <span>{e.name}</span>
-                      <b>{e.val}</b>
-                    </div>
-                  ))}
-                  {cursorInfo.entries.length > 1 && (
-                    <div className="rct-total">Gesamt: <b>{cursorInfo.total}</b></div>
-                  )}
+              {/* Per-Dot-Tooltip */}
+              {hoverInfo && hoverDot && (
+                <div className="rate-cursor-tip rate-dot-tip" style={{ left: hoverDot.x, top: hoverDot.y }}>
+                  <div className="rct-label">{hoverInfo.when}</div>
+                  <div className="rct-row">
+                    <i style={{ background: hoverInfo.color }} />
+                    <span>{hoverInfo.name}</span>
+                    <b>{hoverInfo.val}</b>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* X-Achse (scrollt mit wenn nötig, sonst 100%-Breite) */}
             <div className="rate-axis-wrap" ref={axisRef}>
               <div className="rate-axis" style={{ width: totalSvgW, position: "relative" }}>
                 {buckets.map((b, i) => {
