@@ -7,6 +7,7 @@ import { topicLabel } from "@/lib/topics";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
+export type SubOpt = { key: string; n: number; sources: number };
 
 function makeDays(): string[] {
   const out: string[] = []; const d = new Date(); d.setUTCHours(0, 0, 0, 0);
@@ -22,9 +23,10 @@ type Ctx = {
   atype: string; setAtype: (v: string) => void;
   author: string; setAuthor: (v: string) => void;
   topics: string[]; toggleTopic: (t: string) => void; setTopics: (a: string[]) => void;
+  subcats: string[]; toggleSubcat: (c: string) => void;
   keyword: string; setKeyword: (v: string) => void;
   lang: string; setLang: (v: string) => void;
-  topicOpts: Opt[]; keywordOpts: Opt[];
+  topicOpts: Opt[]; keywordOpts: Opt[]; subOpts: SubOpt[];
   days: string[]; rangeIdx: { from: number; to: number }; setRangeIdx: (r: { from: number; to: number }) => void;
   rangeFrom: string | null; rangeTo: string | null;
   trfOpen: boolean; setTrfOpen: (b: boolean) => void;
@@ -43,8 +45,12 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [atype, setAtype] = useState("all");
   const [author, setAuthor] = useState("all");
   const [topics, setTopics] = useState<string[]>([]);
+  const [subcats, setSubcats] = useState<string[]>([]);
+  const [subOpts, setSubOpts] = useState<SubOpt[]>([]);
   const [keyword, setKeyword] = useState("all");
-  const toggleTopic = (t: string) => setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]);
+  // Topic wechseln leert die Sub-Rubriken-Auswahl (sie gehören zum vorigen Topic)
+  const toggleTopic = (t: string) => { setSubcats([]); setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]); };
+  const toggleSubcat = (c: string) => setSubcats((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c]);
   const [lang, setLang] = useState("all");
   const [topicOpts, setTopicOpts] = useState<Opt[]>([]);
   const [keywordOpts, setKeywordOpts] = useState<Opt[]>([]);
@@ -114,6 +120,17 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       .then(({ data }) => setTopicOpts((data ?? []).map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n }))));
   }, [active, paywall, author, lang, rangeFrom, rangeTo]);
 
+  // Sub-Rubriken: nur sinnvoll bei genau EINEM gewählten Topic.
+  // Defensiv: existiert die RPC (noch) nicht oder liefert Fehler → leer (kein Crash, keine Anzeige).
+  useEffect(() => {
+    if (!active.size || topics.length !== 1) { setSubOpts([]); return; }
+    supabase.rpc("subcategory_opts_f", { p_sources: [...active], p_topic: topics[0], p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
+      .then(({ data, error }) => {
+        if (error || !data) { setSubOpts([]); return; }
+        setSubOpts((data as any[]).map((r) => ({ key: r.subcategory, n: r.n, sources: r.sources })));
+      });
+  }, [active, topics.join(","), paywall, author, lang, rangeFrom, rangeTo]);
+
   // dynamische Keyword-Optionen (voller Filtersatz)
   useEffect(() => {
     if (!active.size) { setKeywordOpts([]); return; }
@@ -128,7 +145,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const value: Ctx = {
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
-    topics, toggleTopic, setTopics, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts,
+    topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts, subOpts,
     days, rangeIdx, setRangeIdx, rangeFrom, rangeTo, trfOpen, setTrfOpen, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;

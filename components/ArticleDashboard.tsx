@@ -12,6 +12,7 @@ import RateStats from "@/components/RateStats";
 import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
 import Donut from "@/components/Donut";
 import TopicCards from "@/components/TopicCards";
+import SubTopicBar from "@/components/SubTopicBar";
 import DataTable, { type Col } from "@/components/DataTable";
 import { topicLabel } from "@/lib/topics";
 
@@ -74,9 +75,21 @@ export default function ArticleDashboard() {
       .then(({ data }) => setKwIds((data ?? []).map((r: any) => r.article_id)));
   }, [f.keyword]);
 
+  // Sub-Rubriken → Artikel-IDs (Artikel mit mind. einer der gewählten Kategorien)
+  const [subIds, setSubIds] = useState<number[] | null>(null);
+  useEffect(() => {
+    if (!f.subcats.length) { setSubIds(null); return; }
+    supabase.from("article_categories").select("article_id, categories!inner(name)").in("categories.name", f.subcats)
+      .then(({ data }) => setSubIds([...new Set((data ?? []).map((r: any) => r.article_id))]));
+  }, [f.subcats.join("|||")]);
+
   const loadRows = useCallback(async () => {
     if (!f.active.size) { setRows([]); setTotal(0); return; }
     if (f.keyword !== "all" && kwIds === null) return;
+    if (f.subcats.length && subIds === null) return;
+    // Keyword- und Sub-Rubrik-Artikel-IDs schneiden (beide müssen gelten, wenn gesetzt)
+    let idFilter: number[] | null = kwIds;
+    if (subIds) idFilter = idFilter ? idFilter.filter((x) => subIds.includes(x)) : subIds;
     let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", f.activeArr);
     if (f.status === "analyzed") q = q.eq("analyzed", true); else if (f.status === "backlog") q = q.eq("analyzed", false);
     if (f.status === "new") q = q.lte("scan_count", 1); else if (f.status === "rescanned") q = q.gte("scan_count", 2);
@@ -87,13 +100,13 @@ export default function ArticleDashboard() {
     if (f.lang !== "all") q = q.eq("language", f.lang);
     if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
     if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
-    if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
+    if (idFilter) q = q.in("article_id", idFilter.length ? idFilter : [-1]);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.rangeFrom, f.rangeTo, kwIds, f.keyword, page]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.rangeFrom, f.rangeTo, kwIds, subIds, f.keyword, f.subcats.join("|||"), page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.keyword, f.lang, f.rangeFrom, f.rangeTo]);
+  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subcats.join("|||"), f.keyword, f.lang, f.rangeFrom, f.rangeTo]);
 
   useEffect(() => {
     const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];
@@ -148,6 +161,7 @@ export default function ArticleDashboard() {
 
       <div className="page wide">
         <TopicCards />
+        <SubTopicBar />
 
         <h2 className="section-h">Auf einen Blick <span className="count">{topicLbl || "Gesamtverteilung"}</span></h2>
         <div className="donut-grid">
