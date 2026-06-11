@@ -31,9 +31,14 @@ type Ctx = {
   catTree: Map<string, SubOpt[]>;
   days: string[]; rangeIdx: { from: number; to: number }; setRangeIdx: (r: { from: number; to: number }) => void;
   rangeFrom: string | null; rangeTo: string | null;
+  // Pinpoint: exaktes Zeitfenster (+ optional Quelle) aus einem Chart-Klick — überschreibt
+  // rangeFrom/rangeTo für die Tabelle und kann eine einzelne Quelle isolieren.
+  pinpoint: Pin | null; setPinpoint: (p: Pin | null) => void;
   trfOpen: boolean; setTrfOpen: (b: boolean) => void;
   ready: boolean;
 };
+
+export type Pin = { from: string; to: string; sourceId?: number; label: string };
 
 const FilterContext = createContext<Ctx | null>(null);
 export const useFilters = () => useContext(FilterContext)!;
@@ -62,9 +67,11 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const days = useMemo(makeDays, []);
   const [trfOpen, setTrfOpen] = useState(true);
   const [rangeIdx, setRangeIdx] = useState<{ from: number; to: number }>({ from: 0, to: 59 });
+  const [pinpoint, setPinpoint] = useState<Pin | null>(null);
   const full = rangeIdx.from === 0 && rangeIdx.to === days.length - 1;
-  const rangeFrom = full ? null : days[rangeIdx.from] + "T00:00:00Z";
-  const rangeTo = full ? null : days[rangeIdx.to] + "T23:59:59Z";
+  // Pinpoint (Chart-Klick) hat Vorrang über den Tages-Range für die Tabellen-Abfrage.
+  const rangeFrom = pinpoint ? pinpoint.from : (full ? null : days[rangeIdx.from] + "T00:00:00Z");
+  const rangeTo = pinpoint ? pinpoint.to : (full ? null : days[rangeIdx.to] + "T23:59:59Z");
 
   const savedActiveRef = useRef<number[] | null>(null);
 
@@ -182,12 +189,14 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const toggle = (id: number) => setActive((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());
   const activeArr = useMemo(() => [...active], [active]);
+  // Manuelle Range-Änderung hebt einen aktiven Pinpoint auf (keine zwei Zeitfilter gleichzeitig).
+  const setRangeIdxClearPin = (r: { from: number; to: number }) => { setPinpoint(null); setRangeIdx(r); };
 
   const value: Ctx = {
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
     topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts, subOpts, catTree,
-    days, rangeIdx, setRangeIdx, rangeFrom, rangeTo, trfOpen, setTrfOpen, ready,
+    days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
 }

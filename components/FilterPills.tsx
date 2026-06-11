@@ -22,7 +22,8 @@ export default function FilterPills() {
   if (f.keyword !== "all") pills.push({ id: "kw", label: `#${f.keyword}`, on: () => f.setKeyword("all") });
   if (f.lang !== "all") pills.push({ id: "lg", label: f.lang === "de" ? "🇩🇪 DE" : "🇫🇷 FR", on: () => f.setLang("all") });
   const fullRange = f.rangeIdx.from === 0 && f.rangeIdx.to === f.days.length - 1;
-  if (!fullRange) pills.push({ id: "range", label: `📅 ${fmtDay(f.days[f.rangeIdx.from])} – ${fmtDay(f.days[f.rangeIdx.to])}`, on: () => f.setRangeIdx({ from: 0, to: f.days.length - 1 }) });
+  if (f.pinpoint) pills.push({ id: "pin", label: `🎯 ${f.pinpoint.label}`, on: () => f.setPinpoint(null) });
+  else if (!fullRange) pills.push({ id: "range", label: `📅 ${fmtDay(f.days[f.rangeIdx.from])} – ${fmtDay(f.days[f.rangeIdx.to])}`, on: () => f.setRangeIdx({ from: 0, to: f.days.length - 1 }) });
 
   if (!pills.length) return null;
   return (

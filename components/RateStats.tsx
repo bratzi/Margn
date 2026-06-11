@@ -36,6 +36,7 @@ export default function RateStats() {
   const roRef = useRef<ResizeObserver | null>(null);
   // Pan-Zustand (Click-and-Drag verschiebt die X-Achse)
   const panRef = useRef<{ startX: number; startScroll: number } | null>(null);
+  const didPanRef = useRef(false); // unterscheidet echten Klick von Pan-Geste
   const [panning, setPanning] = useState(false);
 
   // Container-Breite via Callback-Ref messen (Container existiert erst nach Daten-Load).
@@ -188,10 +189,32 @@ export default function RateStats() {
   };
 
   const unitLabel = unit === "minute" ? "Minuten" : unit === "hour" ? "Stunden" : unit === "day" ? "Tage" : "Kalenderwochen";
+
+  // Klick auf einen Dot → Tabelle exakt auf dieses Bucket-Zeitfenster + diese Quelle filtern.
+  const pinDot = (sid: number, idx: number) => {
+    const start = new Date(buckets[idx]);
+    const end = new Date(start);
+    if (unit === "minute") end.setUTCMinutes(end.getUTCMinutes() + 1);
+    else if (unit === "hour") end.setUTCHours(end.getUTCHours() + 1);
+    else if (unit === "day") end.setUTCDate(end.getUTCDate() + 1);
+    else end.setUTCDate(end.getUTCDate() + 7);
+    end.setUTCSeconds(end.getUTCSeconds() - 1); // inklusives Ende
+    f.setPinpoint({
+      from: start.toISOString(), to: end.toISOString(), sourceId: sid,
+      label: `${nameById.get(sid)} · ${fmtFull(buckets[idx])}`,
+    });
+    // sanft zur Tabelle scrollen, damit die Wirkung sichtbar ist
+    requestAnimationFrame(() => document.querySelector(".dt-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
+
   const total = series.reduce((s, x) => s + x.vals.reduce((a, b) => a + b, 0), 0);
   const fromD = new Date(fromIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   const toD = new Date(toIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
-  const axisStep = Math.max(1, Math.ceil(NB / (stretched ? 18 : 10)));
+  // X-Achsen-Dichte richtet sich nach der ECHTEN Breite: je weiter gezoomt (mehr px je
+  // Bucket), desto mehr Zeitpunkte werden beschriftet. Mindestabstand ~64 px pro Label.
+  const LABEL_MIN_PX = 64;
+  const maxLabels = Math.max(2, Math.floor(naturalWidth / LABEL_MIN_PX));
+  const axisStep = Math.max(1, Math.ceil((NB - 1) / maxLabels));
 
   const yTicks = useMemo(() => {
     const nTicks = 4;
@@ -262,12 +285,14 @@ export default function RateStats() {
   function handleDown(e: React.MouseEvent<SVGSVGElement>) {
     if (e.button !== 0 || !scrollRef.current || !stretched) return;
     panRef.current = { startX: e.clientX, startScroll: scrollRef.current.scrollLeft };
+    didPanRef.current = false;
     setPanning(true);
     setHoverDot(null);
   }
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const p = panRef.current;
     if (!p || !scrollRef.current) return;
+    if (Math.abs(e.clientX - p.startX) > 3) didPanRef.current = true; // echte Pan-Geste
     const sl = p.startScroll - (e.clientX - p.startX);
     scrollRef.current.scrollLeft = sl;
     if (axisRef.current) axisRef.current.scrollLeft = scrollRef.current.scrollLeft;
@@ -374,10 +399,11 @@ export default function RateStats() {
                       <circle cx={X(i)} cy={Y(v)} r={isHover ? 5.5 : 3.4} fill={s.color}
                         stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
                         className="rate-dot" />
-                      {/* unsichtbare große Hitbox für leichtes Treffen (nicht während Pan) */}
-                      <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: stretched ? "grab" : "pointer" }}
+                      {/* Hitbox: Hover zeigt Tooltip, Klick filtert die Tabelle auf dieses Fenster+Quelle */}
+                      <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: "pointer" }}
                         onMouseEnter={() => !panRef.current && setHoverDot({ sid: s.id, idx: i, x: X(i), y: Y(v) })}
-                        onMouseLeave={() => setHoverDot((h) => (h?.sid === s.id && h?.idx === i ? null : h))} />
+                        onMouseLeave={() => setHoverDot((h) => (h?.sid === s.id && h?.idx === i ? null : h))}
+                        onClick={() => { if (!didPanRef.current) pinDot(s.id, i); }} />
                     </g>
                   );
                 }))}
