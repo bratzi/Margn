@@ -6,7 +6,7 @@ import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS } from "@/components/TimeRangeFilter";
 
 type B = { source_id: number; bucket: string; n: number };
-type Unit = "hour" | "day" | "week";
+type Unit = "minute" | "hour" | "day" | "week";
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000, VH = 220;
 const PAD_L = 44, PAD_B = 24, PAD_T = 18, PAD_R = 12;
@@ -56,7 +56,7 @@ export default function RateStats() {
   const baseAutoUnit: Unit = spanDays <= 3 ? "hour" : spanDays <= 45 ? "day" : "week";
   // Im Dynamisch-Modus darf das Mausrad die Einheit verschieben (override), sonst zählt manual.
   const unit: Unit = manual === "auto" ? (autoUnitOverride ?? baseAutoUnit) : manual;
-  const UNIT_ORDER: Unit[] = ["week", "day", "hour"]; // grob → fein
+  const UNIT_ORDER: Unit[] = ["week", "day", "hour", "minute"]; // grob → fein
 
   // Dichte/Override zurücksetzen, wenn Modus oder Zeitraum wechselt
   useEffect(() => { setDens(null); setAutoUnitOverride(null); setHoverDot(null); }, [manual, fromIso, toIso]);
@@ -67,7 +67,7 @@ export default function RateStats() {
     supabase.rpc("publish_buckets_f", {
       p_sources: activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang),
       p_from: fromIso, p_to: toIso, p_bucket: unit,
-    }).limit(6000).then(({ data }) => setRows((data as B[]) ?? []));
+    }).limit(10000).then(({ data }) => setRows((data as B[]) ?? []));
   }, [activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, fromIso, toIso, unit]);
 
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
@@ -76,7 +76,8 @@ export default function RateStats() {
 
   const truncTo = (iso: string, u: Unit) => {
     const d = new Date(iso);
-    if (u === "hour") d.setUTCMinutes(0, 0, 0);
+    if (u === "minute") d.setUTCSeconds(0, 0);
+    else if (u === "hour") d.setUTCMinutes(0, 0, 0);
     else if (u === "day") d.setUTCHours(0, 0, 0, 0);
     else { d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); }
     return d;
@@ -86,10 +87,13 @@ export default function RateStats() {
     const out: string[] = [];
     const cur = truncTo(fromIso, unit);
     const end = new Date(toIso);
+    // Minuten erzeugen extrem viele Buckets → hartes Limit, sonst hängt das Rendering.
+    const cap = unit === "minute" ? 4000 : 3000;
     let g = 0;
-    while (cur <= end && g++ < 3000) {
+    while (cur <= end && g++ < cap) {
       out.push(cur.toISOString());
-      if (unit === "hour") cur.setUTCHours(cur.getUTCHours() + 1);
+      if (unit === "minute") cur.setUTCMinutes(cur.getUTCMinutes() + 1);
+      else if (unit === "hour") cur.setUTCHours(cur.getUTCHours() + 1);
       else if (unit === "day") cur.setUTCDate(cur.getUTCDate() + 1);
       else cur.setUTCDate(cur.getUTCDate() + 7);
     }
@@ -116,13 +120,19 @@ export default function RateStats() {
   const availW = (containerW > 0 ? containerW : VW) - PAD_L - PAD_R;
   // „Fit"-Dichte: so dicht, dass alle Buckets genau die Containerbreite füllen.
   const fitDens = availW / Math.max(1, NB - 1);
-  // Erlaubter Dichtebereich: stauchen bis fitDens (nie schmaler als Container),
-  // strecken bis großzügig (Stunden brauchen weniger px als Wochen).
-  const maxDens = unit === "hour" ? 70 : unit === "day" ? 90 : 160;
-  const effDens = dens === null ? fitDens : Math.max(fitDens, Math.min(maxDens, dens));
-  // naturalWidth: Datendichte × Bucketzahl, aber nie schmaler als der Container.
-  const naturalWidth = Math.max(availW, effDens * Math.max(1, NB - 1));
-  const totalSvgW = naturalWidth + PAD_L + PAD_R;
+  // Erlaubter Dichtebereich PRO EINHEIT — bewusst weit gespannt, damit man lange innerhalb
+  // einer Einheit strecken UND stauchen kann, bevor (im Dynamik-Modus) die Einheit springt.
+  // maxDens (strecken): großzügig, feinere Einheiten brauchen weniger px je Bucket.
+  const maxDens = unit === "minute" ? 60 : unit === "hour" ? 130 : unit === "day" ? 150 : 240;
+  // minDens (stauchen): unter fitDens erlaubt → Achse wird gestaucht (Buckets rücken zusammen),
+  // aber nie unter ~1,5 px/Bucket (sonst unlesbar). Erst dann springt die Einheit gröber.
+  const minDensFloor = unit === "minute" ? 0.4 : unit === "hour" ? 1.2 : unit === "day" ? 3 : 6;
+  const minDens = Math.min(fitDens, minDensFloor);
+  const effDens = dens === null ? fitDens : Math.max(minDens, Math.min(maxDens, dens));
+  // naturalWidth: Datendichte × Bucketzahl; darf jetzt auch SCHMALER als der Container sein
+  // (Stauchen), füllt dann zentriert nur einen Teil — sonst nie unter Containerbreite.
+  const naturalWidth = effDens * Math.max(1, NB - 1);
+  const totalSvgW = Math.max(availW, naturalWidth) + PAD_L + PAD_R;
   const stretched = naturalWidth > availW + 1; // breiter als Container → scrollbar
 
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
@@ -148,12 +158,13 @@ export default function RateStats() {
     return `${line} L${last.toFixed(1)},${base.toFixed(1)} L${PAD_L.toFixed(1)},${base.toFixed(1)} Z`;
   }
 
+  // Tagestrennlinien im Stunden- UND Minuten-Modus (Mitternacht markiert den Tageswechsel).
   const dayDividers = useMemo(() => {
-    if (unit !== "hour") return [];
+    if (unit !== "hour" && unit !== "minute") return [];
     const out: { idx: number; label: string }[] = [];
     for (let i = 1; i < buckets.length; i++) {
       const d = new Date(buckets[i]);
-      if (d.getUTCHours() === 0) {
+      if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) {
         out.push({ idx: i, label: d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "UTC" }) });
       }
     }
@@ -162,6 +173,7 @@ export default function RateStats() {
 
   const fmtAxis = (iso: string) => {
     const d = new Date(iso);
+    if (unit === "minute") return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
     if (unit === "hour") return String(d.getUTCHours()).padStart(2, "0") + ":00";
     if (unit === "week") return "KW " + isoWeek(d);
     return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
@@ -169,12 +181,13 @@ export default function RateStats() {
   // Volles Datum+Zeit für den Dot-Tooltip
   const fmtFull = (iso: string) => {
     const d = new Date(iso);
+    if (unit === "minute") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " Uhr";
     if (unit === "hour") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " Uhr";
     if (unit === "week") return "KW " + isoWeek(d) + " · " + d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
     return d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
   };
 
-  const unitLabel = unit === "hour" ? "Stunden" : unit === "day" ? "Tage" : "Kalenderwochen";
+  const unitLabel = unit === "minute" ? "Minuten" : unit === "hour" ? "Stunden" : unit === "day" ? "Tage" : "Kalenderwochen";
   const total = series.reduce((s, x) => s + x.vals.reduce((a, b) => a + b, 0), 0);
   const fromD = new Date(fromIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   const toD = new Date(toIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
@@ -201,25 +214,28 @@ export default function RateStats() {
   // pointerRatio = relative Position im Content [0..1]; pointerPx = Pixel im sichtbaren Container.
   function applyZoom(dir: 1 | -1, pointerRatio: number, pointerPx: number) {
     const cur = effDens;
-    const STEP = 1.22; // sanfte, gerasterte Schritte (kontrolliert)
+    const STEP = 1.12; // feinere, langsamere Schritte → man zoomt lange innerhalb einer Einheit
     let next = dir > 0 ? cur * STEP : cur / STEP;
 
     if (manual === "auto") {
-      const order = UNIT_ORDER; // week → day → hour
+      const order = UNIT_ORDER; // week → day → hour → minute
       const ui = order.indexOf(unit);
-      // Weiter reinzoomen am oberen Dichte-Ende → feinere Einheit
-      if (dir > 0 && next >= maxDens - 0.5 && ui < order.length - 1) {
-        setAutoUnitOverride(order[ui + 1]); setDens(null);
+      // Einheit springt erst, wenn man am ECHTEN Dichte-Ende (max bzw. min) weiterdreht —
+      // nicht schon an fitDens. So bleibt man lange in Stunden/Tagen/Wochen/Minuten.
+      // Sprung zu „minute" nur bei kurzem Zeitraum (sonst zu viele Buckets).
+      const nextUnit = order[ui + 1];
+      const canGoFiner = nextUnit !== "minute" || spanDays <= 3;
+      if (dir > 0 && cur >= maxDens - 0.5 && ui < order.length - 1 && canGoFiner) {
+        setAutoUnitOverride(nextUnit); setDens(null);
         return;
       }
-      // Weiter rauszoomen am Fit-Ende → gröbere Einheit
-      if (dir < 0 && next <= fitDens + 0.5 && ui > 0) {
+      if (dir < 0 && cur <= minDens + 0.05 && ui > 0) {
         setAutoUnitOverride(order[ui - 1]); setDens(null);
         return;
       }
     }
-    next = Math.max(fitDens, Math.min(maxDens, next));
-    if (Math.abs(next - cur) < 0.01) return;
+    next = Math.max(minDens, Math.min(maxDens, next));
+    if (Math.abs(next - cur) < 0.001) return;
     setDens(next);
     // Punkt unter dem Cursor halten: Content-Punkt (ratio·nextTotal) soll an Pixel pointerPx liegen.
     const nextTotal = Math.max(availW, next * Math.max(1, NB - 1)) + PAD_L + PAD_R;
@@ -275,6 +291,8 @@ export default function RateStats() {
         <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span>
         <div className="seg" style={{ marginLeft: "auto" }}>
           <button className={manual === "auto" ? "on" : ""} onClick={() => setManual("auto")} title="Dynamisch">⟳ Dynamisch</button>
+          {/* Minuten nur bei kurzem Zeitraum (sonst zu viele Buckets für die RPC) */}
+          {spanDays <= 3 && <button className={manual === "minute" ? "on" : ""} onClick={() => setManual("minute")} title="Minutengenau">Minute</button>}
           <button className={manual === "hour" ? "on" : ""} onClick={() => setManual("hour")}>Stunde</button>
           <button className={manual === "day" ? "on" : ""} onClick={() => setManual("day")}>Tag</button>
           <button className={manual === "week" ? "on" : ""} onClick={() => setManual("week")}>Woche</button>
