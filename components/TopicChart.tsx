@@ -68,7 +68,7 @@ export default function TopicChart() {
       <h2 className="section-h">
         Themen <span className="count">publizistenübergreifend · klick zum Filtern</span>
       </h2>
-      <div className="panel pad">
+      <div className="panel pad data-fade-in" key={topics.length}>
         <div className="topic-vchart">
           {topics.map((topic) => {
             const total = totals.get(topic) ?? 0;

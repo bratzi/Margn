@@ -117,7 +117,7 @@ export default function PublisherCompare() {
           ))}
         </div>
       </h2>
-      <div className="charts">
+      <div className="charts data-fade-in" key={`${period}-${stats.length}`}>
         {charts.map((c) => {
           const max = Math.max(1, ...c.data.map((d) => d.value));
           const sorted = [...c.data].sort((a, b) => b.value - a.value);

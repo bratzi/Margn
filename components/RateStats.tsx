@@ -206,7 +206,8 @@ export default function RateStats() {
             {/* Scrollbarer Chart-Container */}
             <div
               ref={scrollRef}
-              className="rate-scroll"
+              key={`${unit}-${NB}`}
+              className="rate-scroll data-fade-in"
               onScroll={(e) => {
                 const sl = (e.target as HTMLDivElement).scrollLeft;
                 setScrollLeft(sl);

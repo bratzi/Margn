@@ -13,6 +13,7 @@ import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
 import Donut from "@/components/Donut";
 import TopicCards from "@/components/TopicCards";
 import SubTopicBar from "@/components/SubTopicBar";
+import ExtLink from "@/components/ExtLink";
 import DataTable, { type Col } from "@/components/DataTable";
 import { topicLabel } from "@/lib/topics";
 
@@ -129,7 +130,7 @@ export default function ArticleDashboard() {
           {r.article_id
             ? <Link href={`/articles/${r.article_id}`} target="_blank" className="url mono" title={r.url}><span className="path">{host}</span>{path}</Link>
             : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
-          <a href={r.url} target="_blank" rel="noreferrer" className="open-btn" title="Original öffnen"><External size={14} /></a>
+          <ExtLink href={r.url} className="open-btn" title="Original öffnen (Hintergrund-Tab)"><External size={14} /></ExtLink>
         </div>); } },
     { key: "outlet", label: "Quelle", width: 130, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></> },
     { key: "ptype", label: "Typ", width: 100, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span> },
@@ -189,7 +190,9 @@ export default function ArticleDashboard() {
         )}
 
         <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
-        <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={1700} rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} />
+        <div className="data-fade-in" key={`${page}-${rows.length}-${f.topics.join(",")}-${f.subcats.join(",")}`}>
+          <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={1700} rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} />
+        </div>
 
         <div className="pager">
           <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>← Zurück</button>

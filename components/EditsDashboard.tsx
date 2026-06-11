@@ -7,6 +7,7 @@ import { useFilters } from "@/components/FilterProvider";
 import FilterPills from "@/components/FilterPills";
 import TimeRangeFilter from "@/components/TimeRangeFilter";
 import DataTable, { type Col } from "@/components/DataTable";
+import ExtLink from "@/components/ExtLink";
 
 type Edit = {
   article_id: number; url: string; title: string;
@@ -56,7 +57,7 @@ export default function EditsDashboard() {
   const artCols: Col<Edit>[] = useMemo(() => [
     { key: "outlet", label: "Quelle", width: 130, value: (e) => e.outlet, render: (e) => <>{e.outlet} <span className="cc">{e.country}</span></> },
     { key: "title", label: "Artikel", width: 420, sortable: false, groupable: false, value: (e) => e.title ?? e.url,
-      render: (e) => <div className="art-row"><Link href={`/articles/${e.article_id}`} target="_blank" className="url" title={e.title}>{e.title?.slice(0, 110) || shortUrl(e.url)}</Link><a href={e.url} target="_blank" rel="noreferrer" className="open-btn" title="Original">↗</a></div> },
+      render: (e) => <div className="art-row"><Link href={`/articles/${e.article_id}`} target="_blank" className="url" title={e.title}>{e.title?.slice(0, 110) || shortUrl(e.url)}</Link><ExtLink href={e.url} className="open-btn" title="Original (Hintergrund-Tab)">↗</ExtLink></div> },
     { key: "edit_count", label: "Stille Edits", width: 110, align: "right", value: (e) => e.edit_count, render: (e) => <span style={{ color: e.edit_count > 0 ? "var(--red)" : "var(--faint)", fontWeight: 600 }}>{e.edit_count}</span> },
     { key: "extension_count", label: "Erweiterungen", width: 120, align: "right", value: (e) => e.extension_count, render: (e) => <span style={{ color: e.extension_count > 0 ? "var(--green)" : "var(--faint)", fontWeight: 600 }}>{e.extension_count}</span> },
     { key: "change_count", label: "Gesamt", width: 90, align: "right", value: (e) => Number(e.change_count), render: (e) => <strong>{e.change_count}</strong> },

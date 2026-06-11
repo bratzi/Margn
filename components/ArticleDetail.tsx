@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder } from "@/components/icons";
 import { topicLabel } from "@/lib/topics";
 import ScanTimeline from "@/components/ScanTimeline";
+import ExtLink from "@/components/ExtLink";
 
 type Detail = {
   id: number; url: string; title: string | null; description: string | null; og_image: string | null;
@@ -73,7 +74,7 @@ export default function ArticleDetail({ id }: { id: number }) {
 
       {/* Kicker */}
       <div className="d-kicker">
-        <a href={a.base_url} target="_blank" rel="noreferrer" className="d-outlet">{a.outlet}</a>
+        <ExtLink href={a.base_url} className="d-outlet">{a.outlet}</ExtLink>
         <span className="cc">{a.country}</span>
         {a.topic && <span className="badge topicbadge"><Folder /> {topicLabel(a.topic)}</span>}
         <TypeBadge type={type} />
@@ -160,7 +161,7 @@ export default function ArticleDetail({ id }: { id: number }) {
       </DL>
 
       <div style={{ marginTop: 28 }}>
-        <a href={a.url} target="_blank" rel="noreferrer" className="cta">Originalartikel öffnen <External size={15} /></a>
+        <ExtLink href={a.url} className="cta">Originalartikel öffnen <External size={15} /></ExtLink>
       </div>
     </div>
   );

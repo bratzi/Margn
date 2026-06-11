@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { wordDiff, classifyEdit, type EditKind } from "@/lib/diff";
+import ExtLink from "@/components/ExtLink";
 
 type EditRow = {
   id: number; url: string; outlet: string; country: string | null;
@@ -66,9 +67,9 @@ export default function DiffViewer() {
         return (
           <div className="panel pad" key={e.id} style={{ marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-              <a href={e.url} target="_blank" rel="noreferrer" style={{ fontWeight: 600, color: "var(--text)" }}>
-                {FLAG[e.country ?? ""] ?? ""} {e.outlet}
-              </a>
+              <ExtLink href={e.url} title="Original (Hintergrund-Tab)">
+                <span style={{ fontWeight: 600, color: "var(--text)" }}>{FLAG[e.country ?? ""] ?? ""} {e.outlet}</span>
+              </ExtLink>
               <span className="badge" style={{ background: `${k.color}22`, color: k.color }}>{k.label}</span>
               <span className="muted" style={{ marginLeft: "auto", fontSize: 12.5 }}>{delayLabel(e.delay_minutes)}</span>
             </div>

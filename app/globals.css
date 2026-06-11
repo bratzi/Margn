@@ -645,3 +645,42 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 @media (max-width: 720px) {
   .subtopic-anchor { width: 100%; padding-top: 0; }
 }
+
+/* ---------- Daten-Transitions (Block 8) ---------- */
+@keyframes data-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.data-fade-in { animation: data-fade-in .34s cubic-bezier(.22,.61,.36,1) both; }
+
+/* sanftes Erscheinen von Tabellenzeilen / Listen-Items, leicht versetzt */
+@keyframes row-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Skeleton-Schimmer für ladende Panels */
+@keyframes skel-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  border-radius: var(--r-sm, 8px);
+  background: linear-gradient(100deg,
+    var(--surface-2) 30%,
+    color-mix(in srgb, var(--surface-2) 55%, var(--surface)) 50%,
+    var(--surface-2) 70%);
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.3s ease-in-out infinite;
+}
+.skeleton-row { height: 38px; margin-bottom: 6px; }
+.skeleton-chart { height: 220px; }
+
+/* sanfter Opazitäts-Übergang wenn Daten still im Hintergrund neu laden */
+.data-soft { transition: opacity .25s ease; }
+.data-soft.is-loading { opacity: .45; }
+
+@media (prefers-reduced-motion: reduce) {
+  .data-fade-in, .skeleton { animation: none; }
+  .data-fade-in { opacity: 1; transform: none; }
+}
