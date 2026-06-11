@@ -63,8 +63,9 @@ export default function TimeRangeFilter() {
       if (drag === "resize") { setH(Math.max(96, Math.min(440, window.innerHeight - e.clientY))); return; }
       const i = idxFromClient(e.clientX);
       const cur = liveRef.current;
-      if (drag === "from") setLive({ from: Math.min(i, cur.to - 1), to: cur.to });
-      else if (drag === "to") setLive({ from: cur.from, to: Math.max(i, cur.from + 1) });
+      // from/to dürfen auf denselben Tag fallen → Einzeltag-Auswahl möglich
+      if (drag === "from") setLive({ from: Math.min(i, cur.to), to: cur.to });
+      else if (drag === "to") setLive({ from: cur.from, to: Math.max(i, cur.from) });
       else if (dragRef.current) {
         const d0 = dragRef.current, delta = i - d0.start, w = d0.t - d0.f;
         let nf = d0.f + delta, nt = d0.t + delta;
@@ -91,7 +92,7 @@ export default function TimeRangeFilter() {
     return (
       <div className="trf trf-mini">
         <button className="rail-toggle" onClick={() => setTrfOpen(true)} title="Zeitstrahl aufklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 18V9M9 18V5M14 18v-7M19 18v-4" /></svg></button>
-        <span className="trf-mini-label">Veröffentlicht: <b>{fmtDay(days[rangeIdx.from])} – {fmtDay(days[rangeIdx.to])}</b></span>
+        <span className="trf-mini-label">Veröffentlicht: <b>{rangeIdx.from === rangeIdx.to ? fmtDay(days[rangeIdx.from]) : `${fmtDay(days[rangeIdx.from])} – ${fmtDay(days[rangeIdx.to])}`}</b></span>
       </div>
     );
   }
@@ -100,13 +101,17 @@ export default function TimeRangeFilter() {
     <div className="trf trf-open" style={{ height: h }}>
       <div className="trf-resize" onPointerDown={(e) => start("resize", e)} title="Höhe ziehen"><span /></div>
       <div className="trf-head">
-        <div className="trf-title">Veröffentlichungs-Zeitraum <span className="trf-range">{fmtDay(days[live.from])} – {fmtDay(days[live.to])}</span></div>
+        <div className="trf-title">Veröffentlichungs-Zeitraum <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
         <div className="trf-legend">{series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}</div>
         {(live.from > 0 || live.to < N - 1) && <button className="trf-reset" onClick={() => { setLive({ from: 0, to: N - 1 }); setRangeIdx({ from: 0, to: N - 1 }); }}>Zurücksetzen</button>}
         <button className="rail-toggle" onClick={() => setTrfOpen(false)} title="Einklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg></button>
       </div>
 
-      <div className="trf-chart" ref={trackRef} style={{ height: chartH }}>
+      <div
+        className="trf-chart" ref={trackRef} style={{ height: chartH }}
+        onDoubleClick={(e) => { const i = idxFromClient(e.clientX); setLive({ from: i, to: i }); setRangeIdx({ from: i, to: i }); }}
+        title="Doppelklick: nur diesen Tag"
+      >
         <svg className="trf-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
           {days.map((_, i) => {
             let yb = VH;
@@ -115,7 +120,10 @@ export default function TimeRangeFilter() {
         </svg>
         <div className="trf-dim" style={{ left: 0, width: `${pctOf(live.from)}%` }} />
         <div className="trf-dim" style={{ right: 0, width: `${100 - pctOf(live.to)}%` }} />
-        <div className="trf-bandsel" style={{ left: `${pctOf(live.from)}%`, width: `${pctOf(live.to) - pctOf(live.from)}%` }} onPointerDown={(e) => start("band", e)} />
+        {/* Auswahl-Band: bei Einzeltag eine Tagesbreite breit darstellen, damit sicht- und greifbar */}
+        <div className={`trf-bandsel ${live.from === live.to ? "single" : ""}`}
+          style={{ left: `${pctOf(live.from)}%`, width: `${Math.max(pctOf(live.to) - pctOf(live.from), 100 / N)}%` }}
+          onPointerDown={(e) => start("band", e)} />
         <div className="trf-h" style={{ left: `${pctOf(live.from)}%` }} onPointerDown={(e) => start("from", e)}><span /></div>
         <div className="trf-h" style={{ left: `${pctOf(live.to)}%` }} onPointerDown={(e) => start("to", e)}><span /></div>
       </div>

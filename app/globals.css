@@ -349,6 +349,8 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .trf-dim { position: absolute; top: 0; bottom: 0; background: var(--surface-2); opacity: .5; pointer-events: none; border-radius: 4px; }
 .trf-bandsel { position: absolute; top: 0; bottom: 0; cursor: grab; }
 .trf-bandsel:active { cursor: grabbing; }
+/* Einzeltag-Auswahl: dezent eingefärbtes Band, damit der eine Tag sicht- und greifbar bleibt */
+.trf-bandsel.single { background: var(--accent-sub); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); border-radius: 3px; }
 .trf-h { position: absolute; top: 0; bottom: 0; width: 0; cursor: ew-resize; z-index: 3; }
 .trf-h::before { content: ""; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: var(--accent); }
 .trf-h span { position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%); width: 11px; height: 24px; border-radius: 3px; background: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
