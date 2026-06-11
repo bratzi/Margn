@@ -69,8 +69,16 @@ export default function ArticleDashboard() {
     if (f.author !== "all") q = q.eq("author_status", f.author);
     if (f.topics.length) q = q.in("topic", f.topics);
     if (f.lang !== "all") q = q.eq("language", f.lang);
-    if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
-    if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
+    // Zeitfilter über EFFEKTIVE Zeit: published_at falls vorhanden, sonst discovered_at.
+    // Sonst fallen alle Artikel ohne Veröffentlichungsdatum aus dem Tagesfilter (bei Bild/
+    // Spiegel sind das viele) → Nutzer sah nur eine Handvoll Treffer statt aller des Tages.
+    if (f.rangeFrom && f.rangeTo) {
+      q = q.or(`and(published_at.gte.${f.rangeFrom},published_at.lte.${f.rangeTo}),and(published_at.is.null,discovered_at.gte.${f.rangeFrom},discovered_at.lte.${f.rangeTo})`);
+    } else if (f.rangeFrom) {
+      q = q.or(`published_at.gte.${f.rangeFrom},and(published_at.is.null,discovered_at.gte.${f.rangeFrom})`);
+    } else if (f.rangeTo) {
+      q = q.or(`published_at.lte.${f.rangeTo},and(published_at.is.null,discovered_at.lte.${f.rangeTo})`);
+    }
     // Sub-Rubriken: URL-Pfadmuster (z.B. politik/ausland) — funktioniert quellenübergreifend,
     // da die Rubrik im URL-Pfad steht (article_categories ist bei den meisten Quellen leer).
     if (f.subcats.length) q = q.or(f.subcats.map((s) => `url.ilike.%/${s}/%`).join(","));
