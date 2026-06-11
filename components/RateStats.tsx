@@ -28,22 +28,30 @@ export default function RateStats() {
   const [cursor, setCursor] = useState<{ x: number; bucketIdx: number } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [containerW, setContainerW] = useState(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const axisRef = useRef<HTMLDivElement>(null);
+  const roRef = useRef<ResizeObserver | null>(null);
 
   // Container-Breite messen → SVG rendert immer in ECHTEN Pixeln (kein preserveAspectRatio-
-  // Stretch, das die Datenpunkte zu Ellipsen verzerrt und teils nur 60% Breite füllte).
-  useEffect(() => {
-    const el = scrollRef.current;
+  // Stretch, das die Datenpunkte zu Ellipsen verzerrt und teils nur ~60% Breite füllte).
+  // WICHTIG: Callback-Ref statt useEffect([]) — der scroll-Container existiert erst NACH dem
+  // Daten-Load (vorher Platzhalter-Text). Ein einmaliger Mount-Effect würde ihn nie messen
+  // → containerW bliebe 0 → Fallback-Breite statt voller Containerbreite.
+  const measure = (el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    roRef.current?.disconnect();
     if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
+    const ro = new ResizeObserver(() => {
+      // clientWidth = Innenbreite inkl. Padding-Box minus Scrollbar → exakt der Platz,
+      // den das SVG füllen soll (contentRect zieht das 4px-Padding ab und ließe Lücken).
+      const w = el.clientWidth;
       if (w > 0) setContainerW(w);
     });
     ro.observe(el);
+    roRef.current = ro;
     setContainerW(el.clientWidth);
-    return () => ro.disconnect();
-  }, []);
+  };
+  useEffect(() => () => roRef.current?.disconnect(), []);
 
   const fromIso = f.days[f.rangeIdx.from] + "T00:00:00Z";
   const toIso = f.days[f.rangeIdx.to] + "T23:59:59Z";
@@ -224,7 +232,7 @@ export default function RateStats() {
 
             {/* Scrollbarer Chart-Container */}
             <div
-              ref={scrollRef}
+              ref={measure}
               className="rate-scroll"
               onScroll={(e) => {
                 const sl = (e.target as HTMLDivElement).scrollLeft;
