@@ -17,7 +17,7 @@ const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kei
 // "analyze":    batch-upsert pages.kind='article' → articles (kein Chromium).
 // "enrich":     articles ohne Titel rendern + Metadaten nachtragen.
 // "reclassify": pages.kind='article' rendern, Videos → kind='media' + aus articles entfernen.
-const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich" | "reclassify";
+const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich" | "reclassify" | "retopic";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -406,6 +406,10 @@ function looksLikeArticle(url: string): boolean {
   const u = url.toLowerCase();
   // Footer/Service-Seiten
   if (/\/(impressum|kontakt|datenschutz|newsletter|mediathek|archiv|suche|recherche|abo|hilfe|agb|rss|index)\b/.test(u)) return false;
+  // Autorenprofile (FAZ /redaktion/, Tagesschau /korrespondenten/, /autor|/auteur) — keine Artikel
+  if (/\/(redaktion|autor(en)?|auteurs?|author|journalist|kolumnisten|signataires|korrespondenten|korrespondent)\//.test(u)) return false;
+  // Themen-Hubs / Special-Übersichten (Bild /themen/specials/, allgemeine /thema(s)/-Sammlungen)
+  if (/\/themen?\/(specials?|organisationen|personen)\//.test(u)) return false;
   // Audio/Video/Bild-Strecken + Evergreen-Service (kein Fließtext)
   if (/\/(podcast|video|livestream|audio|multimedia|bilder|fotostrecke|guides?-d-achat|qui-sommes-nous|about-us|le-monde-(services|et-vous))\b/.test(u)) return false;
   // Widget-/Hub-Seiten mit ID, aber ohne Artikeltext (Börsenkurse, Wetter, Horoskop, Themen-Hubs …)
@@ -813,6 +817,51 @@ async function reclassifyPages(sources: Source[]) {
   console.log(`\nFertig: ${corrected} als Video reklassifiziert, ${kept} korrekt als Artikel.`);
 }
 
+// retopic: Themen NUR aus URL + bereits gespeicherten Kategorien neu berechnen (kein Rendering).
+// Korrigiert „sonstiges"-Fehlklassifikationen nach Schema-Erweiterungen und entfernt URLs,
+// die nach neuen Regeln gar keine Artikel sind (Autorenseiten, Themen-Hubs).
+async function retopicArticles() {
+  console.log("retopic: Themen aus URL + Kategorien neu berechnen…");
+  const PAGE = 1000;
+  let from = 0, scanned = 0, changed = 0, removed = 0;
+  const changes: Record<string, number> = {};
+
+  while (true) {
+    const { data: arts, error } = await sb.from("articles")
+      .select("id,url,topic,article_categories(categories(name))")
+      .order("id", { ascending: true }).range(from, from + PAGE - 1);
+    if (error) { console.error(error.message); break; }
+    if (!arts?.length) break;
+
+    for (const a of arts as any[]) {
+      scanned++;
+      // Nicht-Artikel (nach neuen Regeln) komplett entfernen
+      if (!looksLikeArticle(a.url)) {
+        await sb.from("articles").delete().eq("id", a.id);
+        await sb.from("pages").update({ kind: "section" }).eq("url", a.url);
+        removed++;
+        continue;
+      }
+      const cats: string[] = (a.article_categories ?? [])
+        .map((ac: any) => ac.categories?.name).filter(Boolean);
+      const next = topicOf(cats, a.url);
+      if (next !== a.topic) {
+        await sb.from("articles").update({ topic: next }).eq("id", a.id);
+        changed++;
+        const k = `${a.topic ?? "∅"}→${next}`;
+        changes[k] = (changes[k] ?? 0) + 1;
+      }
+    }
+    console.log(`  ${scanned} geprüft · ${changed} umklassifiziert · ${removed} entfernt`);
+    if (arts.length < PAGE) break;
+    from += PAGE;
+  }
+
+  console.log(`\nFertig: ${scanned} geprüft, ${changed} Themen geändert, ${removed} Nicht-Artikel entfernt.`);
+  const top = Object.entries(changes).sort((a, b) => b[1] - a[1]).slice(0, 20);
+  console.log("Top-Übergänge:"); for (const [k, n] of top) console.log(`  ${k}: ${n}`);
+}
+
 async function run() {
   const { data, error } = await sb.from("sources").select("id,base_url,language").eq("active", true);
   if (error) throw new Error(`Quellen-Abfrage fehlgeschlagen: ${error.message}`);
@@ -822,6 +871,7 @@ async function run() {
   if (MODE === "analyze") { await analyzeBacklog(); return; }
   if (MODE === "enrich")     { await enrichArticles(data as Source[]); return; }
   if (MODE === "reclassify") { await reclassifyPages(data as Source[]); return; }
+  if (MODE === "retopic")    { await retopicArticles(); return; }
 
   const browser = await chromium.launch();
   try {
