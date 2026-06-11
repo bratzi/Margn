@@ -90,25 +90,36 @@ export default function Sidebar() {
         return <Link key={n.href} href={n.href} className={`nav-item ${on ? "on" : ""}`}><Icon /> {n.label}</Link>;
       })}
 
-      {/* Kollabiert: kompakte Filter-Übersicht (zeigt, was selektiert ist) */}
-      {showFilters && collapsed && (
-        <button className="sb-mini-filters" onClick={toggleCollapsed} title="Filter ausklappen">
-          <span className="sb-mini-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18M6 12h12M10 19h4" /></svg>
-            {activeCount > 0 && <i className="sb-mini-badge">{activeCount}</i>}
-          </span>
-          <span className="sb-mini-chips">
-            {ind.pub ? <i className="sb-chip" title="Publizisten gewählt">{ind.pub}×Q</i> : null}
-            {ind.topics ? <i className="sb-chip" title="Themen">{ind.topics}×T</i> : null}
-            {ind.subcats ? <i className="sb-chip" title="Rubriken">{ind.subcats}×R</i> : null}
-            {ind.paywall ? <i className="sb-chip" title="Paywall">🔒</i> : null}
-            {ind.author ? <i className="sb-chip" title="Autor">✍</i> : null}
-            {ind.keyword ? <i className="sb-chip" title="Keyword">#</i> : null}
-            {ind.range ? <i className="sb-chip" title="Zeitraum">📅</i> : null}
-            {activeCount === 0 ? <i className="sb-chip muted" title="keine Filter">∅</i> : null}
-          </span>
-        </button>
-      )}
+      {/* Kollabiert: vertikale Icon-Leiste der AKTIVEN Filter. Reine Icons, klick öffnet. */}
+      {showFilters && collapsed && (() => {
+        const items: { id: string; label: string; n?: number; icon: React.ReactNode }[] = [];
+        const I = (d: string) => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
+        if (ind.pub) items.push({ id: "pub", label: `${ind.pub} Publizist(en)`, n: ind.pub, icon: I("M3 7h18M3 12h18M3 17h18") });
+        if (ind.topics) items.push({ id: "tp", label: `${ind.topics} Thema/Themen`, n: ind.topics, icon: I("M3 7l2-3h6l2 3h6v12H3z") });
+        if (ind.subcats) items.push({ id: "sc", label: `${ind.subcats} Rubrik(en)`, n: ind.subcats, icon: I("M9 5v8a4 4 0 0 0 4 4h7M16 13l4 4-4 4") });
+        if (ind.paywall) items.push({ id: "pw", label: "Paywall-Filter", icon: I("M6 11V8a6 6 0 0 1 12 0v3M5 11h14v10H5z") });
+        if (ind.author) items.push({ id: "au", label: "Autor-Filter", icon: I("M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z") });
+        if (ind.atype) items.push({ id: "at", label: "Seitentyp-Filter", icon: I("M4 4h16v16H4zM4 9h16") });
+        if (ind.status) items.push({ id: "st", label: "Erfassungs-Filter", icon: I("M12 2v4M12 18v4M2 12h4M18 12h4") });
+        if (ind.keyword) items.push({ id: "kw", label: "Keyword-Filter", icon: I("M4 9h16M4 15h16M10 3 8 21M16 3l-2 18") });
+        if (ind.lang) items.push({ id: "lg", label: "Sprach-Filter", icon: I("M2 12h20M12 2a15 15 0 0 1 0 20A15 15 0 0 1 12 2z") });
+        if (ind.range) items.push({ id: "rg", label: "Zeitraum-Filter", icon: I("M3 4h18v18H3zM3 10h18M8 2v4M16 2v4") });
+        return (
+          <div className="sb-fstack">
+            <button className="sb-fstack-toggle" onClick={toggleCollapsed} title={`${activeCount} Filter aktiv — ausklappen`}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18M6 12h12M10 19h4" /></svg>
+              {activeCount > 0 && <i className="sb-fstack-badge">{activeCount}</i>}
+            </button>
+            {items.map((it) => (
+              <button key={it.id} className="sb-ficon" onClick={toggleCollapsed} title={it.label} aria-label={it.label}>
+                {it.icon}
+                {it.n && it.n > 1 ? <i className="sb-ficon-n">{it.n}</i> : null}
+              </button>
+            ))}
+            {activeCount === 0 && <span className="sb-fstack-empty" title="keine Filter aktiv">∅</span>}
+          </div>
+        );
+      })()}
 
       {showFilters && !collapsed && (
         <>
