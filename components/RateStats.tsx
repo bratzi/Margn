@@ -10,9 +10,7 @@ type Unit = "hour" | "day" | "week";
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000, VH = 220;
 const PAD_L = 44, PAD_B = 24, PAD_T = 18, PAD_R = 12;
-const CW = VW - PAD_L - PAD_R;
 const CH = VH - PAD_T - PAD_B;
-const ZOOM_MIN = 1, ZOOM_MAX = 14;
 
 function isoWeek(d: Date): number {
   const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -29,13 +27,16 @@ export default function RateStats() {
   // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
   const [hoverDot, setHoverDot] = useState<{ sid: number; idx: number; x: number; y: number } | null>(null);
   const [containerW, setContainerW] = useState(0);
-  // Zoom-Faktor (Mausrad) + Drag-to-Zoom-Auswahl in Pixeln
-  const [zoom, setZoom] = useState(1);
-  const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
+  // dens = Pixel pro Bucket (Stauchen ↔ Strecken). null = automatisch an Containerbreite anpassen.
+  const [dens, setDens] = useState<number | null>(null);
+  // Im Dynamisch-Modus überschreibt das Mausrad die Einheit (springt Woche↔Tag↔Stunde)
+  const [autoUnitOverride, setAutoUnitOverride] = useState<Unit | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const axisRef = useRef<HTMLDivElement>(null);
   const roRef = useRef<ResizeObserver | null>(null);
-  const dragStartRef = useRef<number | null>(null);
+  // Pan-Zustand (Click-and-Drag verschiebt die X-Achse)
+  const panRef = useRef<{ startX: number; startScroll: number } | null>(null);
+  const [panning, setPanning] = useState(false);
 
   // Container-Breite via Callback-Ref messen (Container existiert erst nach Daten-Load).
   const measure = (el: HTMLDivElement | null) => {
@@ -52,11 +53,13 @@ export default function RateStats() {
   const fromIso = f.days[f.rangeIdx.from] + "T00:00:00Z";
   const toIso = f.days[f.rangeIdx.to] + "T23:59:59Z";
   const spanDays = f.rangeIdx.to - f.rangeIdx.from + 1;
-  const autoUnit: Unit = spanDays <= 3 ? "hour" : spanDays <= 45 ? "day" : "week";
-  const unit: Unit = manual === "auto" ? autoUnit : manual;
+  const baseAutoUnit: Unit = spanDays <= 3 ? "hour" : spanDays <= 45 ? "day" : "week";
+  // Im Dynamisch-Modus darf das Mausrad die Einheit verschieben (override), sonst zählt manual.
+  const unit: Unit = manual === "auto" ? (autoUnitOverride ?? baseAutoUnit) : manual;
+  const UNIT_ORDER: Unit[] = ["week", "day", "hour"]; // grob → fein
 
-  // Zoom zurücksetzen, wenn sich Einheit oder Zeitraum ändert
-  useEffect(() => { setZoom(1); setDrag(null); setHoverDot(null); }, [unit, fromIso, toIso]);
+  // Dichte/Override zurücksetzen, wenn Modus oder Zeitraum wechselt
+  useEffect(() => { setDens(null); setAutoUnitOverride(null); setHoverDot(null); }, [manual, fromIso, toIso]);
 
   useEffect(() => {
     if (!activeArr.length) { setRows([]); return; }
@@ -110,21 +113,20 @@ export default function RateStats() {
   }, [rows, sources, act, buckets, unit]);
 
   const NB = buckets.length;
-  const minPxPerBucket = unit === "hour" ? 28 : unit === "day" ? 18 : 40;
   const availW = (containerW > 0 ? containerW : VW) - PAD_L - PAD_R;
-  // Zoom multipliziert die Datendichte → X-Achse wird breiter (scrollbar)
-  const dataWidth = NB * minPxPerBucket * zoom;
-  const naturalWidth = Math.max(availW, dataWidth);
+  // „Fit"-Dichte: so dicht, dass alle Buckets genau die Containerbreite füllen.
+  const fitDens = availW / Math.max(1, NB - 1);
+  // Erlaubter Dichtebereich: stauchen bis fitDens (nie schmaler als Container),
+  // strecken bis großzügig (Stunden brauchen weniger px als Wochen).
+  const maxDens = unit === "hour" ? 70 : unit === "day" ? 90 : 160;
+  const effDens = dens === null ? fitDens : Math.max(fitDens, Math.min(maxDens, dens));
+  // naturalWidth: Datendichte × Bucketzahl, aber nie schmaler als der Container.
+  const naturalWidth = Math.max(availW, effDens * Math.max(1, NB - 1));
   const totalSvgW = naturalWidth + PAD_L + PAD_R;
-  const zoomed = zoom > 1.001;
+  const stretched = naturalWidth > availW + 1; // breiter als Container → scrollbar
 
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
   const Y = (v: number) => PAD_T + CH - (v / maxVal) * CH;
-  // Pixel→Bucket-Index (SVG-Koordinaten)
-  const idxAtX = (svgX: number) => {
-    const cx = svgX - PAD_L;
-    return Math.max(0, Math.min(NB - 1, Math.round((cx / naturalWidth) * (NB - 1))));
-  };
 
   function smoothPath(vals: number[]): string {
     if (vals.length < 2) return "";
@@ -176,7 +178,7 @@ export default function RateStats() {
   const total = series.reduce((s, x) => s + x.vals.reduce((a, b) => a + b, 0), 0);
   const fromD = new Date(fromIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   const toD = new Date(toIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
-  const axisStep = Math.max(1, Math.ceil(NB / (zoomed ? 18 : 10)));
+  const axisStep = Math.max(1, Math.ceil(NB / (stretched ? 18 : 10)));
 
   const yTicks = useMemo(() => {
     const nTicks = 4;
@@ -194,79 +196,77 @@ export default function RateStats() {
     return { name: nameById.get(s.id)!, color: s.color, val: s.vals[hoverDot.idx], when: fmtFull(buckets[hoverDot.idx]) };
   }, [hoverDot, series, buckets]);
 
-  // SVG-X aus einem Maus-Event (für Drag-to-Zoom)
-  const svgXFromEvent = (e: React.MouseEvent<SVGSVGElement> | React.WheelEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return ((e.clientX - rect.left) / rect.width) * totalSvgW;
-  };
+  // Mausrad: kontrolliert in beide Richtungen stauchen/strecken.
+  // Dynamisch-Modus: an den Dichte-Enden springt die EINHEIT (grob ↔ fein).
+  // pointerRatio = relative Position im Content [0..1]; pointerPx = Pixel im sichtbaren Container.
+  function applyZoom(dir: 1 | -1, pointerRatio: number, pointerPx: number) {
+    const cur = effDens;
+    const STEP = 1.22; // sanfte, gerasterte Schritte (kontrolliert)
+    let next = dir > 0 ? cur * STEP : cur / STEP;
 
-  // Mausrad → Zoom (Position unter dem Cursor bleibt fixiert)
+    if (manual === "auto") {
+      const order = UNIT_ORDER; // week → day → hour
+      const ui = order.indexOf(unit);
+      // Weiter reinzoomen am oberen Dichte-Ende → feinere Einheit
+      if (dir > 0 && next >= maxDens - 0.5 && ui < order.length - 1) {
+        setAutoUnitOverride(order[ui + 1]); setDens(null);
+        return;
+      }
+      // Weiter rauszoomen am Fit-Ende → gröbere Einheit
+      if (dir < 0 && next <= fitDens + 0.5 && ui > 0) {
+        setAutoUnitOverride(order[ui - 1]); setDens(null);
+        return;
+      }
+    }
+    next = Math.max(fitDens, Math.min(maxDens, next));
+    if (Math.abs(next - cur) < 0.01) return;
+    setDens(next);
+    // Punkt unter dem Cursor halten: Content-Punkt (ratio·nextTotal) soll an Pixel pointerPx liegen.
+    const nextTotal = Math.max(availW, next * Math.max(1, NB - 1)) + PAD_L + PAD_R;
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollLeft = Math.max(0, pointerRatio * nextTotal - pointerPx);
+      if (axisRef.current) axisRef.current.scrollLeft = el.scrollLeft;
+    });
+  }
+
   function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
     if (!scrollRef.current) return;
     e.preventDefault();
     const el = scrollRef.current;
     const rect = el.getBoundingClientRect();
-    const pointerInContainer = e.clientX - rect.left;     // px im sichtbaren Container
-    const contentX = el.scrollLeft + pointerInContainer;  // px im (skalierten) Inhalt
-    const ratio = contentX / totalSvgW;                   // relative Position [0..1]
-    const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
-    const nextZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
-    if (nextZoom === zoom) return;
-    setZoom(nextZoom);
-    // Nach Re-Render Scrollposition so setzen, dass der Punkt unter dem Cursor bleibt
-    const nextTotal = Math.max(availW, NB * minPxPerBucket * nextZoom) + PAD_L + PAD_R;
-    requestAnimationFrame(() => {
-      if (scrollRef.current) {
-        const sl = ratio * nextTotal - pointerInContainer;
-        scrollRef.current.scrollLeft = sl;
-        if (axisRef.current) axisRef.current.scrollLeft = sl;
-      }
-    });
+    const pointerInContainer = e.clientX - rect.left;
+    const ratio = (el.scrollLeft + pointerInContainer) / totalSvgW;
+    applyZoom(e.deltaY < 0 ? 1 : -1, ratio, pointerInContainer);
+    setHoverDot(null);
   }
 
-  // Drag-to-Zoom: gedrückt ziehen markiert Bereich, Loslassen zoomt rein
+  // Click-and-Drag verschiebt die X-Achse (Pan). Nur sinnvoll wenn gescrollt werden kann.
   function handleDown(e: React.MouseEvent<SVGSVGElement>) {
-    if (e.button !== 0) return;
-    const x = svgXFromEvent(e);
-    if (x < PAD_L || x > totalSvgW - PAD_R) return;
-    dragStartRef.current = x;
+    if (e.button !== 0 || !scrollRef.current || !stretched) return;
+    panRef.current = { startX: e.clientX, startScroll: scrollRef.current.scrollLeft };
+    setPanning(true);
     setHoverDot(null);
   }
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
-    if (dragStartRef.current === null) return;
-    const x = svgXFromEvent(e);
-    setDrag({ x0: dragStartRef.current, x1: Math.max(PAD_L, Math.min(totalSvgW - PAD_R, x)) });
+    const p = panRef.current;
+    if (!p || !scrollRef.current) return;
+    const sl = p.startScroll - (e.clientX - p.startX);
+    scrollRef.current.scrollLeft = sl;
+    if (axisRef.current) axisRef.current.scrollLeft = scrollRef.current.scrollLeft;
   }
-  function handleUp() {
-    const sel = drag;
-    dragStartRef.current = null;
-    setDrag(null);
-    if (!sel) return;
-    const lo = Math.min(sel.x0, sel.x1), hi = Math.max(sel.x0, sel.x1);
-    if (hi - lo < 12) return; // zu kleine Auswahl = Klick, ignorieren
-    const iLo = idxAtX(lo), iHi = idxAtX(hi);
-    const span = Math.max(1, iHi - iLo);
-    // Ziel: der gewählte Bereich soll die volle Breite füllen → Zoom = NB/span
-    const targetZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, (NB - 1) / span));
-    setZoom(targetZoom);
-    const nextTotal = Math.max(availW, NB * minPxPerBucket * targetZoom) + PAD_L + PAD_R;
-    requestAnimationFrame(() => {
-      if (scrollRef.current) {
-        const sl = PAD_L + (iLo / Math.max(1, NB - 1)) * (nextTotal - PAD_L - PAD_R) - PAD_L;
-        scrollRef.current.scrollLeft = Math.max(0, sl);
-        if (axisRef.current) axisRef.current.scrollLeft = Math.max(0, sl);
-      }
-    });
-  }
+  function handleUp() { panRef.current = null; setPanning(false); }
 
   const resetZoom = () => {
-    setZoom(1); setDrag(null);
+    setDens(null); setAutoUnitOverride(null);
     if (scrollRef.current) scrollRef.current.scrollLeft = 0;
     if (axisRef.current) axisRef.current.scrollLeft = 0;
   };
+  const zoomMod = dens !== null || autoUnitOverride !== null;
 
-  // Dots nur zeigen, wenn nicht zu dicht (sonst Linie pur)
-  const showDots = NB / Math.max(1, zoom) <= 120 || zoomed;
+  // Dots zeigen, solange sie nicht zu dicht stehen (px-Abstand der Buckets)
+  const showDots = effDens >= 7;
 
   return (
     <>
@@ -287,16 +287,16 @@ export default function RateStats() {
           <>
             <div className="rate-legend">
               {series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}
-              <span className="rate-hint">Mausrad zoomt · Bereich ziehen zoomt rein</span>
-              {zoomed && <button className="rate-zoomreset" onClick={resetZoom} title="Zoom zurücksetzen">⤢ {zoom.toFixed(1)}× · zurücksetzen</button>}
-              <span style={{ marginLeft: zoomed ? 0 : "auto", color: "var(--faint)" }}>
+              <span className="rate-hint">Mausrad: stauchen / strecken{stretched ? " · ziehen verschiebt" : ""}</span>
+              {zoomMod && <button className="rate-zoomreset" onClick={resetZoom} title="Ansicht zurücksetzen">⤢ zurücksetzen</button>}
+              <span style={{ marginLeft: zoomMod ? 0 : "auto", color: "var(--faint)" }}>
                 Einheit: <b style={{ color: "var(--accent)" }}>{unitLabel}</b>{manual === "auto" ? " (dynamisch)" : ""}
               </span>
             </div>
 
             <div
               ref={measure}
-              className={`rate-scroll ${dragStartRef.current !== null ? "is-selecting" : ""}`}
+              className={`rate-scroll ${stretched ? "can-pan" : ""} ${panning ? "is-panning" : ""}`}
               onScroll={(e) => {
                 const sl = (e.target as HTMLDivElement).scrollLeft;
                 if (axisRef.current) axisRef.current.scrollLeft = sl;
@@ -356,23 +356,13 @@ export default function RateStats() {
                       <circle cx={X(i)} cy={Y(v)} r={isHover ? 5.5 : 3.4} fill={s.color}
                         stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
                         className="rate-dot" />
-                      {/* unsichtbare große Hitbox für leichtes Treffen */}
-                      <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: "pointer" }}
-                        onMouseEnter={() => dragStartRef.current === null && setHoverDot({ sid: s.id, idx: i, x: X(i), y: Y(v) })}
+                      {/* unsichtbare große Hitbox für leichtes Treffen (nicht während Pan) */}
+                      <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: stretched ? "grab" : "pointer" }}
+                        onMouseEnter={() => !panRef.current && setHoverDot({ sid: s.id, idx: i, x: X(i), y: Y(v) })}
                         onMouseLeave={() => setHoverDot((h) => (h?.sid === s.id && h?.idx === i ? null : h))} />
                     </g>
                   );
                 }))}
-
-                {/* Drag-to-Zoom-Auswahl */}
-                {drag && (
-                  <rect
-                    x={Math.min(drag.x0, drag.x1)} y={PAD_T}
-                    width={Math.abs(drag.x1 - drag.x0)} height={CH}
-                    fill="var(--accent)" opacity="0.12" stroke="var(--accent)" strokeWidth="1"
-                    strokeDasharray="3 2" vectorEffect="non-scaling-stroke" pointerEvents="none"
-                  />
-                )}
               </svg>
 
               {/* Per-Dot-Tooltip */}

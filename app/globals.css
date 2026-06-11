@@ -210,8 +210,10 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .rate-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .rate-legend i { width: 10px; height: 10px; border-radius: 3px; }
 /* Scrollbarer Chart-Container */
-.rate-scroll { position: relative; overflow-x: auto; overflow-y: visible; margin: 0 -4px; padding: 0 4px 4px; cursor: crosshair; }
-.rate-scroll.is-selecting { cursor: ew-resize; }
+.rate-scroll { position: relative; overflow-x: auto; overflow-y: visible; margin: 0 -4px; padding: 0 4px 4px; cursor: default; }
+.rate-scroll.can-pan { cursor: grab; }
+.rate-scroll.is-panning { cursor: grabbing; }
+.rate-scroll.is-panning * { cursor: grabbing !important; }
 .rate-scroll::-webkit-scrollbar { height: 6px; }
 .rate-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
 .rate-scroll::-webkit-scrollbar-thumb:hover { background: var(--faint); }
