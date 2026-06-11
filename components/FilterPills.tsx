@@ -18,7 +18,11 @@ export default function FilterPills() {
   if (f.atype !== "all") { const AT: Record<string, string> = { artikel: "Artikel", paywall: "Paywall-Seite", video: "Video", werbung: "Werbung", hub: "Hub", blog: "Timeline", timeline: "Timeline" }; pills.push({ id: "at", label: AT[f.atype] ?? f.atype, on: () => f.setAtype("all") }); }
   if (f.author !== "all") pills.push({ id: "au", label: f.author === "named" ? "Namentlich" : f.author === "anonymous" ? "Anonym" : "Ohne Autor", on: () => f.setAuthor("all") });
   for (const t of f.topics) pills.push({ id: `tp-${t}`, label: `📁 ${topicLabel(t)}`, on: () => f.toggleTopic(t) });
-  for (const c of f.subcats) pills.push({ id: `sc-${c}`, label: `↳ ${c}`, on: () => f.toggleSubcat(c) });
+  // Sub-Rubrik-Labels aus dem catTree nachschlagen (Fallback: raw key lesbar machen)
+  const subLabel = new Map<string, string>();
+  for (const list of f.catTree.values()) for (const s of list) subLabel.set(s.key, s.label);
+  const prettyRaw = (c: string) => c.split("/").map((p) => p.replace(/[-_]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase())).join(" · ");
+  for (const c of f.subcats) pills.push({ id: `sc-${c}`, label: `↳ ${subLabel.get(c) ?? prettyRaw(c)}`, on: () => f.toggleSubcat(c) });
   if (f.keyword !== "all") pills.push({ id: "kw", label: `#${f.keyword}`, on: () => f.setKeyword("all") });
   if (f.lang !== "all") pills.push({ id: "lg", label: f.lang === "de" ? "🇩🇪 DE" : "🇫🇷 FR", on: () => f.setLang("all") });
   const fullRange = f.rangeIdx.from === 0 && f.rangeIdx.to === f.days.length - 1;

@@ -55,24 +55,13 @@ export default function ArticleDashboard() {
       .then(({ data }) => setKwIds((data ?? []).map((r: any) => r.article_id)));
   }, [f.keyword]);
 
-  // Sub-Rubriken → Artikel-IDs (Artikel mit mind. einer der gewählten Kategorien)
-  const [subIds, setSubIds] = useState<number[] | null>(null);
-  useEffect(() => {
-    if (!f.subcats.length) { setSubIds(null); return; }
-    supabase.from("article_categories").select("article_id, categories!inner(name)").in("categories.name", f.subcats)
-      .then(({ data }) => setSubIds([...new Set((data ?? []).map((r: any) => r.article_id))]));
-  }, [f.subcats.join("|||")]);
-
   const loadRows = useCallback(async () => {
     if (!f.active.size) { setRows([]); setTotal(0); return; }
     if (f.keyword !== "all" && kwIds === null) return;
-    if (f.subcats.length && subIds === null) return;
-    // Keyword- und Sub-Rubrik-Artikel-IDs schneiden (beide müssen gelten, wenn gesetzt)
-    let idFilter: number[] | null = kwIds;
-    if (subIds) idFilter = idFilter ? idFilter.filter((x) => subIds.includes(x)) : subIds;
+    const idFilter: number[] | null = kwIds;
     // Pinpoint (Chart-Klick) kann auf EINE Quelle einschränken, sonst alle aktiven.
     const srcFilter = f.pinpoint?.sourceId != null ? [f.pinpoint.sourceId] : f.activeArr;
-    let q = supabase.from("page_overview").select("id,article_id,url,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", srcFilter);
+    let q = supabase.from("page_overview").select("id,article_id,url,title,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", srcFilter);
     if (f.status === "analyzed") q = q.eq("analyzed", true); else if (f.status === "backlog") q = q.eq("analyzed", false);
     if (f.status === "new") q = q.lte("scan_count", 1); else if (f.status === "rescanned") q = q.gte("scan_count", 2);
     if (f.paywall === "yes") q = q.eq("paywalled", true); else if (f.paywall === "no") q = q.eq("paywalled", false);
@@ -82,10 +71,13 @@ export default function ArticleDashboard() {
     if (f.lang !== "all") q = q.eq("language", f.lang);
     if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
     if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
+    // Sub-Rubriken: URL-Pfadmuster (z.B. politik/ausland) — funktioniert quellenübergreifend,
+    // da die Rubrik im URL-Pfad steht (article_categories ist bei den meisten Quellen leer).
+    if (f.subcats.length) q = q.or(f.subcats.map((s) => `url.ilike.%/${s}/%`).join(","));
     if (idFilter) q = q.in("article_id", idFilter.length ? idFilter : [-1]);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, kwIds, subIds, f.keyword, f.subcats.join("|||"), page]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, kwIds, f.keyword, f.subcats.join("|||"), page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
   useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subcats.join("|||"), f.keyword, f.lang, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId]);

@@ -94,9 +94,9 @@ export default function FilterControls() {
                       const son = f.subcats.includes(s.key);
                       return (
                         <button key={s.key} className={`tg-sub ${son ? "on" : ""}`} onClick={() => f.toggleSubcat(s.key)}
-                          title={`${s.key} · ${s.n} Artikel · ${s.sources} ${s.sources === 1 ? "Quelle" : "Quellen"}`}>
+                          title={`${s.label} · ${s.n} Artikel · ${s.sources} ${s.sources === 1 ? "Quelle" : "Quellen"}`}>
                           <span className="tg-sub-arm">↳</span>
-                          <span className="tg-sub-name">{s.key}</span>
+                          <span className="tg-sub-name">{s.label}</span>
                           <span className="tg-n">{s.n}</span>
                         </button>
                       );

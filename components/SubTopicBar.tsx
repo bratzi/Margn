@@ -27,9 +27,9 @@ export default function SubTopicBar() {
               key={s.key}
               className={`subtopic-chip ${on ? "on" : ""}`}
               onClick={() => f.toggleSubcat(s.key)}
-              title={`${s.key} · ${s.n} Artikel · ${s.sources} ${s.sources === 1 ? "Quelle" : "Quellen"}`}
+              title={`${s.label} · ${s.n} Artikel · ${s.sources} ${s.sources === 1 ? "Quelle" : "Quellen"}`}
             >
-              {s.key}
+              {s.label}
               <span className="subtopic-n">{s.n}</span>
               {s.sources > 1 && <i className="subtopic-multi" title="quellenübergreifend">⇄</i>}
             </button>

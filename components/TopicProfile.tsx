@@ -341,9 +341,9 @@ export default function TopicProfile() {
                     key={s.key}
                     className={`subtopic-chip ${f.subcats.includes(s.key) ? "on" : ""}`}
                     onClick={() => f.toggleSubcat(s.key)}
-                    title={`${s.key} · ${s.n} Artikel · ${s.sources} ${s.sources === 1 ? "Quelle" : "Quellen"}`}
+                    title={`${s.label} · ${s.n} Artikel · ${s.sources} ${s.sources === 1 ? "Quelle" : "Quellen"}`}
                   >
-                    {s.key}<span className="subtopic-n">{s.n}</span>
+                    {s.label}<span className="subtopic-n">{s.n}</span>
                   </button>
                 ))}
               </div>

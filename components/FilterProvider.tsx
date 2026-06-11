@@ -8,7 +8,30 @@ import { fetchPagedSeq } from "@/lib/pgFetch";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
-export type SubOpt = { key: string; n: number; sources: number };
+// key = Roh-Pfadmuster (z.B. "politik/ausland") zum URL-Filtern; label = lesbar.
+export type SubOpt = { key: string; label: string; n: number; sources: number };
+
+// Generische Pfad-Wrapper, die KEINE inhaltliche Rubrik sind.
+const RUBRIC_SKIP = new Set([
+  "aktuell", "article", "articles", "news", "nachrichten", "story", "html", "amp",
+  "de", "en", "fr", "thema", "themen", "a", "id",
+]);
+// Rubrik aus dem URL-Pfad: aussagekräftigste Rubriken-Segmente (vor dem Headline-Slug).
+// Gibt { raw, label } zurück — raw zum URL-Filtern, label für die Anzeige.
+// z.B. faz.net/aktuell/politik/ausland/slug-123.html → { raw:"politik/ausland", label:"Politik · Ausland" }
+function urlRubric(url: string): { raw: string; label: string } | null {
+  let segs: string[] = [];
+  try { segs = new URL(url).pathname.toLowerCase().replace(/\/+$/, "").split("/").filter(Boolean); }
+  catch { return null; }
+  if (segs.length < 2) return null;
+  const rubricSegs = segs.slice(0, -1).filter(
+    (s) => !/^\d+$/.test(s) && !/-\d{4,}/.test(s) && !/^\d{4}$/.test(s) && !RUBRIC_SKIP.has(s) && s.length >= 2,
+  );
+  if (!rubricSegs.length) return null;
+  const last2 = rubricSegs.slice(-2);
+  const pretty = (s: string) => s.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return { raw: last2.join("/"), label: last2.map(pretty).join(" · ") };
+}
 
 function makeDays(): string[] {
   const out: string[] = []; const d = new Date(); d.setUTCHours(0, 0, 0, 0);
@@ -130,43 +153,39 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       .then(({ data }) => setTopicOpts((data ?? []).map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n }))));
   }, [active, paywall, author, lang, rangeFrom, rangeTo]);
 
-  // Unterthemen-Baum: verlagseigene Rubriken je kanonischem Topic, direkt aus den
-  // Junction-Tabellen (keine RPC nötig). Eine Query, clientseitig aggregiert.
+  // Unterthemen-Baum: verlagseigene Rubriken je kanonischem Topic — abgeleitet aus dem
+  // URL-PFAD (nicht aus article_categories, das bei Bild/FAZ/n-tv/Tagesschau leer ist).
+  // Die URL trägt die Rubrik zuverlässig: faz.net/aktuell/politik/ausland/…, bild.de/sport/fussball/…
   const [catTree, setCatTree] = useState<Map<string, SubOpt[]>>(new Map());
   useEffect(() => {
     if (!active.size) { setCatTree(new Map()); return; }
     let cancelled = false;
-    // Seitenweise laden — REST kappt bei 1000 Zeilen, die Junction-Tabelle ist größer.
     fetchPagedSeq<any>((a, b) =>
-      supabase
-        .from("article_categories")
-        .select("categories!inner(name), articles!inner(topic, source_id, published_at)")
-        .in("articles.source_id", [...active])
-        .range(a, b),
-      15,
+      supabase.from("page_overview").select("topic, source_id, url, published_at").in("source_id", [...active]).range(a, b),
+      25,
     )
       .then((data) => {
         if (cancelled) return;
-        const agg = new Map<string, Map<string, { n: number; src: Set<number> }>>();
+        const agg = new Map<string, Map<string, { label: string; n: number; src: Set<number> }>>();
         for (const r of data as any[]) {
-          const art = r.articles, cat = r.categories?.name;
-          if (!art || !cat) continue;
-          if (rangeFrom && (!art.published_at || art.published_at < rangeFrom)) continue;
-          if (rangeTo && (!art.published_at || art.published_at > rangeTo)) continue;
-          const topic = art.topic ?? "sonstiges";
+          if (rangeFrom && (!r.published_at || r.published_at < rangeFrom)) continue;
+          if (rangeTo && (!r.published_at || r.published_at > rangeTo)) continue;
+          const rubric = urlRubric(r.url);
+          if (!rubric) continue;
+          const topic = r.topic ?? "sonstiges";
           if (!agg.has(topic)) agg.set(topic, new Map());
           const m = agg.get(topic)!;
-          const e = m.get(cat) ?? { n: 0, src: new Set<number>() };
-          e.n++; e.src.add(art.source_id);
-          m.set(cat, e);
+          const e = m.get(rubric.raw) ?? { label: rubric.label, n: 0, src: new Set<number>() };
+          e.n++; e.src.add(r.source_id);
+          m.set(rubric.raw, e);
         }
         const tree = new Map<string, SubOpt[]>();
         for (const [topic, m] of agg) {
           const list = [...m.entries()]
-            .filter(([, v]) => v.n >= 2) // Einzel-Dossiers ausblenden (Rauschen)
-            .map(([name, v]) => ({ key: name, n: v.n, sources: v.src.size }))
+            .filter(([, v]) => v.n >= 3) // seltene Rubriken ausblenden
+            .map(([raw, v]) => ({ key: raw, label: v.label, n: v.n, sources: v.src.size }))
             .sort((a, b) => b.n - a.n)
-            .slice(0, 20);
+            .slice(0, 24);
           if (list.length) tree.set(topic, list);
         }
         setCatTree(tree);
