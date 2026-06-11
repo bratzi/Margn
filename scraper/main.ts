@@ -753,14 +753,14 @@ async function enrichArticles(sources: Source[]) {
     // vollständig werden (Nutzer schauen meist auf die jüngsten Artikel).
     const { data: noTitle } = await sb.from("articles").select("id,url,source_id")
       .eq("source_id", src.id).is("title", null)
-      .order("discovered_at", { ascending: false }).limit(Math.ceil(quota * 0.6));
+      .order("first_seen", { ascending: false }).limit(Math.ceil(quota * 0.6));
     toEnrich.push(...((noTitle ?? []) as any[]));
     // Prio 2: Titel vorhanden, aber Veröffentlichungsdatum fehlt
     const missing = quota - (noTitle?.length ?? 0);
     if (missing > 0) {
       const { data: noDate } = await sb.from("articles").select("id,url,source_id")
         .eq("source_id", src.id).not("title", "is", null).is("published_at", null)
-        .order("discovered_at", { ascending: false }).limit(missing);
+        .order("first_seen", { ascending: false }).limit(missing);
       const seen = new Set(toEnrich.map((r) => r.id));
       for (const r of (noDate ?? []) as any[]) { if (!seen.has(r.id)) toEnrich.push(r); }
     }
