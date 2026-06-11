@@ -15,8 +15,8 @@ import { PUB_COLORS } from "@/components/TimeRangeFilter";
 //  - Monetarisierung (Paywall-Quote) & Autoren-Transparenz je Thema
 //  - Unterthemen-Radar aus verlagseigenen Rubriken
 
-type Row = { topic: string | null; source_id: number; paywalled: boolean | null; author_status: string | null };
-type Cell = { n: number; pw: number; named: number; au: number };
+type Row = { topic: string | null; source_id: number; paywalled: boolean | null; author_status: string | null; word_count: number | null };
+type Cell = { n: number; pw: number; named: number; au: number; words: number; wordsN: number };
 
 const short = (n: string) => n.replace(" Online", "");
 const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -37,7 +37,7 @@ export default function TopicProfile() {
     };
     fetchAllRows<Row>(
       () => withFilters(supabase.from("page_overview").select("id", { count: "exact", head: true }).in("source_id", f.activeArr)),
-      (a, b) => withFilters(supabase.from("page_overview").select("topic, source_id, paywalled, author_status").in("source_id", f.activeArr)).range(a, b),
+      (a, b) => withFilters(supabase.from("page_overview").select("topic, source_id, paywalled, author_status, word_count").in("source_id", f.activeArr)).range(a, b),
     ).then((data) => {
       if (cancelled) return;
       setRows(data);
@@ -62,11 +62,12 @@ export default function TopicProfile() {
       if (!byPub.has(r.source_id)) byPub.set(r.source_id, { total: 0, cells: new Map() });
       const p = byPub.get(r.source_id)!;
       p.total++;
-      const c = p.cells.get(t) ?? { n: 0, pw: 0, named: 0, au: 0 };
-      const g = byTopic.get(t) ?? { n: 0, pw: 0, named: 0, au: 0 };
+      const c = p.cells.get(t) ?? { n: 0, pw: 0, named: 0, au: 0, words: 0, wordsN: 0 };
+      const g = byTopic.get(t) ?? { n: 0, pw: 0, named: 0, au: 0, words: 0, wordsN: 0 };
       c.n++; g.n++;
       if (r.paywalled === true) { c.pw++; g.pw++; totalPw++; }
       if (r.author_status) { c.au++; g.au++; if (r.author_status === "named") { c.named++; g.named++; } }
+      if (r.word_count && r.word_count > 0) { c.words += r.word_count; c.wordsN++; g.words += r.word_count; g.wordsN++; }
       p.cells.set(t, c); byTopic.set(t, g);
     }
     // Themen-Spalten: relevanteste zuerst, Mini-Themen (<0,5 % oder <5 Artikel) raus
@@ -172,15 +173,21 @@ export default function TopicProfile() {
     return out.slice(0, 5);
   }, [model]);
 
-  // Monetarisierung & Transparenz je Thema (für die Mini-Charts)
+  // Monetarisierung, Transparenz & Tiefe je Thema (für die Mini-Charts)
   const topicStats = useMemo(() => {
     return model.topicsSorted
       .map((t) => {
         const g = model.byTopic.get(t)!;
-        return { topic: t, n: g.n, pwSh: g.n ? g.pw / g.n : 0, namedSh: g.au >= 10 ? g.named / g.au : null };
+        return {
+          topic: t, n: g.n,
+          pwSh: g.n ? g.pw / g.n : 0,
+          namedSh: g.au >= 10 ? g.named / g.au : null,
+          avgWords: g.wordsN >= 5 ? Math.round(g.words / g.wordsN) : null,
+        };
       })
       .filter((x) => x.n >= 10);
   }, [model]);
+  const maxWords = useMemo(() => Math.max(1, ...topicStats.map((x) => x.avgWords ?? 0)), [topicStats]);
 
   // Unterthemen-Radar: Top-Themen mit ihren verlagseigenen Rubriken
   const spotlight = useMemo(
@@ -299,6 +306,19 @@ export default function TopicProfile() {
                 <span className="lbl">{topicLabel(x.topic)}</span>
                 <span className="track"><i style={{ width: `${Math.round(x.namedSh! * 100)}%`, background: "var(--green)" }} /></span>
                 <span className="val tnum" title={`${x.n.toLocaleString("de-DE")} Artikel`}>{pct(x.namedSh!)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="chart-card panel">
+          <h3>Artikel-Tiefe je Thema</h3>
+          <div className="desc">Ø Wortzahl — wo wird ausführlich, wo knapp berichtet?</div>
+          <div className="bars">
+            {[...topicStats].filter((x) => x.avgWords !== null).sort((a, b) => (b.avgWords! - a.avgWords!)).map((x) => (
+              <div className="barrow" key={x.topic}>
+                <span className="lbl">{topicLabel(x.topic)}</span>
+                <span className="track"><i style={{ width: `${Math.round((x.avgWords! / maxWords) * 100)}%`, background: "var(--teal)" }} /></span>
+                <span className="val tnum" title={`${x.n.toLocaleString("de-DE")} Artikel · ≈ ${Math.round(x.avgWords! / 200)} min`}>{x.avgWords!.toLocaleString("de-DE")}</span>
               </div>
             ))}
           </div>

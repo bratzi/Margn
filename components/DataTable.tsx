@@ -12,6 +12,9 @@ export type Col<T> = {
   sortable?: boolean;
   filterable?: boolean;
   groupable?: boolean;
+  // Aggregat für die Footer-Zeile: numerisch (Summe/Schnitt/Median/Quote) oder eigene Funktion.
+  agg?: "sum" | "avg" | "median" | "min" | "max" | ((rows: T[]) => React.ReactNode);
+  aggFormat?: (n: number) => React.ReactNode;
 };
 
 export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass }: {
@@ -25,6 +28,7 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
   const resizing = useRef<{ key: string; startX: number; startW: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   const val = (row: T, col: Col<T>): any => (col.value ? col.value(row) : (row as any)[col.key]);
   const colBy = (k: string) => columns.find((c) => c.key === k)!;
@@ -59,7 +63,13 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
   }, [rows, filters, sort, columns]);
 
   const toggleSort = (k: string) => setSort((s) => s?.key === k ? (s.dir === "asc" ? { key: k, dir: "desc" } : null) : { key: k, dir: "asc" });
-  const onHeaderCtx = (e: React.MouseEvent, k: string) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, key: k }); };
+  // Menü relativ zum Wrapper positionieren — robust gegen transform-Vorfahren
+  // (z.B. .data-fade-in mit translateY), die sonst ein position:fixed-Kind verschieben.
+  const onHeaderCtx = (e: React.MouseEvent, k: string) => {
+    e.preventDefault();
+    const wrap = wrapRef.current?.getBoundingClientRect();
+    setMenu({ x: e.clientX - (wrap?.left ?? 0), y: e.clientY - (wrap?.top ?? 0), key: k });
+  };
   const startResize = (e: React.PointerEvent, k: string) => { e.stopPropagation(); resizing.current = { key: k, startX: e.clientX, startW: widths[k] ?? colBy(k).width ?? 130 }; document.body.style.cursor = "col-resize"; };
 
   // Gruppierung
@@ -72,6 +82,24 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
   }, [view, groupBy]);
 
   const colW = (c: Col<T>) => widths[c.key] ?? c.width ?? 130;
+
+  // Spalten-Aggregat für die Footer-Zeile (über die aktuell gefilterte Sicht).
+  const aggCell = (c: Col<T>, rs: T[]): React.ReactNode => {
+    if (!c.agg) return null;
+    if (typeof c.agg === "function") return c.agg(rs);
+    const nums = rs.map((r) => Number(val(r, c))).filter((x) => Number.isFinite(x));
+    if (!nums.length) return null;
+    let out: number;
+    if (c.agg === "sum") out = nums.reduce((a, b) => a + b, 0);
+    else if (c.agg === "avg") out = nums.reduce((a, b) => a + b, 0) / nums.length;
+    else if (c.agg === "min") out = Math.min(...nums);
+    else if (c.agg === "max") out = Math.max(...nums);
+    else { const s = [...nums].sort((a, b) => a - b); out = s[Math.floor(s.length / 2)]; }
+    const rounded = c.agg === "avg" ? Math.round(out * 10) / 10 : Math.round(out);
+    return c.aggFormat ? c.aggFormat(rounded) : rounded.toLocaleString("de-DE");
+  };
+  const hasFooter = columns.some((c) => c.agg);
+
   let rowNum = 0;
 
   const Cells = ({ r }: { r: T }) => { rowNum++; const n = rowNum; return (
@@ -82,11 +110,11 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
   ); };
 
   return (
-    <div className="dt-wrap">
+    <div className="dt-wrap" ref={wrapRef}>
       <div className="dt-toolbar">
         <button className={`dt-tbtn ${showFilters ? "on" : ""}`} onClick={() => setShowFilters((s) => !s)}>⌕ Spalten-Filter</button>
         {groupBy && <button className="dt-tbtn on" onClick={() => setGroupBy(null)}>Gruppierung: {colBy(groupBy).label} ✕</button>}
-        <span className="dt-count">{view.length} Zeilen{groups ? ` · ${groups.length} Gruppen` : ""}</span>
+        <span className="dt-count">{view.length} Zeilen{groups ? ` · ${groups.length} Gruppen` : ""}{hasFooter ? " · Σ-Zeile aggregiert diese Seite" : ""}</span>
       </div>
       <div className="dt-scroll">
         <table className="dt" style={{ minWidth }}>
@@ -120,6 +148,18 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
             ))}
             {!view.length && <tr><td colSpan={columns.length + 1} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Zeilen.</td></tr>}
           </tbody>
+          {hasFooter && view.length > 0 && (
+            <tfoot>
+              <tr className="dt-foot">
+                <td className="dt-num">Σ</td>
+                {columns.map((c) => (
+                  <td key={c.key} className={c.align === "right" ? "num" : ""}>
+                    {c.agg ? <span className="dt-agg">{aggCell(c, view)}</span> : null}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
       {menu && (

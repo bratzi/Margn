@@ -111,22 +111,30 @@ export default function ArticleDashboard() {
             : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
           <ExtLink href={r.url} className="open-btn" title="Original öffnen (Hintergrund-Tab)"><External size={14} /></ExtLink>
         </div>); } },
-    { key: "outlet", label: "Quelle", width: 130, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></> },
-    { key: "ptype", label: "Typ", width: 100, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span> },
-    { key: "topic", label: "Thema", width: 130, value: (r) => (r.topic ? topicLabel(r.topic) : "—"), render: (r) => <span className="faint">{r.topic ? topicLabel(r.topic) : "—"}</span> },
-    { key: "author_status", label: "Autor", width: 110, value: (r) => r.author_status ?? "—", render: (r) => r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span> },
+    { key: "outlet", label: "Quelle", width: 130, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></>,
+      agg: (rs) => { const u = new Set(rs.map((r) => r.outlet)).size; return <span title="verschiedene Quellen auf dieser Seite">{u} Quellen</span>; } },
+    { key: "ptype", label: "Typ", width: 100, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span>,
+      agg: (rs) => { const a = rs.filter((r) => r.ptype === "artikel").length; return <span title="Anteil echter Artikel">{Math.round((a / rs.length) * 100)}% Artikel</span>; } },
+    { key: "topic", label: "Thema", width: 130, value: (r) => (r.topic ? topicLabel(r.topic) : "—"), render: (r) => <span className="faint">{r.topic ? topicLabel(r.topic) : "—"}</span>,
+      agg: (rs) => <span title="verschiedene Themen auf dieser Seite">{new Set(rs.map((r) => r.topic ?? "sonstiges")).size} Themen</span> },
+    { key: "author_status", label: "Autor", width: 110, value: (r) => r.author_status ?? "—", render: (r) => r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>,
+      agg: (rs) => { const n = rs.filter((r) => r.author_status === "named").length; const base = rs.filter((r) => r.author_status).length; return <span title="namentlich gekennzeichnet">{base ? Math.round((n / base) * 100) : 0}% nam.</span>; } },
     { key: "keywords", label: "Schlagwörter", width: 220, sortable: false, groupable: false, value: (r) => (r.article_id ? rowKw[r.article_id]?.join(" ") : "") ?? "",
       render: (r) => { const kws = r.article_id ? rowKw[r.article_id] : undefined; return kws && kws.length ? <div className="kw-row">{kws.slice(0, 6).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div> : <span className="faint">—</span>; } },
     { key: "scan", label: "Erfassung", width: 120, value: (r) => ((r.scan_count ?? 1) <= 1 ? "Neu" : "Wiederholt"), render: (r) => (r.scan_count ?? 1) <= 1
       ? <span className="new-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg>Neu</span>
-      : <span className="badge neutral">{r.scan_count}× gescannt</span> },
+      : <span className="badge neutral">{r.scan_count}× gescannt</span>,
+      agg: (rs) => { const n = rs.filter((r) => (r.scan_count ?? 1) <= 1).length; return <span title="Anteil neu erfasster Artikel">{Math.round((n / rs.length) * 100)}% neu</span>; } },
     { key: "published_at", label: "Veröffentlicht", width: 110, value: (r) => r.published_at ?? "", render: (r) => <span className="mono faint">{fmtD(r.published_at)}</span> },
     { key: "discovered_at", label: "Erster Scan", width: 125, value: (r) => r.discovered_at ?? "", render: (r) => <span className="mono faint">{fmtDT(r.discovered_at)}</span> },
     { key: "last_seen", label: "Letzter Scan", width: 125, value: (r) => r.last_seen ?? "", render: (r) => <span className="mono faint">{fmtDT(r.last_seen)}</span> },
-    { key: "word_count", label: "Wörter", width: 90, align: "right", value: (r) => r.word_count ?? 0, render: (r) => <span className="faint">{r.word_count ? r.word_count.toLocaleString("de-DE") : "—"}</span> },
-    { key: "reading_min", label: "Lesezeit", width: 90, align: "right", value: (r) => r.reading_min ?? 0, render: (r) => <span className="faint">{r.reading_min ? `${r.reading_min} min` : "—"}</span> },
+    { key: "word_count", label: "Wörter", width: 90, align: "right", value: (r) => r.word_count ?? 0, render: (r) => <span className="faint">{r.word_count ? r.word_count.toLocaleString("de-DE") : "—"}</span>,
+      agg: "avg", aggFormat: (n) => <span title="Ø Wörter">ø {n.toLocaleString("de-DE")}</span> },
+    { key: "reading_min", label: "Lesezeit", width: 90, align: "right", value: (r) => r.reading_min ?? 0, render: (r) => <span className="faint">{r.reading_min ? `${r.reading_min} min` : "—"}</span>,
+      agg: "avg", aggFormat: (n) => <span title="Ø Lesezeit">ø {n} min</span> },
     { key: "revision_count", label: "Änderungen", width: 120, align: "right", value: (r) => r.revision_count ?? 0,
-      render: (r) => { const rev = r.revision_count ?? 0; return rev > 0 ? <span className="rev-badge">{rev}× {(r.edit_count ?? 0) > 0 && <i className="rev-e">{r.edit_count}E</i>}{(r.extension_count ?? 0) > 0 && <i className="rev-x">{r.extension_count}+</i>}</span> : <span className="faint">—</span>; } },
+      render: (r) => { const rev = r.revision_count ?? 0; return rev > 0 ? <span className="rev-badge">{rev}× {(r.edit_count ?? 0) > 0 && <i className="rev-e">{r.edit_count}E</i>}{(r.extension_count ?? 0) > 0 && <i className="rev-x">{r.extension_count}+</i>}</span> : <span className="faint">—</span>; },
+      agg: (rs) => { const tot = rs.reduce((s, r) => s + (r.revision_count ?? 0), 0); const ch = rs.filter((r) => (r.revision_count ?? 0) > 0).length; return <span title={`${ch} Artikel geändert`}>{tot}× ({Math.round((ch / rs.length) * 100)}%)</span>; } },
     { key: "lang", label: "Sprache", width: 80, value: (r) => r.lang_detected || r.country?.toLowerCase() || "—", render: (r) => <span className="faint" style={{ textTransform: "uppercase", fontSize: 11 }}>{r.lang_detected || r.country?.toLowerCase() || "—"}</span> },
   ], [rowKw]);
 
