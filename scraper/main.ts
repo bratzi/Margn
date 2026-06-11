@@ -687,16 +687,29 @@ async function analyzeBacklog() {
 async function enrichArticles(sources: Source[]) {
   const srcById = new Map(sources.map((s) => [s.id, s]));
 
-  // Artikel ohne Titel ODER ohne Veröffentlichungsdatum ODER ohne Wortanzahl laden (balanciert).
-  const perSource = Math.ceil(MAX_PAGES / sources.length);
+  // Budget proportional zum Backlog jeder Quelle verteilen — sonst verschwendet die
+  // Gleichverteilung Renderzeit auf fast-vollständige Quellen (z.B. Spiegel),
+  // während große Lücken (Le Monde) nur langsam abgebaut werden.
+  const backlog = new Map<number, number>();
+  let backlogTotal = 0;
+  for (const src of sources) {
+    const { count } = await sb.from("articles").select("id", { count: "exact", head: true })
+      .eq("source_id", src.id).or("title.is.null,published_at.is.null");
+    backlog.set(src.id, count ?? 0);
+    backlogTotal += count ?? 0;
+  }
   const toEnrich: { id: number; url: string; source_id: number }[] = [];
   for (const src of sources) {
+    const bl = backlog.get(src.id) ?? 0;
+    if (bl === 0) continue;
+    // Anteil am Gesamt-Backlog → Budget (min. 10, damit kleine Quellen nicht verhungern)
+    const quota = Math.max(10, Math.round((bl / Math.max(1, backlogTotal)) * MAX_PAGES));
     // Prio 1: kein Titel (komplette Lücke)
     const { data: noTitle } = await sb.from("articles").select("id,url,source_id")
-      .eq("source_id", src.id).is("title", null).limit(Math.ceil(perSource * 0.6));
+      .eq("source_id", src.id).is("title", null).limit(Math.ceil(quota * 0.6));
     toEnrich.push(...((noTitle ?? []) as any[]));
     // Prio 2: Titel vorhanden, aber Veröffentlichungsdatum fehlt
-    const missing = perSource - (noTitle?.length ?? 0);
+    const missing = quota - (noTitle?.length ?? 0);
     if (missing > 0) {
       const { data: noDate } = await sb.from("articles").select("id,url,source_id")
         .eq("source_id", src.id).not("title", "is", null).is("published_at", null).limit(missing);
@@ -704,7 +717,7 @@ async function enrichArticles(sources: Source[]) {
       for (const r of (noDate ?? []) as any[]) { if (!seen.has(r.id)) toEnrich.push(r); }
     }
   }
-  console.log(`Zu bereichern: ${toEnrich.length} Artikel (max ${perSource}/Quelle)`);
+  console.log(`Zu bereichern: ${toEnrich.length} Artikel (Backlog gesamt: ${backlogTotal})`);
   if (!toEnrich.length) { console.log("Alle Artikel haben bereits Metadaten."); return; }
 
   const browser = await chromium.launch();
