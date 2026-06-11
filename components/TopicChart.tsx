@@ -40,9 +40,16 @@ export default function TopicChart() {
       });
   }, [f.activeArr.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
+  // Farb- und Reihenfolge-Zuordnung — IDENTISCH für Balken-Segmente UND Legende.
+  // (Vorher liefen Balken über f.sources-Index, Legende über aktive-gefilterten Index →
+  //  Farben stimmten nicht überein und dominante Quelle ließ alles einfarbig wirken.)
+  const activeSources = useMemo(
+    () => f.sources.filter((s) => f.active.has(s.id)),
+    [f.sources, f.active],
+  );
   const colorById = useMemo(
-    () => new Map(f.sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])),
-    [f.sources],
+    () => new Map(activeSources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])),
+    [activeSources],
   );
 
   const { topics, totals, outlets } = useMemo(() => {
@@ -105,9 +112,9 @@ export default function TopicChart() {
           })}
         </div>
         <div className="topic-vchart-legend">
-          {f.sources.filter((s) => f.active.has(s.id)).map((s, i) => (
+          {activeSources.map((s) => (
             <span key={s.id}>
-              <i style={{ background: PUB_COLORS[i % PUB_COLORS.length] }} />
+              <i style={{ background: colorById.get(s.id) }} />
               {short(s.name)}
             </span>
           ))}

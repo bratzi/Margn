@@ -27,8 +27,23 @@ export default function RateStats() {
   const [manual, setManual] = useState<"auto" | Unit>("auto");
   const [cursor, setCursor] = useState<{ x: number; bucketIdx: number } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
+  const [containerW, setContainerW] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const axisRef = useRef<HTMLDivElement>(null);
+
+  // Container-Breite messen → SVG rendert immer in ECHTEN Pixeln (kein preserveAspectRatio-
+  // Stretch, das die Datenpunkte zu Ellipsen verzerrt und teils nur 60% Breite füllte).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setContainerW(w);
+    });
+    ro.observe(el);
+    setContainerW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
 
   const fromIso = f.days[f.rangeIdx.from] + "T00:00:00Z";
   const toIso = f.days[f.rangeIdx.to] + "T23:59:59Z";
@@ -91,12 +106,16 @@ export default function RateStats() {
   const NB = buckets.length;
   // Mindest-Pixel pro Bucket für horizontales Scrollen
   const minPxPerBucket = unit === "hour" ? 28 : unit === "day" ? 18 : 40;
-  // naturalWidth: Mindestbreite des Zeichenbereichs (ohne Padding).
-  // Wenn NB Buckets × minPx < CW → Chart nutzt immer die volle Containerbreite.
-  const naturalWidth = Math.max(CW, NB * minPxPerBucket);
+  // Verfügbare Zeichenfläche = echte Containerbreite minus Achsen-Padding.
+  // Fallback auf VW solange noch nicht gemessen.
+  const availW = (containerW > 0 ? containerW : VW) - PAD_L - PAD_R;
+  const dataWidth = NB * minPxPerBucket;
+  // naturalWidth: füllt mindestens die volle Containerbreite; wächst nur, wenn die
+  // Datendichte mehr Platz braucht (→ dann scrollen).
+  const naturalWidth = Math.max(availW, dataWidth);
   const totalSvgW = naturalWidth + PAD_L + PAD_R;
-  // Muss gescrollt werden?
-  const needsScroll = naturalWidth > CW;
+  // Muss gescrollt werden? Nur wenn die Daten breiter sind als der Container.
+  const needsScroll = dataWidth > availW;
 
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
   const Y = (v: number) => PAD_T + CH - (v / maxVal) * CH;
@@ -206,8 +225,7 @@ export default function RateStats() {
             {/* Scrollbarer Chart-Container */}
             <div
               ref={scrollRef}
-              key={`${unit}-${NB}`}
-              className="rate-scroll data-fade-in"
+              className="rate-scroll"
               onScroll={(e) => {
                 const sl = (e.target as HTMLDivElement).scrollLeft;
                 setScrollLeft(sl);
@@ -215,12 +233,12 @@ export default function RateStats() {
               }}
             >
               <svg
+                key={`${unit}-${NB}`}
                 viewBox={`0 0 ${totalSvgW} ${VH}`}
-                width={needsScroll ? totalSvgW : "100%"}
+                width={totalSvgW}
                 height={VH}
-                className="rate-svg-inner"
-                style={{ display: "block", minWidth: needsScroll ? totalSvgW : "100%" }}
-                preserveAspectRatio={needsScroll ? undefined : "none"}
+                className="rate-svg-inner data-fade-in"
+                style={{ display: "block" }}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={() => setCursor(null)}
               >
@@ -281,9 +299,7 @@ export default function RateStats() {
 
               {/* Hover-Tooltip (außerhalb SVG für einfacheres Styling) */}
               {cursor !== null && cursorInfo && (
-                <div className="rate-cursor-tip" style={{
-                  left: needsScroll ? cursor.x : `${(cursor.x / totalSvgW) * 100}%`,
-                }}>
+                <div className="rate-cursor-tip" style={{ left: cursor.x }}>
                   <div className="rct-label">{cursorInfo.label}</div>
                   {cursorInfo.entries.map((e) => (
                     <div key={e.name} className="rct-row">
@@ -301,20 +317,13 @@ export default function RateStats() {
 
             {/* X-Achse (scrollt mit wenn nötig, sonst 100%-Breite) */}
             <div className="rate-axis-wrap" ref={axisRef}>
-              <div className="rate-axis" style={{ width: needsScroll ? totalSvgW : "100%", position: "relative" }}>
+              <div className="rate-axis" style={{ width: totalSvgW, position: "relative" }}>
                 {buckets.map((b, i) => {
                   if (i % axisStep !== 0) return null;
-                  // Prozentuale Position innerhalb des Zeichenbereichs [PAD_L/totalSvgW … (totalSvgW-PAD_R)/totalSvgW]
-                  const pct = needsScroll
-                    ? undefined
-                    : `${((PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth) / totalSvgW) * 100}%`;
-                  const abs = needsScroll
-                    ? PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth
-                    : undefined;
                   return (
                     <span key={b} style={{
                       position: "absolute",
-                      left: pct ?? abs,
+                      left: X(i),
                       transform: i === 0 ? "none" : i >= NB - 2 ? "translateX(-100%)" : "translateX(-50%)",
                     }}>{fmtAxis(b)}</span>
                   );
