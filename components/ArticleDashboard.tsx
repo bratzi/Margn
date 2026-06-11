@@ -152,7 +152,7 @@ export default function ArticleDashboard() {
         <h2 className="section-h">Auf einen Blick <span className="count">{topicLbl || "Gesamtverteilung"}</span></h2>
         <div className="donut-grid">
           <Donut title="Themen-Mix" centerLabel={f.topicOpts.reduce((s, t) => s + t.n, 0).toLocaleString("de-DE")} centerSub="Artikel"
-            segments={f.topicOpts.slice(0, 6).map((t, i) => ({ label: t.label, value: t.n, color: PUB_COLORS[i % PUB_COLORS.length] }))} />
+            segments={f.topicOpts.slice(0, 8).map((t, i) => ({ label: t.label, value: t.n, color: PUB_COLORS[i % PUB_COLORS.length] }))} />
           <Donut title="Bezahlschranke" centerLabel={`${fpct(agg.paywalled, agg.articles)}%`} centerSub="Paywall"
             segments={[{ label: "Frei zugänglich", value: agg.articles - agg.paywalled, color: "var(--green)" }, { label: "Hinter Paywall", value: agg.paywalled, color: "var(--red)" }]} />
           <Donut title="Autoren-Transparenz" centerLabel={`${fpct(agg.named, agg.au)}%`} centerSub="namentlich"
@@ -165,9 +165,9 @@ export default function ArticleDashboard() {
 
         {f.keywordOpts.length > 0 && (
           <>
-            <h2 className="section-h">Schlagwörter im Filter <span className="count">{topicLbl || "alle Themen"} · klick zum Filtern</span></h2>
+            <h2 className="section-h">Keywords im Filter <span className="count">{topicLbl || "alle Themen"} · klick zum Filtern</span></h2>
             <div className="kw-cloud">
-              {f.keywordOpts.slice(0, 60).map((k) => (
+              {f.keywordOpts.map((k) => (
                 <button key={k.key} className={`kw-pill ${f.keyword === k.key ? "on" : ""}`} onClick={() => f.setKeyword(f.keyword === k.key ? "all" : k.key)}>{k.label} <span className="kw-n">{k.n}</span></button>
               ))}
             </div>

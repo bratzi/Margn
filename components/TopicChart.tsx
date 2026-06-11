@@ -14,7 +14,7 @@ export default function TopicChart() {
     if (!f.activeArr.length) { setRows([]); return; }
     const nn = (v: string) => (v === "all" ? null : v);
     supabase.rpc("topic_opts_f", { p_sources: f.activeArr, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo })
-      .then(({ data }) => setRows((data ?? []).filter((r: any) => r.topic !== "sonstiges")));
+      .then(({ data }) => setRows(data ?? []));
   }, [f.activeArr.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   if (!rows.length) return null;

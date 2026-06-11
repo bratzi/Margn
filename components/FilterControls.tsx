@@ -47,9 +47,9 @@ export default function FilterControls() {
         <div className="fglabel">Seitentyp</div>
         <select value={f.atype} onChange={(e) => f.setAtype(e.target.value)}>
           <option value="all">Alle Seiten</option>
-          <option value="artikel">Artikel</option><option value="paywall">Paywall-Seite</option>
-          <option value="video">Video-Seite</option><option value="werbung">Werbe-/Sponsored</option>
-          <option value="hub">Hub-/Rubrikseite</option><option value="timeline">Timeline / Liveblog</option>
+          <option value="artikel">Artikel</option>
+          <option value="paywall">Paywall-Seite</option>
+          <option value="timeline">Timeline / Liveblog</option>
         </select>
       </div>
 

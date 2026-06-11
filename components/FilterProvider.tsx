@@ -111,7 +111,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   useEffect(() => {
     if (!active.size) { setTopicOpts([]); return; }
     supabase.rpc("topic_opts_f", { p_sources: [...active], p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
-      .then(({ data }) => setTopicOpts((data ?? []).filter((r: any) => r.topic !== "sonstiges").map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n }))));
+      .then(({ data }) => setTopicOpts((data ?? []).map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n }))));
   }, [active, paywall, author, lang, rangeFrom, rangeTo]);
 
   // dynamische Keyword-Optionen (voller Filtersatz)
