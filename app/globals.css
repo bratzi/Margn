@@ -885,3 +885,15 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
   font-size: 11px; font-weight: 650; color: var(--ink); padding: 7px 10px; font-variant-numeric: tabular-nums; z-index: 1; }
 .dt-foot .dt-num { color: var(--accent); font-weight: 800; }
 .dt-agg { white-space: nowrap; }
+
+/* ---------- DataTable: erweiterte Features ---------- */
+.dt th[draggable="true"] { user-select: none; }
+.dt th.dt-dragover { box-shadow: inset 3px 0 0 var(--accent); }
+.dt th.dt-pinned, .dt td.dt-pinned { position: sticky; left: 0; z-index: 3; background: var(--surface); box-shadow: 2px 0 0 var(--line-2); }
+.dt thead th.dt-pinned { z-index: 5; background: var(--surface-2); }
+.dt-pin-mark { font-size: 9px; margin-right: 4px; opacity: .8; }
+.dt-menu-head { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 4px 11px 6px; }
+.dt-menu-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+/* Artikel-Titel-Spalte */
+.art-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; text-decoration: none; }
+a.art-title:hover { color: var(--accent); text-decoration: underline; }

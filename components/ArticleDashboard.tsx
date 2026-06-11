@@ -18,7 +18,7 @@ import DataTable, { type Col } from "@/components/DataTable";
 import { topicLabel } from "@/lib/topics";
 
 type Row = {
-  id: number; article_id: number | null; url: string; outlet: string; country: string | null;
+  id: number; article_id: number | null; url: string; title: string | null; outlet: string; country: string | null;
   analyzed: boolean; paywalled: boolean | null; ptype: string; topic: string | null; author_status: string | null;
   discovered_at: string | null; last_seen: string | null; published_at: string | null;
   word_count: number | null; reading_min: number | null; revision_count: number | null;
@@ -105,6 +105,12 @@ export default function ArticleDashboard() {
             : <span className="url mono" title={r.url}><span className="path">{host}</span>{path}</span>}
           <ExtLink href={r.url} className="open-btn" title="Original öffnen (Hintergrund-Tab)"><External size={14} /></ExtLink>
         </div>); } },
+    { key: "title", label: "Titel", width: 320, value: (r) => r.title ?? "",
+      render: (r) => r.title
+        ? (r.article_id
+          ? <Link href={`/articles/${r.article_id}`} target="_blank" className="art-title" title={r.title}>{r.title}</Link>
+          : <span className="art-title" title={r.title}>{r.title}</span>)
+        : <span className="faint">—</span> },
     { key: "outlet", label: "Quelle", width: 130, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></>,
       agg: (rs) => { const u = new Set(rs.map((r) => r.outlet)).size; return <span title="verschiedene Quellen auf dieser Seite">{u} Quellen</span>; } },
     { key: "ptype", label: "Typ", width: 100, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span>,
@@ -183,7 +189,7 @@ export default function ArticleDashboard() {
 
         <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
         <div className="data-fade-in" key={`${page}-${rows.length}-${f.topics.join(",")}-${f.subcats.join(",")}`}>
-          <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={1700} rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} />
+          <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={2000} tableId="articles" rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} />
         </div>
 
         <div className="pager">
