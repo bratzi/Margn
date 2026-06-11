@@ -17,7 +17,7 @@ const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kei
 // "analyze":    batch-upsert pages.kind='article' → articles (kein Chromium).
 // "enrich":     articles ohne Titel rendern + Metadaten nachtragen.
 // "reclassify": pages.kind='article' rendern, Videos → kind='media' + aus articles entfernen.
-const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich" | "reclassify" | "retopic";
+const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich" | "reclassify" | "retopic" | "rekeyword";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -69,9 +69,55 @@ function parseJsonLd(html: string): any[] {
   const rx = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   let m;
   while ((m = rx.exec(html)) !== null) {
-    try { const j = JSON.parse(m[1]); out.push(...(Array.isArray(j) ? j : [j])); } catch {}
+    try {
+      const j = JSON.parse(m[1]);
+      const items = Array.isArray(j) ? j : [j];
+      for (const it of items) {
+        out.push(it);
+        // @graph-Wrapper entpacken (Le Monde, FAZ u.a. verschachteln Article darin)
+        if (it && Array.isArray(it["@graph"])) out.push(...it["@graph"]);
+      }
+    } catch {}
   }
   return out;
+}
+
+// @type kann String ODER Array sein ("NewsArticle" vs. ["NewsArticle","Report"]).
+function typeIncludes(t: any, needle: string): boolean {
+  if (typeof t === "string") return t.includes(needle);
+  if (Array.isArray(t)) return t.some((x) => typeof x === "string" && x.includes(needle));
+  return false;
+}
+
+// Schlagwörter aus <a rel="tag">-Links (HTML-Standard, von FAZ u.a. genutzt).
+function relTagKeywords(html: string): string[] {
+  const out: string[] = [];
+  const rx = /<a[^>]+rel=["']tag["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = rx.exec(html)) !== null) {
+    const txt = m[1].replace(/<[^>]+>/g, "").trim();
+    if (txt) out.push(txt);
+  }
+  return out;
+}
+
+// Keywords aus allen bekannten Quellen sammeln, normalisieren, deduplizieren.
+//  1) JSON-LD keywords (String/Array)  2) meta news_keywords/keywords
+//  3) ALLE <meta property="article:tag"> (mehrfach)  4) <a rel="tag"> (FAZ u.a.)
+function extractKeywords(html: string, article: any): string[] {
+  const parts: string[] = [];
+  const push = (raw: any) => {
+    if (!raw) return;
+    const arr = Array.isArray(raw) ? raw : String(raw).split(/[,;|]/);
+    for (const k of arr) parts.push(String(k));
+  };
+  push(article?.keywords);
+  push(metaContent(html, "news_keywords", "keywords"));
+  for (const m of html.matchAll(/<meta[^>]+property=["']article:tag["'][^>]+content=["']([^"']+)["']/gi)) parts.push(m[1]);
+  for (const t of relTagKeywords(html)) parts.push(t);
+  return [...new Set(
+    parts.map((k) => k.trim().toLowerCase().replace(/_/g, " ")).filter((k) => k.length > 1 && k.length < 60),
+  )];
 }
 
 function metaContent(html: string, ...selectors: string[]): string | null {
@@ -85,7 +131,7 @@ function metaContent(html: string, ...selectors: string[]): string | null {
 
 function extractMeta(html: string, url: string) {
   const ld = parseJsonLd(html);
-  const article = ld.find((d) => typeof d["@type"] === "string" && d["@type"].includes("Article")) ?? {};
+  const article = ld.find((d) => d && typeIncludes(d["@type"], "Article")) ?? {};
 
   const titleRaw =
     metaContent(html, "og:title", "twitter:title") ??
@@ -140,12 +186,7 @@ function extractMeta(html: string, url: string) {
   const metaAuthor = metaContent(html, "author", "article:author");
   if (metaAuthor && !authorList.includes(metaAuthor)) authorList.push(metaAuthor);
 
-  // Keywords (JSON-LD keywords + meta news_keywords/keywords/article:tag)
-  const kwRaw = article.keywords ?? metaContent(html, "news_keywords", "keywords", "article:tag") ?? "";
-  const kwArr = Array.isArray(kwRaw) ? kwRaw : String(kwRaw).split(/[,;|]/);
-  const keywords: string[] = kwArr
-    .map((k: string) => String(k).trim().toLowerCase())
-    .filter((k: string) => k.length > 1 && k.length < 60);
+  const keywords = extractKeywords(html, article);
 
   // Kategorien
   const catRaw = article.articleSection ?? metaContent(html, "article:section") ?? "";
@@ -862,6 +903,55 @@ async function retopicArticles() {
   console.log("Top-Übergänge:"); for (const [k, n] of top) console.log(`  ${k}: ${n}`);
 }
 
+// rekeyword: Rendert Artikel OHNE Keyword-Verknüpfung neu und trägt Keywords nach
+// (für Backlog nach Extractor-Verbesserung; priorisiert Quellen mit den größten Lücken).
+async function rekeywordArticles(sources: Source[]) {
+  console.log("rekeyword: Artikel ohne Keywords neu rendern und Schlagwörter nachtragen…");
+  // Pro Quelle ein faires Budget; Artikel OHNE Keyword-Verknüpfung sammeln.
+  const perSource = Math.ceil(MAX_PAGES / sources.length);
+  const toFix: { id: number; url: string; lang: string }[] = [];
+  for (const src of sources) {
+    // Mehr laden als Budget (viele haben evtl. schon Keywords), bis perSource ohne KW erreicht.
+    const { data } = await sb.from("articles")
+      .select("id,url,article_keywords(article_id)")
+      .eq("source_id", src.id).not("title", "is", null).limit(perSource * 4);
+    let taken = 0;
+    for (const a of (data ?? []) as any[]) {
+      if (taken >= perSource) break;
+      if (!a.article_keywords?.length) { toFix.push({ id: a.id, url: a.url, lang: src.language ?? "de" }); taken++; }
+    }
+  }
+  const queue = toFix.slice(0, MAX_PAGES);
+  console.log(`Zu bearbeiten: ${queue.length} Artikel ohne Keywords.`);
+  if (!queue.length) { console.log("Keine Artikel ohne Keywords gefunden."); return; }
+
+  const browser = await chromium.launch();
+  let done = 0, withKw = 0;
+  const total = queue.length;
+  async function worker() {
+    const ctx = await browser.newContext({ userAgent: UA, locale: "de-DE" });
+    try {
+      while (true) {
+        const item = queue.shift();
+        if (!item) break;
+        const { html } = await renderPage(ctx, item.url);
+        if (html) {
+          const ld = parseJsonLd(html);
+          const article = ld.find((d) => d && typeIncludes(d["@type"], "Article")) ?? {};
+          const kws = extractKeywords(html, article);
+          if (kws.length) { await upsertDimensions(item.id, [], kws, []); withKw++; }
+        }
+        done++;
+        if (done % 50 === 0) console.log(`  ${done}/${total} bearbeitet (${withKw} mit Keywords)…`);
+        await sleep(DELAY_MS);
+      }
+    } finally { await ctx.close(); }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  await browser.close();
+  console.log(`\nFertig: ${done} bearbeitet, ${withKw} mit Keywords angereichert.`);
+}
+
 async function run() {
   const { data, error } = await sb.from("sources").select("id,base_url,language").eq("active", true);
   if (error) throw new Error(`Quellen-Abfrage fehlgeschlagen: ${error.message}`);
@@ -872,6 +962,7 @@ async function run() {
   if (MODE === "enrich")     { await enrichArticles(data as Source[]); return; }
   if (MODE === "reclassify") { await reclassifyPages(data as Source[]); return; }
   if (MODE === "retopic")    { await retopicArticles(); return; }
+  if (MODE === "rekeyword")  { await rekeywordArticles(data as Source[]); return; }
 
   const browser = await chromium.launch();
   try {
