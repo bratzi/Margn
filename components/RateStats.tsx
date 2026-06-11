@@ -91,8 +91,12 @@ export default function RateStats() {
   const NB = buckets.length;
   // Mindest-Pixel pro Bucket für horizontales Scrollen
   const minPxPerBucket = unit === "hour" ? 28 : unit === "day" ? 18 : 40;
+  // naturalWidth: Mindestbreite des Zeichenbereichs (ohne Padding).
+  // Wenn NB Buckets × minPx < CW → Chart nutzt immer die volle Containerbreite.
   const naturalWidth = Math.max(CW, NB * minPxPerBucket);
   const totalSvgW = naturalWidth + PAD_L + PAD_R;
+  // Muss gescrollt werden?
+  const needsScroll = naturalWidth > CW;
 
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
   const Y = (v: number) => PAD_T + CH - (v / maxVal) * CH;
@@ -167,6 +171,7 @@ export default function RateStats() {
 
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
+    // Maus-X auf SVG-viewBox skalieren (korrekt für beide Modi: feste Breite + stretched)
     const svgX = ((e.clientX - rect.left) / rect.width) * totalSvgW;
     const chartX = svgX - PAD_L;
     if (chartX < 0 || chartX > naturalWidth) { setCursor(null); return; }
@@ -210,10 +215,11 @@ export default function RateStats() {
             >
               <svg
                 viewBox={`0 0 ${totalSvgW} ${VH}`}
-                width={totalSvgW}
+                width={needsScroll ? totalSvgW : "100%"}
                 height={VH}
                 className="rate-svg-inner"
-                style={{ display: "block", minWidth: totalSvgW }}
+                style={{ display: "block", minWidth: needsScroll ? totalSvgW : "100%" }}
+                preserveAspectRatio={needsScroll ? undefined : "none"}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={() => setCursor(null)}
               >
@@ -274,7 +280,9 @@ export default function RateStats() {
 
               {/* Hover-Tooltip (außerhalb SVG für einfacheres Styling) */}
               {cursor !== null && cursorInfo && (
-                <div className="rate-cursor-tip" style={{ left: cursor.x }}>
+                <div className="rate-cursor-tip" style={{
+                  left: needsScroll ? cursor.x : `${(cursor.x / totalSvgW) * 100}%`,
+                }}>
                   <div className="rct-label">{cursorInfo.label}</div>
                   {cursorInfo.entries.map((e) => (
                     <div key={e.name} className="rct-row">
@@ -290,16 +298,26 @@ export default function RateStats() {
               )}
             </div>
 
-            {/* X-Achse (scrollt mit) */}
+            {/* X-Achse (scrollt mit wenn nötig, sonst 100%-Breite) */}
             <div className="rate-axis-wrap" ref={axisRef}>
-              <div className="rate-axis" style={{ width: totalSvgW, paddingLeft: PAD_L, paddingRight: PAD_R, position: "relative" }}>
-                {buckets.map((b, i) => i % axisStep === 0 ? (
-                  <span key={b} style={{
-                    position: "absolute",
-                    left: PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth,
-                    transform: i === 0 ? "none" : i >= NB - 2 ? "translateX(-100%)" : "translateX(-50%)",
-                  }}>{fmtAxis(b)}</span>
-                ) : null)}
+              <div className="rate-axis" style={{ width: needsScroll ? totalSvgW : "100%", position: "relative" }}>
+                {buckets.map((b, i) => {
+                  if (i % axisStep !== 0) return null;
+                  // Prozentuale Position innerhalb des Zeichenbereichs [PAD_L/totalSvgW … (totalSvgW-PAD_R)/totalSvgW]
+                  const pct = needsScroll
+                    ? undefined
+                    : `${((PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth) / totalSvgW) * 100}%`;
+                  const abs = needsScroll
+                    ? PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth
+                    : undefined;
+                  return (
+                    <span key={b} style={{
+                      position: "absolute",
+                      left: pct ?? abs,
+                      transform: i === 0 ? "none" : i >= NB - 2 ? "translateX(-100%)" : "translateX(-50%)",
+                    }}>{fmtAxis(b)}</span>
+                  );
+                })}
               </div>
             </div>
           </>
