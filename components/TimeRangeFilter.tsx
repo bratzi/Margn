@@ -50,6 +50,12 @@ export default function TimeRangeFilter() {
   const X = (i: number) => (i / (N - 1)) * VW;
   const colW = (VW / N) * 0.72;
   const pctOf = (i: number) => (i / (N - 1)) * 100;
+  // Halbe Säulenbreite in Prozent der Gesamtbreite — damit die Regler/das Band exakt an
+  // den Säulen-KANTEN sitzen (linke Kante von „from", rechte Kante von „to"),
+  // nicht auf der Säulenmitte (= scheinbar zwischen zwei Säulen).
+  const halfColPct = (colW / 2 / VW) * 100;
+  const edgeLeft = (i: number) => Math.max(0, pctOf(i) - halfColPct);   // linke Säulenkante
+  const edgeRight = (i: number) => Math.min(100, pctOf(i) + halfColPct); // rechte Säulenkante
   const chartH = Math.max(60, h - 60);
 
   const idxFromClient = useCallback((clientX: number) => {
@@ -118,14 +124,15 @@ export default function TimeRangeFilter() {
             return <g key={i}>{series.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
           })}
         </svg>
-        <div className="trf-dim" style={{ left: 0, width: `${pctOf(live.from)}%` }} />
-        <div className="trf-dim" style={{ right: 0, width: `${100 - pctOf(live.to)}%` }} />
-        {/* Auswahl-Band: bei Einzeltag eine Tagesbreite breit darstellen, damit sicht- und greifbar */}
+        {/* Regler/Band sitzen auf den Säulen-KANTEN (linke Kante „from", rechte Kante „to"),
+            sodass die Randsäulen vollständig umschlossen werden — auch bei Einzeltag. */}
+        <div className="trf-dim" style={{ left: 0, width: `${edgeLeft(live.from)}%` }} />
+        <div className="trf-dim" style={{ right: 0, width: `${100 - edgeRight(live.to)}%` }} />
         <div className={`trf-bandsel ${live.from === live.to ? "single" : ""}`}
-          style={{ left: `${pctOf(live.from)}%`, width: `${Math.max(pctOf(live.to) - pctOf(live.from), 100 / N)}%` }}
+          style={{ left: `${edgeLeft(live.from)}%`, width: `${edgeRight(live.to) - edgeLeft(live.from)}%` }}
           onPointerDown={(e) => start("band", e)} />
-        <div className="trf-h" style={{ left: `${pctOf(live.from)}%` }} onPointerDown={(e) => start("from", e)}><span /></div>
-        <div className="trf-h" style={{ left: `${pctOf(live.to)}%` }} onPointerDown={(e) => start("to", e)}><span /></div>
+        <div className="trf-h" style={{ left: `${edgeLeft(live.from)}%` }} onPointerDown={(e) => start("from", e)}><span /></div>
+        <div className="trf-h" style={{ left: `${edgeRight(live.to)}%` }} onPointerDown={(e) => start("to", e)}><span /></div>
       </div>
       <div className="trf-axis">{[0, 15, 30, 45, 59].map((i) => <span key={i} style={{ left: `${pctOf(i)}%`, transform: i === 0 ? "none" : i === 59 ? "translateX(-100%)" : "translateX(-50%)" }}>{fmtDay(days[i])}</span>)}</div>
     </div>
