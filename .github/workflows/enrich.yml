@@ -1,12 +1,16 @@
 name: enrich
 on:
   schedule:
-    - cron: "15 1 * * *"   # täglich 01:15 UTC – rendert Backlog-Artikel ohne Titel, trägt Metadaten nach
+    - cron: "15 */6 * * *"   # alle 6 h – rendert Backlog-Artikel ohne Titel/Datum, trägt Metadaten nach
   workflow_dispatch:
+# Überlappende Läufe verhindern (vorige Läufe wurden teils abgebrochen)
+concurrency:
+  group: enrich
+  cancel-in-progress: false
 jobs:
   enrich:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,6 +37,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "enrich"
-          CRAWL_MAX_PAGES: "1000"
-          CRAWL_DELAY_MS: "80"
-          CRAWL_CONCURRENCY: "8"
+          CRAWL_MAX_PAGES: "2500"
+          CRAWL_DELAY_MS: "60"
+          CRAWL_CONCURRENCY: "10"

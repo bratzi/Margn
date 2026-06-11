@@ -749,15 +749,18 @@ async function enrichArticles(sources: Source[]) {
     if (bl === 0) continue;
     // Anteil am Gesamt-Backlog → Budget (min. 10, damit kleine Quellen nicht verhungern)
     const quota = Math.max(10, Math.round((bl / Math.max(1, backlogTotal)) * MAX_PAGES));
-    // Prio 1: kein Titel (komplette Lücke)
+    // Prio 1: kein Titel (komplette Lücke). NEUESTE zuerst, damit aktuelle Tage schnell
+    // vollständig werden (Nutzer schauen meist auf die jüngsten Artikel).
     const { data: noTitle } = await sb.from("articles").select("id,url,source_id")
-      .eq("source_id", src.id).is("title", null).limit(Math.ceil(quota * 0.6));
+      .eq("source_id", src.id).is("title", null)
+      .order("discovered_at", { ascending: false }).limit(Math.ceil(quota * 0.6));
     toEnrich.push(...((noTitle ?? []) as any[]));
     // Prio 2: Titel vorhanden, aber Veröffentlichungsdatum fehlt
     const missing = quota - (noTitle?.length ?? 0);
     if (missing > 0) {
       const { data: noDate } = await sb.from("articles").select("id,url,source_id")
-        .eq("source_id", src.id).not("title", "is", null).is("published_at", null).limit(missing);
+        .eq("source_id", src.id).not("title", "is", null).is("published_at", null)
+        .order("discovered_at", { ascending: false }).limit(missing);
       const seen = new Set(toEnrich.map((r) => r.id));
       for (const r of (noDate ?? []) as any[]) { if (!seen.has(r.id)) toEnrich.push(r); }
     }
