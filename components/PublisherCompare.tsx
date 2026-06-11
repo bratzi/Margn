@@ -81,11 +81,13 @@ export default function PublisherCompare() {
     });
   }, [activeSources.join(","), topics.join(","), f.paywall, f.author, f.lang, period]);
 
+  // WICHTIG: alle Hooks VOR jedem early return — sonst "Rendered more hooks than
+  // during the previous render" (Crash sobald stats von leer auf befüllt wechselt).
+  const prevMap = useMemo(() => new Map(prevStats.map((s) => [s.source_id, s])), [prevStats]);
+
   if (!stats.length) return null;
   const nm = (id: number) => short(nameById.get(id)?.name ?? "?");
   const ctx = topics.length === 1 ? ` · Thema: ${topicLabel(topics[0])}` : topics.length > 1 ? ` · ${topics.length} Themen` : "";
-
-  const prevMap = useMemo(() => new Map(prevStats.map((s) => [s.source_id, s])), [prevStats]);
 
   const charts: {
     title: string; desc: string; color: string; fmt?: (n: number) => string;
