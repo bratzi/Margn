@@ -489,24 +489,53 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .cta:hover { opacity: .88; }
 
 /* ---------- Scan-Timeline (Detail) ---------- */
-.scant-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 18px; }
-.scant-head .scant-k { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 3px; }
-.scant-head .scant-v { font-size: 14px; font-weight: 650; color: var(--ink); }
-.scant-mid { text-align: center; display: flex; flex-direction: column; gap: 2px; }
-.scant-dur { font-size: 13px; font-weight: 600; color: var(--accent); }
-.scant-cnt { font-size: 11px; color: var(--faint); }
-.scant-track { position: relative; height: 30px; margin: 4px 6px 0; }
-.scant-line { position: absolute; top: 50%; left: 0; right: 0; height: 3px; transform: translateY(-50%); border-radius: 99px; background: linear-gradient(90deg, var(--green), var(--accent)); opacity: .35; }
-.scant-cap { position: absolute; top: 50%; width: 11px; height: 11px; border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid var(--surface); }
-.scant-cap.start { left: 0; background: var(--green); }
-.scant-cap.end { left: 100%; background: var(--accent); }
-.scant-dot { position: absolute; top: 50%; width: 7px; height: 7px; border-radius: 50%; transform: translate(-50%, -50%); background: var(--muted); border: 1.5px solid var(--surface); cursor: pointer; transition: transform .12s; }
-.scant-dot:hover { transform: translate(-50%, -50%) scale(1.6); }
-.scant-dot.change { width: 11px; height: 11px; background: var(--amber); box-shadow: 0 0 0 3px var(--marker-sub); z-index: 2; }
-.scant-tip { position: absolute; bottom: 100%; transform: translateX(-50%); margin-bottom: 6px; white-space: nowrap; background: var(--ink); color: var(--bg); font-size: 11px; padding: 4px 8px; border-radius: 5px; pointer-events: none; z-index: 5; }
-.scant-legend { display: flex; gap: 16px; align-items: center; margin-top: 16px; font-size: 11.5px; color: var(--muted); }
+.scant-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+.scant-endpoint { display: flex; flex-direction: column; gap: 3px; }
+.scant-k { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 600; }
+.scant-v { font-size: 13.5px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.scant-mid { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.scant-dur { font-size: 13px; font-weight: 700; color: var(--accent); }
+.scant-badges { display: flex; gap: 7px; flex-wrap: wrap; justify-content: center; }
+.scant-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 99px; }
+.scant-badge-scan { background: var(--accent-sub); color: var(--accent); }
+.scant-badge-change { background: var(--amber-sub); color: var(--amber); }
+/* Track */
+.scant-track { position: relative; height: 36px; margin: 2px 8px 0; user-select: none; }
+.scant-line { position: absolute; top: 50%; left: 0; right: 0; height: 3px; transform: translateY(-50%);
+  border-radius: 99px; background: linear-gradient(90deg, var(--green), var(--accent)); opacity: .3; }
+/* Start/End-Caps */
+.scant-cap { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
+  transform: translate(-50%, -50%); border: 2.5px solid var(--surface); z-index: 3; }
+.scant-cap.start { left: 0; background: var(--green); box-shadow: 0 0 0 3px var(--green-sub); }
+.scant-cap.end   { left: 100%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-sub); }
+/* Monats-Marker */
+.scant-month-tick { position: absolute; top: 0; bottom: 0; width: 0; pointer-events: none; }
+.scant-month-tick::before { content: ""; position: absolute; top: 20%; bottom: 20%; left: 0; width: 1px; background: var(--line-2); }
+.scant-month-tick span { position: absolute; top: -16px; left: 3px; font-size: 9px; color: var(--faint); white-space: nowrap; }
+/* Dots */
+.scant-dot { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%;
+  transform: translate(-50%, -50%); background: var(--muted); border: 2px solid var(--surface);
+  cursor: pointer; transition: transform .15s, box-shadow .15s; padding: 0; z-index: 2; }
+.scant-dot:hover { transform: translate(-50%, -50%) scale(1.9); box-shadow: 0 0 0 3px var(--accent-sub); z-index: 4; }
+.scant-dot.change { width: 12px; height: 12px; background: var(--amber); border-color: var(--surface);
+  box-shadow: 0 0 0 3px var(--marker-sub); z-index: 3; }
+.scant-dot.change:hover { transform: translate(-50%, -50%) scale(1.7); box-shadow: 0 0 0 5px var(--marker-sub); }
+/* Tooltip */
+.scant-tip { position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); border-radius: 7px; padding: 7px 11px;
+  pointer-events: none; z-index: 20; white-space: nowrap;
+  box-shadow: 0 4px 18px rgba(0,0,0,.22); }
+.scant-tip::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: var(--ink); }
+.scant-tip-type { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: rgba(255,255,255,.55); margin-bottom: 3px; }
+.scant-tip.change .scant-tip-type { color: var(--amber); }
+.scant-tip-time { display: block; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Legende */
+.scant-legend { display: flex; gap: 16px; align-items: center; margin-top: 14px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
 .scant-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.scant-legend i.scant-dot { position: static; transform: none; }
+.scant-dot-leg { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); border: 2px solid var(--surface); box-shadow: 0 0 0 1.5px var(--line-2); }
+.scant-dot-leg.change { background: var(--amber); box-shadow: 0 0 0 2px var(--marker-sub); }
 
 /* ---------- Timeline ---------- */
 .tl { position: relative; padding-left: 24px; }
