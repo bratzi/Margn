@@ -9,8 +9,8 @@ import FilterPills from "@/components/FilterPills";
 import PublisherCompare from "@/components/PublisherCompare";
 import TopicProfile from "@/components/TopicProfile";
 import RateStats from "@/components/RateStats";
-import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
-import Donut from "@/components/Donut";
+import TimeRangeFilter from "@/components/TimeRangeFilter";
+import PulseBar from "@/components/PulseBar";
 import TopicCards from "@/components/TopicCards";
 import SubTopicBar from "@/components/SubTopicBar";
 import ExtLink from "@/components/ExtLink";
@@ -45,29 +45,8 @@ export default function ArticleDashboard() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [kwIds, setKwIds] = useState<number[] | null>(null);
-  const [agg, setAgg] = useState({ articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 });
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   useEffect(() => { setUpdatedAt(new Date()); }, [f.ready]);
-
-  const fpct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
-
-  // Aggregat-Facts. WICHTIG: Autoren-Verteilung wird OHNE den Autor-Filter berechnet —
-  // sonst kollabiert die Transparenz-Anzeige bei gesetztem Filter zirkulär auf 100 %/0 %.
-  useEffect(() => {
-    if (!f.active.size) return;
-    const nn = (v: string) => (v === "all" ? null : v);
-    const base = { p_sources: f.activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo };
-    Promise.all([
-      supabase.rpc("publisher_stats_f", { ...base, p_author: nn(f.author) }),
-      f.author === "all" ? null : supabase.rpc("publisher_stats_f", base), // ungefiltert für au-Anteile
-    ]).then(([main, auFree]) => {
-      const a = { articles: 0, paywalled: 0, named: 0, au: 0, video: 0, werbung: 0, new7d: 0 };
-      for (const r of (main.data ?? []) as any[]) { a.articles += r.articles; a.paywalled += r.paywalled; a.video += r.video; a.werbung += r.werbung; a.new7d += r.new_7d; }
-      const auSrc = (auFree?.data ?? main.data ?? []) as any[];
-      for (const r of auSrc) { a.named += r.au_named; a.au += r.au_named + r.au_anon + r.au_none; }
-      setAgg(a);
-    });
-  }, [f.activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
 
   // Keyword → Artikel-IDs
   useEffect(() => {
@@ -164,30 +143,41 @@ export default function ArticleDashboard() {
         <TopicCards />
         <SubTopicBar />
 
-        <h2 className="section-h">Auf einen Blick <span className="count">{topicLbl || "Gesamtverteilung"}</span></h2>
-        <div className="donut-grid">
-          <Donut title="Themen-Mix" centerLabel={f.topicOpts.reduce((s, t) => s + t.n, 0).toLocaleString("de-DE")} centerSub="Artikel"
-            segments={f.topicOpts.slice(0, 8).map((t, i) => ({ label: t.label, value: t.n, color: PUB_COLORS[i % PUB_COLORS.length] }))} />
-          <Donut title="Bezahlschranke" centerLabel={`${fpct(agg.paywalled, agg.articles)}%`} centerSub="Paywall"
-            segments={[{ label: "Frei zugänglich", value: agg.articles - agg.paywalled, color: "var(--green)" }, { label: "Hinter Paywall", value: agg.paywalled, color: "var(--red)" }]} />
-          <Donut title="Autoren-Transparenz" centerLabel={`${fpct(agg.named, agg.au)}%`} centerSub="namentlich"
-            segments={[{ label: "Namentlich", value: agg.named, color: "var(--green)" }, { label: "Redaktion/Agentur · ohne", value: agg.au - agg.named, color: "var(--line-2)" }]} />
-        </div>
+        <PulseBar />
 
         <RateStats />
         <PublisherCompare />
         <TopicProfile />
 
-        {f.keywordOpts.length > 0 && (
-          <>
-            <h2 className="section-h">Keywords im Filter <span className="count">{topicLbl || "alle Themen"} · klick zum Filtern</span></h2>
-            <div className="kw-cloud">
-              {f.keywordOpts.map((k) => (
-                <button key={k.key} className={`kw-pill ${f.keyword === k.key ? "on" : ""}`} onClick={() => f.setKeyword(f.keyword === k.key ? "all" : k.key)}>{k.label} <span className="kw-n">{k.n}</span></button>
-              ))}
-            </div>
-          </>
-        )}
+        {f.keywordOpts.length > 0 && (() => {
+          // Echte Tag-Cloud: Schriftgröße proportional zur Häufigkeit (Wurzel-Skala dämpft
+          // Ausreißer), Gewicht/Deckkraft nach Rang. Relevanteste Begriffe stechen sofort heraus.
+          const kwMax = Math.max(...f.keywordOpts.map((k) => k.n));
+          const kwMin = Math.min(...f.keywordOpts.map((k) => k.n));
+          const sized = [...f.keywordOpts].sort((a, b) => b.n - a.n);
+          const scale = (n: number) => {
+            const t = kwMax === kwMin ? 1 : (Math.sqrt(n) - Math.sqrt(kwMin)) / (Math.sqrt(kwMax) - Math.sqrt(kwMin));
+            return { fs: 12 + t * 12, w: t > 0.55 ? 700 : t > 0.25 ? 600 : 500, op: 0.62 + t * 0.38 };
+          };
+          return (
+            <>
+              <h2 className="section-h">Keywords im Filter <span className="count">{topicLbl || "alle Themen"} · Größe = Häufigkeit · klick zum Filtern</span></h2>
+              <div className="kw-cloud kw-cloud-scaled">
+                {sized.map((k) => {
+                  const s = scale(k.n);
+                  const on = f.keyword === k.key;
+                  return (
+                    <button key={k.key} className={`kw-pill ${on ? "on" : ""}`}
+                      style={{ fontSize: on ? undefined : s.fs, fontWeight: s.w, opacity: on ? 1 : s.op }}
+                      onClick={() => f.setKeyword(on ? "all" : k.key)}>
+                      {k.label} <span className="kw-n">{k.n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
 
         <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
         <div className="data-fade-in" key={`${page}-${rows.length}-${f.topics.join(",")}-${f.subcats.join(",")}`}>
