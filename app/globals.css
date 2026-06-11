@@ -936,3 +936,6 @@ a.art-title:hover { color: var(--accent); text-decoration: underline; }
 
 /* Collapse-Toggle auf Mobile ausblenden (dort gibt es den Drawer) */
 @media (max-width: 860px) { .sb-collapse-btn { display: none; } }
+
+/* Noch nicht angereicherte Artikel: dezenter Pending-Status in der Titel-Spalte */
+.art-pending { color: var(--faint); font-style: italic; font-size: 12px; white-space: nowrap; }

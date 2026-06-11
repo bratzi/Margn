@@ -118,7 +118,8 @@ export default function ArticleDashboard() {
         ? (r.article_id
           ? <Link href={`/articles/${r.article_id}`} target="_blank" className="art-title" title={r.title}>{r.title}</Link>
           : <span className="art-title" title={r.title}>{r.title}</span>)
-        : <span className="faint">—</span> },
+        // Noch nicht angereichert: ehrlicher Status statt verwirrend leerer Zelle.
+        : <span className="art-pending" title="Erfasst, Metadaten werden beim nächsten Anreicherungs-Lauf nachgetragen">⏳ wird erfasst…</span> },
     { key: "outlet", label: "Quelle", width: 130, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></>,
       agg: (rs) => { const u = new Set(rs.map((r) => r.outlet)).size; return <span title="verschiedene Quellen auf dieser Seite">{u} Quellen</span>; } },
     { key: "ptype", label: "Typ", width: 100, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span>,
