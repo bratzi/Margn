@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
+import { fetchPagedSeq } from "@/lib/pgFetch";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
@@ -27,6 +28,7 @@ type Ctx = {
   keyword: string; setKeyword: (v: string) => void;
   lang: string; setLang: (v: string) => void;
   topicOpts: Opt[]; keywordOpts: Opt[]; subOpts: SubOpt[];
+  catTree: Map<string, SubOpt[]>;
   days: string[]; rangeIdx: { from: number; to: number }; setRangeIdx: (r: { from: number; to: number }) => void;
   rangeFrom: string | null; rangeTo: string | null;
   trfOpen: boolean; setTrfOpen: (b: boolean) => void;
@@ -48,8 +50,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [subcats, setSubcats] = useState<string[]>([]);
   const [subOpts, setSubOpts] = useState<SubOpt[]>([]);
   const [keyword, setKeyword] = useState("all");
-  // Topic wechseln leert die Sub-Rubriken-Auswahl (sie gehören zum vorigen Topic)
-  const toggleTopic = (t: string) => { setSubcats([]); setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]); };
+  // Unterthemen bleiben beim Topic-Wechsel erhalten — sie sind über die Filter-Pills
+  // jederzeit sichtbar und einzeln entfernbar.
+  const toggleTopic = (t: string) => setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]);
   const toggleSubcat = (c: string) => setSubcats((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c]);
   const [lang, setLang] = useState("all");
   const [topicOpts, setTopicOpts] = useState<Opt[]>([]);
@@ -120,16 +123,54 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       .then(({ data }) => setTopicOpts((data ?? []).map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n }))));
   }, [active, paywall, author, lang, rangeFrom, rangeTo]);
 
-  // Sub-Rubriken: nur sinnvoll bei genau EINEM gewählten Topic.
-  // Defensiv: existiert die RPC (noch) nicht oder liefert Fehler → leer (kein Crash, keine Anzeige).
+  // Unterthemen-Baum: verlagseigene Rubriken je kanonischem Topic, direkt aus den
+  // Junction-Tabellen (keine RPC nötig). Eine Query, clientseitig aggregiert.
+  const [catTree, setCatTree] = useState<Map<string, SubOpt[]>>(new Map());
   useEffect(() => {
-    if (!active.size || topics.length !== 1) { setSubOpts([]); return; }
-    supabase.rpc("subcategory_opts_f", { p_sources: [...active], p_topic: topics[0], p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
-      .then(({ data, error }) => {
-        if (error || !data) { setSubOpts([]); return; }
-        setSubOpts((data as any[]).map((r) => ({ key: r.subcategory, n: r.n, sources: r.sources })));
+    if (!active.size) { setCatTree(new Map()); return; }
+    let cancelled = false;
+    // Seitenweise laden — REST kappt bei 1000 Zeilen, die Junction-Tabelle ist größer.
+    fetchPagedSeq<any>((a, b) =>
+      supabase
+        .from("article_categories")
+        .select("categories!inner(name), articles!inner(topic, source_id, published_at)")
+        .in("articles.source_id", [...active])
+        .range(a, b),
+      15,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const agg = new Map<string, Map<string, { n: number; src: Set<number> }>>();
+        for (const r of data as any[]) {
+          const art = r.articles, cat = r.categories?.name;
+          if (!art || !cat) continue;
+          if (rangeFrom && (!art.published_at || art.published_at < rangeFrom)) continue;
+          if (rangeTo && (!art.published_at || art.published_at > rangeTo)) continue;
+          const topic = art.topic ?? "sonstiges";
+          if (!agg.has(topic)) agg.set(topic, new Map());
+          const m = agg.get(topic)!;
+          const e = m.get(cat) ?? { n: 0, src: new Set<number>() };
+          e.n++; e.src.add(art.source_id);
+          m.set(cat, e);
+        }
+        const tree = new Map<string, SubOpt[]>();
+        for (const [topic, m] of agg) {
+          const list = [...m.entries()]
+            .filter(([, v]) => v.n >= 2) // Einzel-Dossiers ausblenden (Rauschen)
+            .map(([name, v]) => ({ key: name, n: v.n, sources: v.src.size }))
+            .sort((a, b) => b.n - a.n)
+            .slice(0, 20);
+          if (list.length) tree.set(topic, list);
+        }
+        setCatTree(tree);
       });
-  }, [active, topics.join(","), paywall, author, lang, rangeFrom, rangeTo]);
+    return () => { cancelled = true; };
+  }, [active, rangeFrom, rangeTo]);
+
+  // SubTopicBar-Optionen: abgeleitet aus dem Baum (bei genau einem gewählten Topic)
+  useEffect(() => {
+    setSubOpts(topics.length === 1 ? (catTree.get(topics[0]) ?? []) : []);
+  }, [topics.join(","), catTree]);
 
   // dynamische Keyword-Optionen (voller Filtersatz)
   useEffect(() => {
@@ -145,7 +186,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const value: Ctx = {
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
-    topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts, subOpts,
+    topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts, subOpts, catTree,
     days, rangeIdx, setRangeIdx, rangeFrom, rangeTo, trfOpen, setTrfOpen, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;

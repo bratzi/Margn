@@ -7,7 +7,7 @@ import { FileText, External } from "@/components/icons";
 import { useFilters } from "@/components/FilterProvider";
 import FilterPills from "@/components/FilterPills";
 import PublisherCompare from "@/components/PublisherCompare";
-import TopicChart from "@/components/TopicChart";
+import TopicProfile from "@/components/TopicProfile";
 import RateStats from "@/components/RateStats";
 import TimeRangeFilter, { PUB_COLORS } from "@/components/TimeRangeFilter";
 import Donut from "@/components/Donut";
@@ -176,7 +176,7 @@ export default function ArticleDashboard() {
 
         <RateStats />
         <PublisherCompare />
-        <TopicChart />
+        <TopicProfile />
 
         {f.keywordOpts.length > 0 && (
           <>

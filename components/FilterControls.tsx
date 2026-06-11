@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useFilters } from "@/components/FilterProvider";
 
 const favicon = (base: string) => { try { return `https://www.google.com/s2/favicons?sz=64&domain=${new URL(base).host}`; } catch { return ""; } };
@@ -18,6 +19,10 @@ function Group({ label, value, opts, on }: { label: string; value: string; opts:
 
 export default function FilterControls() {
   const f = useFilters();
+  // Welche Hauptthemen sind aufgeklappt (zeigen ihre Unterthemen)?
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExp = (t: string) =>
+    setExpanded((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; });
   return (
     <div className="filters">
       <div className="fgroup">
@@ -62,10 +67,43 @@ export default function FilterControls() {
           <button className={`tg ${f.topics.length === 0 ? "on" : ""}`} onClick={() => f.setTopics([])}>Alle Themen</button>
           {f.topicOpts.map((t) => {
             const on = f.topics.includes(t.key);
+            const subs = f.catTree.get(t.key) ?? [];
+            const exp = expanded.has(t.key);
+            const selSubs = subs.filter((s) => f.subcats.includes(s.key)).length;
             return (
-              <button key={t.key} className={`tg ${on ? "on" : ""}`} onClick={() => f.toggleTopic(t.key)}>
-                <span className="tg-check">{on ? "✓" : ""}</span><span>{t.label}</span><span className="tg-n">{t.n}</span>
-              </button>
+              <div key={t.key} className="tg-block">
+                <div className="tg-row">
+                  <button className={`tg ${on ? "on" : ""}`} onClick={() => f.toggleTopic(t.key)}>
+                    <span className="tg-check">{on ? "✓" : ""}</span><span>{t.label}</span><span className="tg-n">{t.n}</span>
+                  </button>
+                  {subs.length > 0 && (
+                    <button
+                      className={`tg-exp ${exp ? "open" : ""} ${selSubs ? "has-sel" : ""}`}
+                      onClick={() => toggleExp(t.key)}
+                      title={`${subs.length} Unterthemen${selSubs ? ` · ${selSubs} aktiv` : ""}`}
+                      aria-expanded={exp}
+                    >
+                      {selSubs > 0 && <i className="tg-exp-n">{selSubs}</i>}
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                    </button>
+                  )}
+                </div>
+                {exp && (
+                  <div className="tg-subs">
+                    {subs.map((s) => {
+                      const son = f.subcats.includes(s.key);
+                      return (
+                        <button key={s.key} className={`tg-sub ${son ? "on" : ""}`} onClick={() => f.toggleSubcat(s.key)}
+                          title={`${s.key} · ${s.n} Artikel · ${s.sources} ${s.sources === 1 ? "Quelle" : "Quellen"}`}>
+                          <span className="tg-sub-arm">↳</span>
+                          <span className="tg-sub-name">{s.key}</span>
+                          <span className="tg-n">{s.n}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
