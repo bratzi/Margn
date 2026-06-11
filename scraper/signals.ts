@@ -4,19 +4,41 @@ import { sb } from "./lib";
 const AD_HOSTS = /doubleclick|googlesyndication|adservice|adnxs|criteo|taboola|outbrain/i;
 const COMMENT_MARKERS = ["disqus", "coral", "fb-comments", "commento", "kommentar", "comment-section"];
 
+// Paywall-Erkennung: DOM-Elemente die auf gesperrten Inhalt hinweisen.
+// Playwright rendert die Seite vollständig → zuverlässiger als statisches HTML.
+const PAYWALL_DOM = [
+  // FAZ: Paywall-Wrapper + Piano-Meter
+  "faz-paywall", "faz-plus", "js-paywall", "SubscriptionWall",
+  // Spiegel: Plus-Artikel
+  "spiegel-plus", "paid-content", "sp-subscription",
+  // Le Monde: Abonnenten-Schranke
+  "article__state--premium", "paywall", "lmd-premium",
+  // Allgemein
+  "piano-", "tinypass", "piano-id", "piano-offer",
+  "metered-wall", "subscriber-only", "locked-content",
+  "abo-schranke", "plus-artikel", "premium-overlay",
+  "premium-content", "premium-article",
+];
+
 type Ctx = { url: string; html: string; jsonLd: any[]; adRequests: number };
 
 // === Jedes Feature = ein Eintrag. Neues Signal hinzufügen = eine Zeile ergänzen. ===
 const collectors: Record<string, (c: Ctx) => unknown> = {
   has_comments: (c) => COMMENT_MARKERS.some((m) => c.html.includes(m)),
   ad_signal: (c) => c.adRequests,
-  paywalled: (c) =>
-    c.jsonLd.some((d) => d.isAccessibleForFree === false || d.isAccessibleForFree === "False") ||
-    /paywall|premium-overlay|piano-|plus-artikel|abo-schranke/.test(c.html),
+  paywalled: (c) => {
+    // JSON-LD hat Vorrang wenn vorhanden
+    const iaff = c.jsonLd.map((d: any) => d.isAccessibleForFree).filter((v: any) => v !== undefined && v !== null);
+    const notFree = (v: any) => v === false || v === "False" || v === "false";
+    const isFree = (v: any) => v === true || v === "True" || v === "true";
+    if (iaff.length > 0) return iaff.some(notFree) && !iaff.some(isFree);
+    // DOM-basiert: präzise Pattern die in gerenderter Seite auf Paywall-Schranken hindeuten
+    return PAYWALL_DOM.some((p) => c.html.includes(p.toLowerCase()));
+  },
   is_liveblog: (c) =>
-    c.jsonLd.some((d) => d["@type"] === "LiveBlogPosting") ||
+    c.jsonLd.some((d: any) => d["@type"] === "LiveBlogPosting") ||
     /liveblog|live-blog|live-?ticker/.test(c.html),
-  body_chars: (c) => c.html.replace(/<[^>]+>/g, "").length, // Basis für Liveblog-Wachstum
+  body_chars: (c) => c.html.replace(/<[^>]+>/g, "").length,
 };
 
 async function gather(url: string): Promise<Ctx> {
@@ -64,6 +86,10 @@ async function run() {
         }
       }
       await sb.from("article_versions").update({ signals }).eq("id", (v as any).id);
+      // Paywall-Signal zurück in articles spiegeln (überschreibt ggf. fehlerhafte statische Erkennung)
+      if (typeof signals.paywalled === "boolean") {
+        await sb.from("articles").update({ paywalled: signals.paywalled }).eq("url", url);
+      }
       console.log("SIGNALS:", url, signals);
     } catch (e) {
       console.error("FEHLER:", url, (e as Error).message);

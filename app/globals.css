@@ -195,17 +195,20 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .rate-pulse { animation: rate-pulse 2.4s ease-in-out infinite; }
 .rate-dot { transition: r .15s; }
 .rate-scroll:hover .rate-dot { r: 5; }
-/* Cursor-Tooltip */
-.rate-cursor-tip { position: absolute; top: 8px; transform: translateX(-50%); pointer-events: none; z-index: 10;
-  background: var(--ink); color: var(--surface); font-size: 11.5px; border-radius: 7px;
-  padding: 7px 10px; min-width: 120px; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+/* Cursor-Tooltip — kompakt, semi-transparent */
+.rate-cursor-tip { position: absolute; top: 6px; transform: translateX(-50%); pointer-events: none; z-index: 10;
+  background: color-mix(in srgb, var(--ink) 82%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--surface); font-size: 11px; border-radius: 6px;
+  padding: 5px 9px; min-width: 90px; max-width: 160px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.15);
   white-space: nowrap; }
-.rct-label { font-weight: 700; margin-bottom: 5px; color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
-.rct-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; margin-bottom: 3px; }
-.rct-row i { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.rct-row span { flex: 1; }
-.rct-row b { font-variant-numeric: tabular-nums; }
-.rct-total { border-top: 1px solid rgba(255,255,255,.15); margin-top: 4px; padding-top: 4px; font-size: 11px; color: rgba(255,255,255,.7); }
+.rct-label { font-weight: 600; margin-bottom: 4px; color: rgba(255,255,255,.5); font-size: 9.5px; text-transform: uppercase; letter-spacing: .06em; }
+.rct-row { display: flex; align-items: center; gap: 5px; font-size: 11px; margin-bottom: 2px; }
+.rct-row i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.rct-row span { flex: 1; font-size: 10.5px; opacity: .8; }
+.rct-row b { font-variant-numeric: tabular-nums; font-size: 11px; }
+.rct-total { border-top: 1px solid rgba(255,255,255,.12); margin-top: 3px; padding-top: 3px; font-size: 10px; color: rgba(255,255,255,.55); }
 /* X-Achse scrollt mit dem Container */
 .rate-axis-wrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .rate-axis-wrap::-webkit-scrollbar { display: none; }

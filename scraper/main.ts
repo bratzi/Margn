@@ -687,13 +687,22 @@ async function analyzeBacklog() {
 async function enrichArticles(sources: Source[]) {
   const srcById = new Map(sources.map((s) => [s.id, s]));
 
-  // Artikel ohne Titel laden (balanciert über Quellen)
+  // Artikel ohne Titel ODER ohne Veröffentlichungsdatum ODER ohne Wortanzahl laden (balanciert).
   const perSource = Math.ceil(MAX_PAGES / sources.length);
   const toEnrich: { id: number; url: string; source_id: number }[] = [];
   for (const src of sources) {
-    const { data } = await sb.from("articles").select("id,url,source_id")
-      .eq("source_id", src.id).is("title", null).limit(perSource);
-    toEnrich.push(...((data ?? []) as { id: number; url: string; source_id: number }[]));
+    // Prio 1: kein Titel (komplette Lücke)
+    const { data: noTitle } = await sb.from("articles").select("id,url,source_id")
+      .eq("source_id", src.id).is("title", null).limit(Math.ceil(perSource * 0.6));
+    toEnrich.push(...((noTitle ?? []) as any[]));
+    // Prio 2: Titel vorhanden, aber Veröffentlichungsdatum fehlt
+    const missing = perSource - (noTitle?.length ?? 0);
+    if (missing > 0) {
+      const { data: noDate } = await sb.from("articles").select("id,url,source_id")
+        .eq("source_id", src.id).not("title", "is", null).is("published_at", null).limit(missing);
+      const seen = new Set(toEnrich.map((r) => r.id));
+      for (const r of (noDate ?? []) as any[]) { if (!seen.has(r.id)) toEnrich.push(r); }
+    }
   }
   console.log(`Zu bereichern: ${toEnrich.length} Artikel (max ${perSource}/Quelle)`);
   if (!toEnrich.length) { console.log("Alle Artikel haben bereits Metadaten."); return; }
