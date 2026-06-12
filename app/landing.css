@@ -6,7 +6,7 @@
 
 .mg {
   /* Palette — Tinte auf dunklem Papier */
-  --mg-bg: #0a0b0f;
+  --mg-bg: #0a0b0f; 
   --mg-bg-2: #0d0f14;
   --mg-panel: #11131a;
   --mg-panel-2: #161922;
