@@ -17,6 +17,8 @@ export default function FilterPills() {
   else if (f.status === "rescanned") pills.push({ id: "scan", label: "🔁 Wiederholt gescannt", on: () => f.setStatus("all") });
   if (f.atype !== "all") { const AT: Record<string, string> = { artikel: "Artikel", paywall: "Paywall-Seite", video: "Video", werbung: "Werbung", hub: "Hub", blog: "Timeline", timeline: "Timeline" }; pills.push({ id: "at", label: AT[f.atype] ?? f.atype, on: () => f.setAtype("all") }); }
   if (f.author !== "all") pills.push({ id: "au", label: f.author === "named" ? "Namentlich" : f.author === "anonymous" ? "Anonym" : "Ohne Autor", on: () => f.setAuthor("all") });
+  if (f.changed !== "all") pills.push({ id: "ch", label: f.changed === "yes" ? "✏️ Nachträglich geändert" : "Unverändert", on: () => f.setChanged("all") });
+  if (f.depth !== "all") pills.push({ id: "dp", label: f.depth === "kurz" ? "📄 < 300 Wörter" : f.depth === "mittel" ? "📄 300–900 Wörter" : "📄 > 900 Wörter", on: () => f.setDepth("all") });
   for (const t of f.topics) pills.push({ id: `tp-${t}`, label: `📁 ${topicLabel(t)}`, on: () => f.toggleTopic(t) });
   // Sub-Rubrik-Labels aus dem catTree nachschlagen (Fallback: raw key lesbar machen)
   const subLabel = new Map<string, string>();

@@ -23,8 +23,20 @@ export default function FilterControls() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExp = (t: string) =>
     setExpanded((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  // Sind überhaupt Filter gesetzt? (steuert den globalen Reset-Button)
+  const anyActive =
+    f.activeArr.length !== f.sources.length || f.status !== "all" || f.paywall !== "all" ||
+    f.author !== "all" || f.atype !== "all" || f.topics.length > 0 || f.subcats.length > 0 ||
+    f.keyword !== "all" || f.lang !== "all" || f.changed !== "all" || f.depth !== "all";
+
   return (
     <div className="filters">
+      {anyActive && (
+        <button className="freset-all" onClick={f.resetAll} title="Alle Filter auf Ausgangszustand">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>
+          Alle Filter zurücksetzen
+        </button>
+      )}
       <div className="fgroup">
         <div className="fglabel">Publizisten
           <span className="fg-actions"><button onClick={() => f.setAll(true)}>alle</button><button onClick={() => f.setAll(false)}>keine</button></span>
@@ -47,6 +59,9 @@ export default function FilterControls() {
       <Group label="Erfassung" value={f.status} on={f.setStatus} opts={[["all", "Alle"], ["new", "Neu"], ["rescanned", "Wiederholt"]]} />
       <Group label="Bezahlschranke" value={f.paywall} on={f.setPaywall} opts={[["all", "Alle"], ["no", "Frei"], ["yes", "Paywall"]]} />
       <Group label="Autor" value={f.author} on={f.setAuthor} opts={[["all", "Alle"], ["named", "Namentl."], ["anonymous", "Anonym"], ["none", "Ohne"]]} />
+      {/* Stille Änderungen: das Alleinstellungsmerkmal des Observatoriums als Filter */}
+      <Group label="Nachträgliche Änderungen" value={f.changed} on={f.setChanged} opts={[["all", "Alle"], ["yes", "Geändert"], ["no", "Unverändert"]]} />
+      <Group label="Artikel-Tiefe" value={f.depth} on={f.setDepth} opts={[["all", "Alle"], ["kurz", "< 300 W."], ["mittel", "300–900"], ["lang", "> 900 W."]]} />
 
       <div className="fgroup">
         <div className="fglabel">Seitentyp</div>

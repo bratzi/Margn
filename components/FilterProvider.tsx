@@ -50,6 +50,12 @@ type Ctx = {
   subcats: string[]; toggleSubcat: (c: string) => void;
   keyword: string; setKeyword: (v: string) => void;
   lang: string; setLang: (v: string) => void;
+  // Stille Änderungen (revision_count) — Kernfeature des Observatoriums
+  changed: string; setChanged: (v: string) => void;
+  // Artikel-Tiefe nach Wortzahl (kurz < 300, mittel 300–900, lang > 900)
+  depth: string; setDepth: (v: string) => void;
+  // Alle Filter auf Ausgangszustand
+  resetAll: () => void;
   topicOpts: Opt[]; keywordOpts: Opt[]; subOpts: SubOpt[];
   catTree: Map<string, SubOpt[]>;
   days: string[]; rangeIdx: { from: number; to: number }; setRangeIdx: (r: { from: number; to: number }) => void;
@@ -83,6 +89,8 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const toggleTopic = (t: string) => setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]);
   const toggleSubcat = (c: string) => setSubcats((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c]);
   const [lang, setLang] = useState("all");
+  const [changed, setChanged] = useState("all");
+  const [depth, setDepth] = useState("all");
   const [topicOpts, setTopicOpts] = useState<Opt[]>([]);
   const [keywordOpts, setKeywordOpts] = useState<Opt[]>([]);
   const [ready, setReady] = useState(false);
@@ -117,6 +125,8 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (Array.isArray(f.topics)) setTopics(f.topics); else if (f.topic && f.topic !== "all") setTopics([f.topic]);
       if (f.keyword) setKeyword(f.keyword);
       if (f.lang) setLang(f.lang);
+      if (f.changed) setChanged(f.changed);
+      if (f.depth) setDepth(f.depth);
       if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
       if (f.rangeIdx && typeof f.rangeIdx.from === "number") setRangeIdx(f.rangeIdx);
       if (Array.isArray(f.activeIds)) savedActiveRef.current = f.activeIds;
@@ -139,10 +149,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!sources.length) return;
     try {
       localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, trfOpen, rangeIdx,
+        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx,
       }));
     } catch {}
-  }, [active, status, paywall, atype, author, topics, keyword, lang, trfOpen, rangeIdx, sources.length]);
+  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, sources.length]);
 
   const nn = (v: string) => (v === "all" ? null : v);
 
@@ -211,10 +221,21 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // Manuelle Range-Änderung hebt einen aktiven Pinpoint auf (keine zwei Zeitfilter gleichzeitig).
   const setRangeIdxClearPin = (r: { from: number; to: number }) => { setPinpoint(null); setRangeIdx(r); };
 
+  // Alle Filter auf Ausgangszustand (Quellen wieder alle aktiv).
+  const resetAll = () => {
+    setStatus("all"); setPaywall("all"); setAtype("all"); setAuthor("all");
+    setTopics([]); setSubcats([]); setKeyword("all"); setLang("all");
+    setChanged("all"); setDepth("all"); setPinpoint(null);
+    setRangeIdx({ from: 0, to: days.length - 1 });
+    setActive(new Set(sources.map((s) => s.id)));
+  };
+
   const value: Ctx = {
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
-    topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang, topicOpts, keywordOpts, subOpts, catTree,
+    topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang,
+    changed, setChanged, depth, setDepth, resetAll,
+    topicOpts, keywordOpts, subOpts, catTree,
     days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
