@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS } from "@/components/TimeRangeFilter";
@@ -12,11 +12,12 @@ const VW = 1000, VH = 220;
 const PAD_L = 44, PAD_B = 24, PAD_T = 18, PAD_R = 12;
 const CH = VH - PAD_T - PAD_B;
 
+// ISO-Kalenderwoche aus LOKALEN Datumskomponenten (konsistent mit der lokalen Bucketing-Zeit).
 function isoWeek(d: Date): number {
-  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const day = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - day + 3);
-  const first = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
-  return 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = (t.getDay() + 6) % 7; t.setDate(t.getDate() - day + 3);
+  const first = new Date(t.getFullYear(), 0, 4);
+  return 1 + Math.round(((t.getTime() - first.getTime()) / 86400000 - 3 + ((first.getDay() + 6) % 7)) / 7);
 }
 
 export default function RateStats() {
@@ -38,18 +39,29 @@ export default function RateStats() {
   const panRef = useRef<{ startX: number; startScroll: number } | null>(null);
   const didPanRef = useRef(false); // unterscheidet echten Klick von Pan-Geste
   const [panning, setPanning] = useState(false);
+  // Aktuelle Wheel-Logik (wird jeden Render aktualisiert); der NATIVE Listener ruft sie auf.
+  const wheelFnRef = useRef<(e: WheelEvent) => void>(() => {});
 
+  // Stabiler nativer wheel-Handler (delegiert an die aktuelle Logik im Ref).
+  const nativeWheelRef = useRef((e: WheelEvent) => wheelFnRef.current(e));
   // Container-Breite via Callback-Ref messen (Container existiert erst nach Daten-Load).
-  const measure = (el: HTMLDivElement | null) => {
+  // Zusätzlich: NATIVER wheel-Listener mit { passive: false }, damit preventDefault greift und
+  // das Mausrad-Zoom NICHT die Seite mitscrollt (React onWheel ist passiv → preventDefault wirkungslos).
+  const measure = useCallback((el: HTMLDivElement | null) => {
+    if (scrollRef.current) scrollRef.current.removeEventListener("wheel", nativeWheelRef.current);
     scrollRef.current = el;
     roRef.current?.disconnect();
     if (!el) return;
+    el.addEventListener("wheel", nativeWheelRef.current, { passive: false });
     const ro = new ResizeObserver(() => { const w = el.clientWidth; if (w > 0) setContainerW(w); });
     ro.observe(el);
     roRef.current = ro;
     setContainerW(el.clientWidth);
-  };
-  useEffect(() => () => roRef.current?.disconnect(), []);
+  }, []);
+  useEffect(() => () => {
+    roRef.current?.disconnect();
+    scrollRef.current?.removeEventListener("wheel", nativeWheelRef.current);
+  }, []);
 
   const fromIso = f.days[f.rangeIdx.from] + "T00:00:00Z";
   const toIso = f.days[f.rangeIdx.to] + "T23:59:59Z";
@@ -75,12 +87,14 @@ export default function RateStats() {
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
+  // Bucketing in LOKALER Zeit des Endnutzers (nicht UTC) — sonst erscheint ein um 06:00
+  // (Berlin) publizierter Artikel fälschlich im 04:00-Bucket (UTC-Versatz).
   const truncTo = (iso: string, u: Unit) => {
     const d = new Date(iso);
-    if (u === "minute") d.setUTCSeconds(0, 0);
-    else if (u === "hour") d.setUTCMinutes(0, 0, 0);
-    else if (u === "day") d.setUTCHours(0, 0, 0, 0);
-    else { d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); }
+    if (u === "minute") d.setSeconds(0, 0);
+    else if (u === "hour") d.setMinutes(0, 0, 0);
+    else if (u === "day") d.setHours(0, 0, 0, 0);
+    else { d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); }
     return d;
   };
 
@@ -93,10 +107,11 @@ export default function RateStats() {
     let g = 0;
     while (cur <= end && g++ < cap) {
       out.push(cur.toISOString());
-      if (unit === "minute") cur.setUTCMinutes(cur.getUTCMinutes() + 1);
-      else if (unit === "hour") cur.setUTCHours(cur.getUTCHours() + 1);
-      else if (unit === "day") cur.setUTCDate(cur.getUTCDate() + 1);
-      else cur.setUTCDate(cur.getUTCDate() + 7);
+      // Schrittweite in lokaler Zeit (DST-sicher: ein „Tag" kann 23/25 h haben)
+      if (unit === "minute") cur.setMinutes(cur.getMinutes() + 1);
+      else if (unit === "hour") cur.setHours(cur.getHours() + 1);
+      else if (unit === "day") cur.setDate(cur.getDate() + 1);
+      else cur.setDate(cur.getDate() + 7);
     }
     return out;
   }, [fromIso, toIso, unit]);
@@ -159,33 +174,34 @@ export default function RateStats() {
     return `${line} L${last.toFixed(1)},${base.toFixed(1)} L${PAD_L.toFixed(1)},${base.toFixed(1)} Z`;
   }
 
-  // Tagestrennlinien im Stunden- UND Minuten-Modus (Mitternacht markiert den Tageswechsel).
+  // Tagestrennlinien im Stunden- UND Minuten-Modus (Mitternacht LOKAL markiert den Tageswechsel).
   const dayDividers = useMemo(() => {
     if (unit !== "hour" && unit !== "minute") return [];
     const out: { idx: number; label: string }[] = [];
     for (let i = 1; i < buckets.length; i++) {
       const d = new Date(buckets[i]);
-      if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) {
-        out.push({ idx: i, label: d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "UTC" }) });
+      if (d.getHours() === 0 && d.getMinutes() === 0) {
+        out.push({ idx: i, label: d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }) });
       }
     }
     return out;
   }, [buckets, unit]);
 
+  // Alle Labels in LOKALER Zeit des Endnutzers.
   const fmtAxis = (iso: string) => {
     const d = new Date(iso);
-    if (unit === "minute") return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
-    if (unit === "hour") return String(d.getUTCHours()).padStart(2, "0") + ":00";
+    if (unit === "minute") return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    if (unit === "hour") return String(d.getHours()).padStart(2, "0") + ":00";
     if (unit === "week") return "KW " + isoWeek(d);
-    return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
+    return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
   };
   // Volles Datum+Zeit für den Dot-Tooltip
   const fmtFull = (iso: string) => {
     const d = new Date(iso);
-    if (unit === "minute") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " Uhr";
-    if (unit === "hour") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " Uhr";
-    if (unit === "week") return "KW " + isoWeek(d) + " · " + d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
-    return d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
+    if (unit === "minute") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
+    if (unit === "hour") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
+    if (unit === "week") return "KW " + isoWeek(d) + " · " + d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" });
+    return d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "2-digit" });
   };
 
   const unitLabel = unit === "minute" ? "Minuten" : unit === "hour" ? "Stunden" : unit === "day" ? "Tage" : "Kalenderwochen";
@@ -270,16 +286,19 @@ export default function RateStats() {
     });
   }
 
-  function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
-    if (!scrollRef.current) return;
-    e.preventDefault();
+  // Wheel-Logik jeden Render in den Ref schreiben (frischer Closure-State).
+  // Der native Listener (passive:false, in measure attached) ruft diese Funktion auf.
+  wheelFnRef.current = (e: WheelEvent) => {
     const el = scrollRef.current;
+    if (!el) return;
+    e.preventDefault();   // verhindert das Mitscrollen der Seite
+    e.stopPropagation();
     const rect = el.getBoundingClientRect();
     const pointerInContainer = e.clientX - rect.left;
     const ratio = (el.scrollLeft + pointerInContainer) / totalSvgW;
     applyZoom(e.deltaY < 0 ? 1 : -1, ratio, pointerInContainer);
     setHoverDot(null);
-  }
+  };
 
   // Click-and-Drag verschiebt die X-Achse (Pan). Nur sinnvoll wenn gescrollt werden kann.
   function handleDown(e: React.MouseEvent<SVGSVGElement>) {
@@ -352,7 +371,6 @@ export default function RateStats() {
                 height={VH}
                 className="rate-svg-inner data-fade-in"
                 style={{ display: "block", touchAction: "pan-x" }}
-                onWheel={handleWheel}
                 onMouseDown={handleDown}
                 onMouseMove={handleMove}
                 onMouseUp={handleUp}
