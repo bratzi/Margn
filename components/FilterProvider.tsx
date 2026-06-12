@@ -202,6 +202,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // für den aktuellen Datenumfang ist der Client-Corpus die konsistenteste Lösung.
   const [corpus, setCorpus] = useState<CorpusRow[]>([]);
   const [corpusReady, setCorpusReady] = useState(false);
+  const [corpusGen, setCorpusGen] = useState(0); // erhöht = Neuladen
   useEffect(() => {
     if (!sources.length) return;
     let cancelled = false;
@@ -212,7 +213,13 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       60000,
     ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); } });
     return () => { cancelled = true; };
-  }, [sources.length]);
+  }, [sources.length, corpusGen]);
+  // Der Scraper schreibt alle 2 h; ein 10-Minuten-Refresh hält die Zählungen aktuell,
+  // ohne bei jeder Filteränderung neu zu laden (Filtern bleibt rein clientseitig).
+  useEffect(() => {
+    const t = setInterval(() => setCorpusGen((g) => g + 1), 10 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // Keyword → Artikel-IDs (zentral, damit Tabelle UND Analytics dieselbe Menge nutzen)
   const [kwIds, setKwIds] = useState<number[] | null>(null);

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import LandingStats from "@/components/LandingStats";
 import LandingBg from "@/components/LandingBg";
+import LandingSources from "@/components/LandingSources";
 
 export const metadata = {
   title: "margn — Was Nachrichtenseiten ändern, nachdem sie publiziert haben",
@@ -8,52 +9,45 @@ export const metadata = {
     "Offenes Medienobservatorium: erfasst Artikel aus DE & FR stündlich, versioniert sie und macht stille Änderungen, Agenda-Profile und Paywall-Strategien sichtbar.",
 };
 
+// Editoriale Feature-Liste — nummeriert statt Icon-Kacheln (ruhige, typografische Rhythmik).
 const FEATURES = [
   {
-    icon: "M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z",
+    n: "01",
     title: "Silent Edits",
     text: "Überschriften und Texte werden nach der Veröffentlichung still geändert. margn versioniert jeden Scan und zeigt Wort für Wort, was sich geändert hat — rot entfernt, grün neu.",
   },
   {
-    icon: "M3 3v18h18M7 16l4-6 4 3 5-8",
+    n: "02",
     title: "Themen-DNA",
     text: "Agenda-Heatmap nach dem Vorbild der Agenda-Setting-Forschung: Welcher Publizist setzt wie stark auf welches Thema — und wer liegt 2× über dem Marktschnitt?",
   },
   {
-    icon: "M6 11V8a6 6 0 0 1 12 0v3M5 11h14v10H5z",
+    n: "03",
     title: "Paywall-Monitoring",
     text: "Welche Inhalte gelten als zahlungswürdig? Paywall-Quoten je Thema und Publizist, im Zeitvergleich mit der Vorperiode — in Prozentpunkten, ehrlich gerechnet.",
   },
   {
-    icon: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9zM9 12h6M9 16h4",
+    n: "04",
     title: "Publizisten-Benchmark",
     text: "Artikel-Volumen, Publikations-Tempo, Autoren-Transparenz: jede Quelle im direkten Vergleich, mit expliziter Vergleichsbasis statt schöner, aber leerer Zahlen.",
   },
   {
-    icon: "M12 8v4l3 3M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z",
+    n: "05",
     title: "Zeitverlauf bis zur Minute",
     text: "Publikationsrhythmen von Kalenderwochen bis auf Minuten zoombar. Ein Klick auf einen Datenpunkt filtert die Artikelliste exakt auf dieses Zeitfenster.",
   },
   {
-    icon: "M9 5v8a4 4 0 0 0 4 4h7M16 13l4 4-4 4",
+    n: "06",
     title: "Unterthemen-Radar",
-    text: "Verlagseigene Rubriken wie Politik · Ausland oder Sport · Fußball, quellenübergreifend aus den URL-Strukturen abgeleitet und als Filter nutzbar.",
+    text: "Verlagseigene Rubriken wie Politik · Ausland oder Sport · Fußball, quellenübergreifend und mehrsprachig aus den URL-Strukturen abgeleitet und als Filter nutzbar.",
   },
 ];
 
 const STEPS = [
-  { n: "01", title: "Erfassen", text: "Sechs Quellen aus Deutschland und Frankreich werden stündlich gelesen — schonend, per RSS und freundlicher Crawl-Rate." },
+  { n: "01", title: "Erfassen", text: "Quellen aus Deutschland und Frankreich werden stündlich gelesen — schonend, per RSS und freundlicher Crawl-Rate." },
   { n: "02", title: "Versionieren", text: "Jeder Artikel wird bei jedem Scan verglichen. Änderungen an Titel und Text werden als Revision festgehalten — mit Zeitstempel." },
   { n: "03", title: "Auswerten", text: "Themen, Paywall, Autoren, Tiefe: alle Dimensionen werden publizistenübergreifend normalisiert und im Dashboard vergleichbar gemacht." },
 ];
-
-function Icon({ d }: { d: string }) {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={d} />
-    </svg>
-  );
-}
 
 export default function Landing() {
   return (
@@ -68,6 +62,7 @@ export default function Landing() {
           </span>
           <nav className="ld-nav-links">
             <a href="#funktionen">Funktionen</a>
+            <a href="#abdeckung">Abdeckung</a>
             <a href="#methodik">Methodik</a>
             <a href="#transparenz">Transparenz</a>
           </nav>
@@ -75,16 +70,16 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="ld-hero">
+      {/* Hero — dunkles Statement-Panel mit Serif-Display */}
+      <section className="ld-hero ld-dark">
         <LandingBg variant="network" />
-        <p className="ld-overline">Offenes Medienobservatorium · DE &amp; FR</p>
+        <p className="ld-overline">Offenes Medienobservatorium · Deutschland &amp; Frankreich</p>
         <h1 className="ld-h1">
           Was Nachrichtenseiten ändern,<br />
           <em>nachdem</em> sie publiziert haben.
         </h1>
         <p className="ld-sub">
-          margn beobachtet sechs große Nachrichtenquellen, versioniert jeden Artikel
+          margn beobachtet große Nachrichtenquellen, versioniert jeden Artikel
           und macht sichtbar, was zwischen den Zeilen passiert: stille Überschriften-Änderungen,
           Agenda-Profile, Paywall-Strategien und Publikationsrhythmen.
         </p>
@@ -92,17 +87,21 @@ export default function Landing() {
           <Link href="/articles" className="ld-cta">Dashboard öffnen</Link>
           <a href="#funktionen" className="ld-cta-ghost">Funktionen ansehen</a>
         </div>
+      </section>
+
+      {/* Kennzahlen-Band — Vertrauen über echte Zahlen */}
+      <section className="ld-band">
         <LandingStats />
       </section>
 
-      {/* Funktionen */}
+      {/* Funktionen — editoriale, nummerierte Liste */}
       <section className="ld-section" id="funktionen">
         <p className="ld-overline">Funktionen</p>
         <h2 className="ld-h2">Mehrwerte, die man auf den ersten Blick nicht sieht</h2>
         <div className="ld-grid">
           {FEATURES.map((ftr) => (
             <div key={ftr.title} className="ld-card">
-              <span className="ld-card-icon"><Icon d={ftr.icon} /></span>
+              <span className="ld-card-n">{ftr.n}</span>
               <h3>{ftr.title}</h3>
               <p>{ftr.text}</p>
             </div>
@@ -110,9 +109,19 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Abdeckung — Quellen & Länder (analog „Expansion"-Sektion) */}
+      <section className="ld-section ld-section-alt" id="abdeckung">
+        <p className="ld-overline">Abdeckung</p>
+        <h2 className="ld-h2">Zwei Medienmärkte, eine Vergleichsbasis</h2>
+        <p className="ld-lede">
+          Sprachübergreifende Beobachtung: deutsche und französische Leitmedien werden mit derselben
+          Methodik erfasst und normalisiert — Themen, Rubriken und Kennzahlen sind direkt vergleichbar.
+        </p>
+        <LandingSources />
+      </section>
+
       {/* Methodik */}
-      <section className="ld-section ld-section-alt" id="methodik">
-        <LandingBg variant="flow" />
+      <section className="ld-section" id="methodik">
         <p className="ld-overline">Methodik</p>
         <h2 className="ld-h2">Drei Schritte, stündlich wiederholt</h2>
         <div className="ld-steps">
@@ -127,7 +136,7 @@ export default function Landing() {
       </section>
 
       {/* Transparenz */}
-      <section className="ld-section" id="transparenz">
+      <section className="ld-section ld-section-alt" id="transparenz">
         <p className="ld-overline">Transparenz</p>
         <h2 className="ld-h2">Nur Metadaten. Volltexte bleiben bei den Verlagen.</h2>
         <div className="ld-trust">
@@ -146,10 +155,10 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Abschluss-CTA */}
-      <section className="ld-final">
-        <LandingBg variant="network" />
-        <h2 className="ld-h2">Selbst nachsehen, was sich geändert hat.</h2>
+      {/* Abschluss-CTA — dunkles Serif-Statement wie der Hero */}
+      <section className="ld-final ld-dark">
+        <LandingBg variant="flow" />
+        <h2 className="ld-h2 ld-h2-final">Selbst nachsehen,<br /><em>was</em> sich geändert hat.</h2>
         <Link href="/articles" className="ld-cta">Zum Dashboard</Link>
       </section>
 

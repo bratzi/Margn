@@ -1,12 +1,14 @@
 import "./globals.css";
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Fraunces } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
 import FilterProvider from "@/components/FilterProvider";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-jb", display: "swap" });
+// Editoriale Display-Serif für die Landingpage (Tres-Mares-artige Statement-Typo)
+const fraunces = Fraunces({ subsets: ["latin"], variable: "--font-display", display: "swap", weight: ["300", "400", "600"], style: ["normal", "italic"] });
 
 export const metadata: Metadata = {
   title: "margn — Medienobservatorium",
@@ -17,7 +19,7 @@ const themeInit = `(function(){try{var t=localStorage.getItem('margn-theme');if(
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="de" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="de" className={`${inter.variable} ${mono.variable} ${fraunces.variable}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: themeInit }} /></head>
       <body>
         <Suspense>
