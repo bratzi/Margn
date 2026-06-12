@@ -246,7 +246,9 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .rct-row b { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--ink); }
 .rct-total { border-top: 1px solid var(--line); margin-top: 3px; padding-top: 3px; font-size: 10px; color: var(--faint); }
 /* Per-Dot-Tooltip: schwebt direkt über dem Punkt */
-.rate-dot-tip { top: auto; transform: translate(-50%, calc(-100% - 12px)); }
+.rate-dot-tip { transform: translate(-50%, calc(-100% - 12px)); }
+/* Punkt zu weit oben → Tooltip unterhalb statt oberhalb (bleibt sichtbar) */
+.rate-dot-tip.below { transform: translate(-50%, 14px); }
 /* X-Achse scrollt mit dem Container */
 .rate-axis-wrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .rate-axis-wrap::-webkit-scrollbar { display: none; }

@@ -154,9 +154,17 @@ export default function RateStats() {
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
   const Y = (v: number) => PAD_T + CH - (v / maxVal) * CH;
 
-  function smoothPath(vals: number[]): string {
-    if (vals.length < 2) return "";
-    const pts = vals.map((v, i) => [X(i), Y(v)] as [number, number]);
+  // Bei feinen Einheiten (Minute/Stunde) sind viele Buckets leer. Die Linie soll dann NICHT
+  // zwischen den Punkten auf 0 abstürzen, sondern die vorhandenen Punkte direkt verbinden.
+  // → leere Buckets überspringen; nur Punkte mit Wert (plus Rand-Anker) zeichnen.
+  const skipZeros = unit === "minute" || unit === "hour";
+  function linePoints(vals: number[]): [number, number][] {
+    if (!skipZeros) return vals.map((v, i) => [X(i), Y(v)] as [number, number]);
+    const pts = vals.map((v, i) => [v, i] as [number, number]).filter(([v]) => v > 0).map(([v, i]) => [X(i), Y(v)] as [number, number]);
+    return pts.length >= 2 ? pts : vals.map((v, i) => [X(i), Y(v)] as [number, number]);
+  }
+  function pathThrough(pts: [number, number][]): string {
+    if (pts.length < 2) return "";
     let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
     for (let i = 0; i < pts.length - 1; i++) {
       const [x0, y0] = pts[i];
@@ -166,12 +174,15 @@ export default function RateStats() {
     }
     return d;
   }
+  function smoothPath(vals: number[]): string {
+    return pathThrough(linePoints(vals));
+  }
   function areaPath(vals: number[]): string {
-    if (vals.length < 2) return "";
-    const line = smoothPath(vals);
-    const last = X(vals.length - 1);
+    const pts = linePoints(vals);
+    if (pts.length < 2) return "";
+    const line = pathThrough(pts);
     const base = PAD_T + CH;
-    return `${line} L${last.toFixed(1)},${base.toFixed(1)} L${PAD_L.toFixed(1)},${base.toFixed(1)} Z`;
+    return `${line} L${pts[pts.length - 1][0].toFixed(1)},${base.toFixed(1)} L${pts[0][0].toFixed(1)},${base.toFixed(1)} Z`;
   }
 
   // Tagestrennlinien im Stunden- UND Minuten-Modus (Mitternacht LOKAL markiert den Tageswechsel).
@@ -427,9 +438,10 @@ export default function RateStats() {
                 }))}
               </svg>
 
-              {/* Per-Dot-Tooltip */}
+              {/* Per-Dot-Tooltip — flippt nach UNTEN, wenn der Punkt zu weit oben liegt
+                  (sonst wäre der Tooltip über dem Punkt abgeschnitten/unsichtbar). */}
               {hoverInfo && hoverDot && (
-                <div className="rate-cursor-tip rate-dot-tip" style={{ left: hoverDot.x, top: hoverDot.y }}>
+                <div className={`rate-cursor-tip rate-dot-tip ${hoverDot.y < 62 ? "below" : ""}`} style={{ left: hoverDot.x, top: hoverDot.y }}>
                   <div className="rct-label">{hoverInfo.when}</div>
                   <div className="rct-row">
                     <i style={{ background: hoverInfo.color }} />
