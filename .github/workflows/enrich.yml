@@ -1,7 +1,7 @@
 name: enrich
 on:
-  schedule:
-    - cron: "15 */6 * * *"   # alle 6 h – rendert Backlog-Artikel ohne Titel/Datum, trägt Metadaten nach
+  # Kein automatisches Scheduling mehr – neue Artikel werden sofort im scrape-Job voll angereichert.
+  # workflow_dispatch bleibt für einmalige Nacharbeit am Altbestand (titel/published_at = NULL).
   workflow_dispatch:
 # Überlappende Läufe verhindern (vorige Läufe wurden teils abgebrochen)
 concurrency:

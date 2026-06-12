@@ -88,7 +88,17 @@ export default function ArticleDashboard() {
     }
     // Sub-Rubriken: URL-Pfadmuster (z.B. politik/ausland) — funktioniert quellenübergreifend,
     // da die Rubrik im URL-Pfad steht (article_categories ist bei den meisten Quellen leer).
-    if (f.subcats.length) q = q.or(f.subcats.map((s) => `url.ilike.%/${s}/%`).join(","));
+    if (f.subcats.length) {
+      // Pro kanonaischer Kategorie alle zugehörigen URL-Muster (ggf. mehrsprachig) nutzen
+      const rawPats = f.subcats.flatMap((key) => {
+        for (const opts of f.catTree.values()) {
+          const opt = opts.find((o) => o.key === key);
+          if (opt) return opt.rawKeys;
+        }
+        return [key];
+      });
+      q = q.or(rawPats.map((s) => `url.ilike.%/${s}/%`).join(","));
+    }
     if (idFilter) q = q.in("article_id", idFilter.length ? idFilter : [-1]);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
@@ -125,8 +135,7 @@ export default function ArticleDashboard() {
         ? (r.article_id
           ? <Link href={`/articles/${r.article_id}`} target="_blank" className="art-title" title={r.title}>{r.title}</Link>
           : <span className="art-title" title={r.title}>{r.title}</span>)
-        // Noch nicht angereichert: ehrlicher Status statt verwirrend leerer Zelle.
-        : <span className="art-pending" title="Erfasst, Metadaten werden beim nächsten Anreicherungs-Lauf nachgetragen">⏳ wird erfasst…</span> },
+        : <span className="art-pending" title="Metadaten noch nicht geladen – beim nächsten Scraper-Lauf wird dieser Artikel vollständig erfasst">wird erfasst…</span> },
     { key: "outlet", label: "Quelle", width: 130, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></>,
       agg: (rs) => { const u = new Set(rs.map((r) => r.outlet)).size; return <span title="verschiedene Quellen auf dieser Seite">{u} Quellen</span>; } },
     { key: "ptype", label: "Typ", width: 100, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span>,
@@ -141,7 +150,10 @@ export default function ArticleDashboard() {
       ? <span className="new-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg>Neu</span>
       : <span className="badge neutral">{r.scan_count}× gescannt</span>,
       agg: (rs) => { const n = rs.filter((r) => (r.scan_count ?? 1) <= 1).length; return <span title="Anteil neu erfasster Artikel">{Math.round((n / rs.length) * 100)}% neu</span>; } },
-    { key: "published_at", label: "Veröffentlicht", width: 110, value: (r) => r.published_at ?? "", render: (r) => <span className="mono faint">{fmtD(r.published_at)}</span> },
+    { key: "published_at", label: "Veröffentlicht", width: 140, value: (r) => r.published_at ?? r.discovered_at ?? "",
+      render: (r) => r.published_at
+        ? <span className="mono faint">{fmtDT(r.published_at)}</span>
+        : <span className="mono faint" style={{ opacity: 0.55 }} title="Kein Datum vom Verlag – Erster Scan als Zeitstempel">{fmtDT(r.discovered_at)} <sup>⊛</sup></span> },
     { key: "discovered_at", label: "Erster Scan", width: 125, value: (r) => r.discovered_at ?? "", render: (r) => <span className="mono faint">{fmtDT(r.discovered_at)}</span> },
     { key: "last_seen", label: "Letzter Scan", width: 125, value: (r) => r.last_seen ?? "", render: (r) => <span className="mono faint">{fmtDT(r.last_seen)}</span> },
     { key: "word_count", label: "Wörter", width: 90, align: "right", value: (r) => r.word_count ?? 0, render: (r) => <span className="faint">{r.word_count ? r.word_count.toLocaleString("de-DE") : "—"}</span>,

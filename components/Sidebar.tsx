@@ -7,11 +7,11 @@ import ThemeToggle from "@/components/ThemeToggle";
 import NextRun from "@/components/NextRun";
 import FilterControls from "@/components/FilterControls";
 import { useFilters } from "@/components/FilterProvider";
-import { FileText, Clock } from "@/components/icons";
+import { Newspaper, FileDiff } from "@/components/icons";
 
 const NAV = [
-  { href: "/articles", label: "Übersicht", icon: FileText },
-  { href: "/articles/edits", label: "Silent Edits", icon: Clock },
+  { href: "/articles", label: "Übersicht", icon: Newspaper },
+  { href: "/articles/edits", label: "Silent Edits", icon: FileDiff },
 ];
 
 export default function Sidebar() {
@@ -94,7 +94,7 @@ export default function Sidebar() {
       {NAV.map((n) => {
         const on = n.href === "/articles" ? path === "/articles" : path.startsWith(n.href);
         const Icon = n.icon;
-        return <Link key={n.href} href={n.href} className={`nav-item ${on ? "on" : ""}`}><Icon /> {n.label}</Link>;
+        return <Link key={n.href} href={n.href} className={`nav-item ${on ? "on" : ""}`} title={n.label}><Icon /> <span>{n.label}</span></Link>;
       })}
 
       {/* Kollabiert: vertikale Icon-Leiste der AKTIVEN Filter. Reine Icons, klick öffnet. */}

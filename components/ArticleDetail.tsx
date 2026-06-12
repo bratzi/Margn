@@ -34,6 +34,16 @@ function fmtShort(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", year: "numeric" });
 }
+function timeDelta(isoA: string, isoB: string): string {
+  const diff = Math.abs(new Date(isoB).getTime() - new Date(isoA).getTime());
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return "unter 1 Min";
+  if (mins < 60) return `${mins} Min`;
+  const hours = Math.floor(mins / 60), remMins = mins % 60;
+  if (hours < 24) return remMins > 0 ? `${hours}h ${remMins}min` : `${hours}h`;
+  const days = Math.floor(hours / 24), remH = hours % 24;
+  return remH > 0 ? `${days}d ${remH}h` : `${days}d`;
+}
 
 export default function ArticleDetail({ id }: { id: number }) {
   const [a, setA] = useState<Detail | null>(null);
@@ -97,7 +107,12 @@ export default function ArticleDetail({ id }: { id: number }) {
 
       {/* Stats */}
       <div className="panel statbar">
-        <Stat k="Veröffentlicht" v={fmtDate(a.published_at)} />
+        {a.published_at ? (
+          <Stat k="Veröffentlicht" v={fmtDate(a.published_at)}
+            sub={a.first_seen ? `Erfasst ${timeDelta(a.published_at, a.first_seen)} später` : undefined} />
+        ) : (
+          <Stat k="Veröffentlicht" v="Kein Datum vom Verlag" sub={a.first_seen ? `Erster Scan: ${fmtDate(a.first_seen)}` : undefined} />
+        )}
         {a.modified_at && a.modified_at !== a.published_at && <Stat k="Aktualisiert" v={fmtDate(a.modified_at)} />}
         {a.word_count ? <Stat k="Umfang" v={`${a.word_count.toLocaleString("de-DE")} Wörter`} /> : null}
         {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
@@ -240,8 +255,14 @@ function TimelineItem({ s }: { s: Snapshot }) {
   );
 }
 
-function Stat({ k, v }: { k: string; v: string }) {
-  return <div className="stat"><div className="k">{k}</div><div className="v">{v}</div></div>;
+function Stat({ k, v, sub }: { k: string; v: string; sub?: string }) {
+  return (
+    <div className="stat">
+      <div className="k">{k}</div>
+      <div className="v">{v}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </div>
+  );
 }
 function DL({ h, children }: { h: string; children: React.ReactNode }) {
   return <div className="panel pad dl-section" style={{ marginTop: 14 }}><div className="h">{h}</div>{children}</div>;

@@ -9,7 +9,40 @@ import { fetchPagedSeq } from "@/lib/pgFetch";
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
 // key = Roh-Pfadmuster (z.B. "politik/ausland") zum URL-Filtern; label = lesbar.
-export type SubOpt = { key: string; label: string; n: number; sources: number };
+export type SubOpt = { key: string; label: string; n: number; sources: number; rawKeys: string[] };
+
+// Kanonische Ober-Kategorien mit mehrsprachigen Synonymen (DE/FR/EN).
+// Erlaubt das Bündeln sprachlich unterschiedlicher Verlagsrubriken unter einem Dach.
+const CANON_CATS: { key: string; label: string; words: string[] }[] = [
+  { key: "politik",       label: "Politik",              words: ["politik", "politique", "political", "politisch"] },
+  { key: "international", label: "International",         words: ["ausland", "international", "étranger", "monde", "europa", "europe", "foreign", "world", "außenpolitik"] },
+  { key: "national",      label: "National / Inland",    words: ["inland", "national", "france", "deutschland", "germany", "allemagne", "innenpolitik"] },
+  { key: "wirtschaft",    label: "Wirtschaft",           words: ["wirtschaft", "économie", "economy", "business", "finanzen", "finances", "geld", "markt"] },
+  { key: "sport",         label: "Sport",                words: ["sport", "sports", "fussball", "football", "soccer", "bundesliga", "ligue"] },
+  { key: "kultur",        label: "Kultur",               words: ["kultur", "culture", "kulturell", "art", "arts", "kino", "film", "musik", "musique", "litterature"] },
+  { key: "gesellschaft",  label: "Gesellschaft",         words: ["gesellschaft", "société", "social", "soziales", "leben", "vie", "famille"] },
+  { key: "wissenschaft",  label: "Wissenschaft & Tech",  words: ["wissenschaft", "sciences", "technologie", "technology", "tech", "forschung", "innovation", "numerique", "digital"] },
+  { key: "gesundheit",    label: "Gesundheit",           words: ["gesundheit", "santé", "health", "medizin", "médecine", "medical"] },
+  { key: "umwelt",        label: "Umwelt & Klima",       words: ["umwelt", "klima", "environnement", "environment", "climate", "natur", "nature", "ecologie", "energie"] },
+  { key: "meinung",       label: "Meinung",              words: ["meinung", "opinion", "kommentar", "commentary", "analyse", "analysis", "debat", "debatte"] },
+  { key: "regional",      label: "Regional",             words: ["regional", "local", "lokal", "region", "bundesland", "departement"] },
+  { key: "reise",         label: "Reise",                words: ["reise", "voyage", "tourisme", "tourism", "travel", "urlaub", "ferien"] },
+  { key: "medien",        label: "Medien",               words: ["medien", "médias", "media", "presse", "press", "fernsehen", "television"] },
+];
+
+function stripAccents(s: string) { return s.normalize("NFD").replace(/[̀-ͯ]/g, ""); }
+function toCanonKey(rawLabel: string): string | null {
+  const norm = stripAccents(rawLabel.toLowerCase()).replace(/[^a-z ]/g, " ");
+  const words = norm.split(/\s+/).filter(Boolean);
+  for (const cat of CANON_CATS) {
+    if (cat.words.some((w) => words.includes(w) || norm.includes(w))) return cat.key;
+  }
+  const first = words.find((w) => w.length >= 3);
+  return first ?? null;
+}
+function canonLabel(key: string, fallback: string): string {
+  return CANON_CATS.find((c) => c.key === key)?.label ?? fallback;
+}
 
 // Generische Pfad-Wrapper, die KEINE inhaltliche Rubrik sind.
 const RUBRIC_SKIP = new Set([
@@ -176,6 +209,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     )
       .then((data) => {
         if (cancelled) return;
+        // raw-Rubriken je Topic sammeln (alle aktiven Quellen)
         const agg = new Map<string, Map<string, { label: string; n: number; src: Set<number> }>>();
         for (const r of data as any[]) {
           if (rangeFrom && (!r.published_at || r.published_at < rangeFrom)) continue;
@@ -189,11 +223,26 @@ export default function FilterProvider({ children }: { children: React.ReactNode
           e.n++; e.src.add(r.source_id);
           m.set(rubric.raw, e);
         }
+        // Mehrsprachige Rubriken zu kanonischen Kategorien bündeln:
+        // "politik/ausland" + "politique/international" → beide unter "international"
         const tree = new Map<string, SubOpt[]>();
         for (const [topic, m] of agg) {
-          const list = [...m.entries()]
-            .filter(([, v]) => v.n >= 3) // seltene Rubriken ausblenden
-            .map(([raw, v]) => ({ key: raw, label: v.label, n: v.n, sources: v.src.size }))
+          const groups = new Map<string, { label: string; n: number; src: Set<number>; rawKeys: string[]; topN: number }>();
+          for (const [raw, entry] of m) {
+            if (entry.n < 3) continue;
+            const cKey = toCanonKey(entry.label) ?? raw.replace(/\//g, "_");
+            const g = groups.get(cKey);
+            if (g) {
+              g.n += entry.n;
+              entry.src.forEach((id) => g.src.add(id));
+              g.rawKeys.push(raw);
+              if (entry.n > g.topN) { g.topN = entry.n; g.label = canonLabel(cKey, entry.label); }
+            } else {
+              groups.set(cKey, { label: canonLabel(cKey, entry.label), n: entry.n, src: new Set(entry.src), rawKeys: [raw], topN: entry.n });
+            }
+          }
+          const list = [...groups.entries()]
+            .map(([key, g]) => ({ key, label: g.label, n: g.n, sources: g.src.size, rawKeys: g.rawKeys }))
             .sort((a, b) => b.n - a.n)
             .slice(0, 24);
           if (list.length) tree.set(topic, list);

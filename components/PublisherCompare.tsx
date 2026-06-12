@@ -5,29 +5,27 @@ import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
 
-// Publizisten-Benchmark mit sauberer Vergleichsbasis:
-//  - Balken = aktueller Zeitraum, Δ = Veränderung zur DIREKT VORANGEHENDEN Periode
-//    gleicher Länge (beide Zeiträume werden explizit mit Datum angezeigt).
-//  - Zähl-KPIs: Δ absolut + Prozent. Quoten-KPIs: Δ in PROZENTPUNKTEN (pp) —
-//    "%-Veränderung einer Prozentzahl" erzeugt die absurden Werte, die vorher zu sehen waren.
-//  - Guard: Hat die Vorperiode zu wenig Datenbasis (< 10 Artikel), wird kein Δ behauptet.
-
 type Stat = {
   source_id: number; articles: number; paywalled: number;
   au_named: number; au_anon: number; au_none: number;
   video: number; werbung: number; hub: number; new_7d: number;
 };
 
-type Period = "7d" | "30d" | "90d";
-const PERIOD_DAYS: Record<Period, number> = { "7d": 7, "30d": 30, "90d": 90 };
+type Period = "7d" | "30d" | "90d" | "dyn";
+const PERIOD_DAYS: Record<Exclude<Period, "dyn">, number> = { "7d": 7, "30d": 30, "90d": 90 };
 
 const short = (n: string) => n.replace(" Online", "");
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 const fmtD = (d: Date) => d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
 
-function periodLabel(p: Period) { return p === "7d" ? "7 Tage" : p === "30d" ? "30 Tage" : "90 Tage"; }
+function periodLabel(p: Period) {
+  if (p === "7d") return "7 Tage";
+  if (p === "30d") return "30 Tage";
+  if (p === "90d") return "90 Tage";
+  return "Dynamisch";
+}
 
-function periodBounds(p: Period) {
+function fixedPeriodBounds(p: Exclude<Period, "dyn">) {
   const days = PERIOD_DAYS[p];
   const now = new Date();
   const curFrom = new Date(now); curFrom.setDate(now.getDate() - days);
@@ -35,7 +33,6 @@ function periodBounds(p: Period) {
   return { days, now, curFrom, prevFrom };
 }
 
-// Δ für Zähl-KPIs: absolut + % zur Vorperiode. prev=0 → "neu" statt +∞%.
 function DeltaCount({ cur, prev }: { cur: number; prev: number }) {
   if (prev === 0 && cur === 0) return <span className="pc-delta neutral">—</span>;
   if (prev === 0) return <span className="pc-delta up" title="Vorperiode: 0">neu</span>;
@@ -50,9 +47,8 @@ function DeltaCount({ cur, prev }: { cur: number; prev: number }) {
   );
 }
 
-// Δ für Quoten-KPIs: Prozentpunkte. baseOk=false → keine Aussage (zu wenig Daten).
 function DeltaPP({ cur, prev, baseOk }: { cur: number; prev: number; baseOk: boolean }) {
-  if (!baseOk) return <span className="pc-delta neutral" title="Vorperiode: zu wenig Artikel für einen belastbaren Vergleich">·</span>;
+  if (!baseOk) return <span className="pc-delta neutral" title="Vorperiode: zu wenig Artikel">·</span>;
   const diff = Math.round(cur - prev);
   if (diff === 0) return <span className="pc-delta neutral" title={`Vorperiode: ${Math.round(prev)}%`}>±0 pp</span>;
   return (
@@ -64,34 +60,45 @@ function DeltaPP({ cur, prev, baseOk }: { cur: number; prev: number; baseOk: boo
 
 export default function PublisherCompare() {
   const f = useFilters();
-  const { sources, activeArr: activeSources, topics } = f;
+  const { sources, activeArr: activeSources, topics, days, rangeIdx } = f;
   const [stats, setStats] = useState<Stat[]>([]);
   const [prevStats, setPrevStats] = useState<Stat[]>([]);
   const [period, setPeriod] = useState<Period>("7d");
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
   const prevMap = useMemo(() => new Map(prevStats.map((s) => [s.source_id, s])), [prevStats]);
 
+  // Berechne curFrom/curTo/prevFrom/prevTo je nach Modus
+  const { curFrom, curTo, prevFrom, periodDays } = useMemo(() => {
+    if (period === "dyn") {
+      // Dynamisch: nutzt aktuellen TimeRangeFilter-Bereich
+      const cf = new Date(days[rangeIdx.from] + "T00:00:00Z");
+      const ct = new Date(days[rangeIdx.to] + "T23:59:59Z");
+      const spanMs = ct.getTime() - cf.getTime();
+      const pf = new Date(cf.getTime() - spanMs);
+      const pdDays = Math.max(1, Math.round(spanMs / 86400000));
+      return { curFrom: cf, curTo: ct, prevFrom: pf, periodDays: pdDays };
+    }
+    const { days: d, now, curFrom: cf, prevFrom: pf } = fixedPeriodBounds(period as Exclude<Period, "dyn">);
+    return { curFrom: cf, curTo: now, prevFrom: pf, periodDays: d };
+  }, [period, days, rangeIdx]);
+
   useEffect(() => {
     if (!activeSources.length) { setStats([]); setPrevStats([]); return; }
     const nn = (v: string) => (v === "all" ? null : v);
     const base = { p_sources: activeSources, p_topics: topics.length ? topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang) };
-    const { now, curFrom, prevFrom } = periodBounds(period);
     Promise.all([
-      supabase.rpc("publisher_stats_f", { ...base, p_from: curFrom.toISOString(), p_to: now.toISOString() }),
+      supabase.rpc("publisher_stats_f", { ...base, p_from: curFrom.toISOString(), p_to: curTo.toISOString() }),
       supabase.rpc("publisher_stats_f", { ...base, p_from: prevFrom.toISOString(), p_to: curFrom.toISOString() }),
     ]).then(([cur, prev]) => {
       setStats((cur.data as Stat[]) ?? []);
       setPrevStats((prev.data as Stat[]) ?? []);
     });
-  }, [activeSources.join(","), topics.join(","), f.paywall, f.author, f.lang, period]);
-
-  const { days, now, curFrom, prevFrom } = periodBounds(period);
+  }, [activeSources.join(","), topics.join(","), f.paywall, f.author, f.lang, curFrom.toISOString(), curTo.toISOString(), prevFrom.toISOString()]);
 
   if (!stats.length) return null;
   const nm = (id: number) => short(nameById.get(id)?.name ?? "?");
   const ctx = topics.length === 1 ? ` · Thema: ${topicLabel(topics[0])}` : topics.length > 1 ? ` · ${topics.length} Themen` : "";
 
-  // Abgeleitete Kennzahlen je Publizist (aktuell + Vorperiode)
   const derived = stats.map((s) => {
     const prev = prevMap.get(s.source_id);
     const au = s.au_named + s.au_anon + s.au_none;
@@ -99,7 +106,7 @@ export default function PublisherCompare() {
     return {
       sid: s.source_id, name: nm(s.source_id), country: nameById.get(s.source_id)?.country ?? "",
       articles: s.articles, prevArticles: prev?.articles ?? 0,
-      perDay: s.articles / days, prevPerDay: (prev?.articles ?? 0) / days,
+      perDay: s.articles / periodDays, prevPerDay: (prev?.articles ?? 0) / periodDays,
       pwPct: pct(s.paywalled, s.articles), prevPwPct: pct(prev?.paywalled ?? 0, prev?.articles ?? 0),
       pwBaseOk: (prev?.articles ?? 0) >= 10,
       namedPct: pct(s.au_named, au), prevNamedPct: pct(prev?.au_named ?? 0, auPrev),
@@ -126,7 +133,7 @@ export default function PublisherCompare() {
       data: derived.map((d) => ({
         sid: d.sid, label: d.name, value: d.perDay,
         display: d.perDay.toLocaleString("de-DE", { maximumFractionDigits: 1, minimumFractionDigits: 1 }),
-        raw: `${d.articles.toLocaleString("de-DE")} Artikel in ${days} Tagen`,
+        raw: `${d.articles.toLocaleString("de-DE")} Artikel in ${periodDays} Tagen`,
         delta: <DeltaCount cur={Math.round(d.perDay * 10)} prev={Math.round(d.prevPerDay * 10)} />,
       })),
     },
@@ -152,20 +159,22 @@ export default function PublisherCompare() {
         Publizisten im Vergleich
         <span className="count">{stats.length} Portale{ctx}</span>
         <div className="seg" style={{ marginLeft: "auto" }}>
-          {(["7d", "30d", "90d"] as Period[]).map((p) => (
-            <button key={p} className={period === p ? "on" : ""} onClick={() => setPeriod(p)}>{periodLabel(p)}</button>
+          {(["7d", "30d", "90d", "dyn"] as Period[]).map((p) => (
+            <button key={p} className={period === p ? "on" : ""} onClick={() => setPeriod(p)}
+              title={p === "dyn" ? "Nutzt den aktuell gewählten Zeitstrahl-Bereich" : undefined}>
+              {periodLabel(p)}
+            </button>
           ))}
         </div>
       </h2>
 
-      {/* Explizite Vergleichsbasis — was wird womit verglichen? */}
       <div className="pc-basis">
-        <span className="pc-basis-cur">Zeitraum: <b>{fmtD(curFrom)} – {fmtD(now)}</b></span>
+        <span className="pc-basis-cur">Zeitraum: <b>{fmtD(curFrom)} – {fmtD(curTo)}</b></span>
         <span className="pc-basis-sep">·</span>
         <span>Δ vergleicht mit der Vorperiode <b>{fmtD(prevFrom)} – {fmtD(curFrom)}</b> (gleiche Länge)</span>
       </div>
 
-      <div className="charts data-fade-in" key={`${period}-${stats.length}`}>
+      <div className="charts data-fade-in" key={`${period}-${curFrom.toISOString()}-${stats.length}`}>
         {charts.map((c) => {
           const max = Math.max(0.0001, ...c.data.map((d) => d.value));
           const sorted = [...c.data].sort((a, b) => b.value - a.value);
@@ -190,7 +199,7 @@ export default function PublisherCompare() {
         })}
       </div>
 
-      <h2 className="section-h">Steckbrief <span className="count">{fmtD(curFrom)} – {fmtD(now)}{ctx}</span></h2>
+      <h2 className="section-h">Steckbrief <span className="count">{fmtD(curFrom)} – {fmtD(curTo)}{ctx}</span></h2>
       <div className="panel" style={{ overflowX: "auto" }}>
         <table className="matrix">
           <thead>

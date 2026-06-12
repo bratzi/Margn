@@ -7,6 +7,9 @@ const S = ({ size = 16, className, children }: P & { children: React.ReactNode }
   </svg>
 );
 
+export const Newspaper = (p: P) => <S {...p}><path d="M4 3h16a1 1 0 0 1 1 1v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a1 1 0 0 1 1-1Z"/><path d="M4 7h16"/><path d="M4 12h5v6H4v-6Z"/><path d="M13 12h7M13 15h7M13 18h5"/></S>;
+export const FileDiff = (p: P) => <S {...p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></S>;
+
 export const Lock = (p: P) => <S {...p}><rect width="18" height="11" x="3" y="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></S>;
 export const LockOpen = (p: P) => <S {...p}><rect width="18" height="11" x="3" y="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></S>;
 export const Video = (p: P) => <S {...p}><path d="m16 13 5.2 3.2a.5.5 0 0 0 .8-.4V8.2a.5.5 0 0 0-.8-.4L16 11" /><rect x="2" y="6" width="14" height="12" rx="2" /></S>;

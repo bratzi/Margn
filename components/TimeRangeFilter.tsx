@@ -9,6 +9,8 @@ export const PUB_COLORS = ["#3D63DD", "#1A7F55", "#CF4035", "#B0790C", "#0C8F86"
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000, VH = 100;
 
+type HoverDay = { idx: number; clientX: number; clientY: number };
+
 export default function TimeRangeFilter() {
   const f = useFilters();
   const { sources, activeArr, days, rangeIdx, setRangeIdx, trfOpen, setTrfOpen } = f;
@@ -18,14 +20,17 @@ export default function TimeRangeFilter() {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<null | "from" | "to" | "band" | "resize">(null);
   const dragRef = useRef<{ start: number; f: number; t: number } | null>(null);
-  // Flüssiges Ziehen: während des Drags nur lokaler State (keine Daten-Reloads);
-  // commit in den globalen Filter erst beim Loslassen.
   const [live, setLive] = useState(rangeIdx);
   const liveRef = useRef(live);
   liveRef.current = live;
   useEffect(() => { if (!drag) setLive(rangeIdx); }, [rangeIdx, drag]);
 
-  // Gefilterte Säulen (Thema/Paywall/Autor/Sprache wirken; Zeitraum NICHT, der kommt aus dem Chart selbst)
+  // Absolut-/Relativ-Modus (abs = kumulativ hochgezählt, rel = pro Tag)
+  const [mode, setMode] = useState<"rel" | "abs">("rel");
+
+  // Hover-Tooltip
+  const [hoverDay, setHoverDay] = useState<HoverDay | null>(null);
+
   useEffect(() => {
     if (!activeArr.length) { setRows([]); return; }
     supabase.rpc("publish_timeline_f", {
@@ -39,23 +44,33 @@ export default function TimeRangeFilter() {
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
-  const { series, maxTotal } = useMemo(() => {
+  const { series } = useMemo(() => {
     const map = new Map<number, Map<string, number>>();
     for (const r of rows) { if (!map.has(r.source_id)) map.set(r.source_id, new Map()); map.get(r.source_id)!.set(r.day, r.n); }
     const ser = sources.filter((s) => act.has(s.id)).map((s) => ({ id: s.id, color: colorById.get(s.id)!, vals: days.map((d) => map.get(s.id)?.get(d) ?? 0) }));
-    const tot = days.map((_, i) => ser.reduce((sum, s) => sum + s.vals[i], 0));
-    return { series: ser, maxTotal: Math.max(1, ...tot) };
+    return { series: ser };
   }, [rows, sources, act, days, colorById]);
+
+  // Für abs-Modus: kumulierte Werte; für rel: Original
+  const displaySeries = useMemo(() => {
+    if (mode === "rel") return series;
+    return series.map((s) => {
+      let sum = 0;
+      return { ...s, vals: s.vals.map((v) => { sum += v; return sum; }) };
+    });
+  }, [series, mode]);
+
+  const maxTotal = useMemo(() => {
+    const tot = days.map((_, i) => displaySeries.reduce((sum, s) => sum + s.vals[i], 0));
+    return Math.max(1, ...tot);
+  }, [displaySeries, days]);
 
   const X = (i: number) => (i / (N - 1)) * VW;
   const colW = (VW / N) * 0.72;
   const pctOf = (i: number) => (i / (N - 1)) * 100;
-  // Halbe Säulenbreite in Prozent der Gesamtbreite — damit die Regler/das Band exakt an
-  // den Säulen-KANTEN sitzen (linke Kante von „from", rechte Kante von „to"),
-  // nicht auf der Säulenmitte (= scheinbar zwischen zwei Säulen).
   const halfColPct = (colW / 2 / VW) * 100;
-  const edgeLeft = (i: number) => Math.max(0, pctOf(i) - halfColPct);   // linke Säulenkante
-  const edgeRight = (i: number) => Math.min(100, pctOf(i) + halfColPct); // rechte Säulenkante
+  const edgeLeft = (i: number) => Math.max(0, pctOf(i) - halfColPct);
+  const edgeRight = (i: number) => Math.min(100, pctOf(i) + halfColPct);
   const chartH = Math.max(60, h - 60);
 
   const idxFromClient = useCallback((clientX: number) => {
@@ -69,7 +84,6 @@ export default function TimeRangeFilter() {
       if (drag === "resize") { setH(Math.max(96, Math.min(440, window.innerHeight - e.clientY))); return; }
       const i = idxFromClient(e.clientX);
       const cur = liveRef.current;
-      // from/to dürfen auf denselben Tag fallen → Einzeltag-Auswahl möglich
       if (drag === "from") setLive({ from: Math.min(i, cur.to), to: cur.to });
       else if (drag === "to") setLive({ from: cur.from, to: Math.max(i, cur.from) });
       else if (dragRef.current) {
@@ -81,7 +95,7 @@ export default function TimeRangeFilter() {
     };
     const up = () => {
       setDrag(null); dragRef.current = null; document.body.style.userSelect = "";
-      if (drag !== "resize") setRangeIdx(liveRef.current); // erst JETZT laden alle Komponenten
+      if (drag !== "resize") setRangeIdx(liveRef.current);
     };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
@@ -93,6 +107,14 @@ export default function TimeRangeFilter() {
     setDrag(k);
   };
   const fmtDay = (ds: string) => new Date(ds + "T00:00:00Z").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
+
+  // Klick auf einen Tag: Pinpoint OHNE sourceId → alle Publizisten dieses Tages sichtbar
+  const handleDayClick = (dayIdx: number) => {
+    const total = series.reduce((sum, s) => sum + s.vals[dayIdx], 0);
+    if (total === 0) return;
+    const day = days[dayIdx];
+    f.setPinpoint({ from: day + "T00:00:00Z", to: day + "T23:59:59Z", label: fmtDay(day) });
+  };
 
   if (!trfOpen) {
     return (
@@ -109,6 +131,11 @@ export default function TimeRangeFilter() {
       <div className="trf-head">
         <div className="trf-title">Veröffentlichungs-Zeitraum <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
         <div className="trf-legend">{series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}</div>
+        {/* Absolut / Relativ Schalter */}
+        <div className="seg seg-xs trf-mode-seg">
+          <button className={mode === "rel" ? "on" : ""} onClick={() => setMode("rel")} title="Pro Tag – jede Säule zeigt die Artikel dieses Tages">rel</button>
+          <button className={mode === "abs" ? "on" : ""} onClick={() => setMode("abs")} title="Kumulativ – hochgezählte Summe über die Zeit">abs</button>
+        </div>
         {(live.from > 0 || live.to < N - 1) && <button className="trf-reset" onClick={() => { setLive({ from: 0, to: N - 1 }); setRangeIdx({ from: 0, to: N - 1 }); }}>Zurücksetzen</button>}
         <button className="rail-toggle" onClick={() => setTrfOpen(false)} title="Einklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg></button>
       </div>
@@ -116,16 +143,52 @@ export default function TimeRangeFilter() {
       <div
         className="trf-chart" ref={trackRef} style={{ height: chartH }}
         onDoubleClick={(e) => { const i = idxFromClient(e.clientX); setLive({ from: i, to: i }); setRangeIdx({ from: i, to: i }); }}
-        title="Doppelklick: nur diesen Tag"
+        onMouseLeave={() => setHoverDay(null)}
+        title="Doppelklick: nur diesen Tag · Klick auf Balken: alle Artikel dieses Tages"
       >
         <svg className="trf-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
           {days.map((_, i) => {
             let yb = VH;
-            return <g key={i}>{series.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
+            return <g key={i}>{displaySeries.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
           })}
         </svg>
-        {/* Regler/Band sitzen auf den Säulen-KANTEN (linke Kante „from", rechte Kante „to"),
-            sodass die Randsäulen vollständig umschlossen werden — auch bei Einzeltag. */}
+
+        {/* Transparente Hover-Overlays je Tag – fangen Hover + Klick ab */}
+        {days.map((_, i) => (
+          <div
+            key={i}
+            className="trf-col-hit"
+            style={{ left: `${edgeLeft(i)}%`, width: `${Math.max(edgeRight(i) - edgeLeft(i), 1)}%` }}
+            onMouseEnter={(e) => setHoverDay({ idx: i, clientX: e.clientX, clientY: e.clientY })}
+            onMouseMove={(e) => setHoverDay((h) => h ? { ...h, clientX: e.clientX, clientY: e.clientY } : h)}
+            onClick={() => handleDayClick(i)}
+          />
+        ))}
+
+        {/* Tooltip */}
+        {hoverDay && (() => {
+          // Tooltip zeigt immer Per-Tag-Werte (series), unabhängig vom abs/rel-Modus
+          const dayData = series.filter((s) => s.vals[hoverDay.idx] > 0);
+          if (!dayData.length) return null;
+          const total = dayData.reduce((sum, s) => sum + s.vals[hoverDay.idx], 0);
+          const rect = trackRef.current?.getBoundingClientRect();
+          const relX = rect ? hoverDay.clientX - rect.left : 0;
+          const fromRight = rect ? rect.width - relX < 160 : false;
+          return (
+            <div className="trf-tt" style={{ left: fromRight ? undefined : `${(relX / (rect?.width ?? 1)) * 100}%`, right: fromRight ? `${100 - (relX / (rect?.width ?? 1)) * 100}%` : undefined }}>
+              <div className="trf-tt-day">{fmtDay(days[hoverDay.idx])}</div>
+              {dayData.map((s) => (
+                <div key={s.id} className="trf-tt-row">
+                  <i style={{ background: s.color }} />
+                  <span>{nameById.get(s.id)}</span>
+                  <b>{s.vals[hoverDay.idx]}</b>
+                </div>
+              ))}
+              {dayData.length > 1 && <div className="trf-tt-total">Gesamt: <b>{total}</b></div>}
+            </div>
+          );
+        })()}
+
         <div className="trf-dim" style={{ left: 0, width: `${edgeLeft(live.from)}%` }} />
         <div className="trf-dim" style={{ right: 0, width: `${100 - edgeRight(live.to)}%` }} />
         <div className={`trf-bandsel ${live.from === live.to ? "single" : ""}`}
