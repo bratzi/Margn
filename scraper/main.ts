@@ -17,7 +17,7 @@ const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kei
 // "analyze":    batch-upsert pages.kind='article' → articles (kein Chromium).
 // "enrich":     articles ohne Titel rendern + Metadaten nachtragen.
 // "reclassify": pages.kind='article' rendern, Videos → kind='media' + aus articles entfernen.
-const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich" | "reclassify" | "retopic" | "rekeyword";
+const MODE = (process.env.CRAWL_MODE ?? "articles") as "articles" | "structure" | "analyze" | "enrich" | "reclassify" | "retopic" | "rekeyword" | "retype";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -57,7 +57,8 @@ function isLiveContent(url: string, title: string | null): boolean {
   const hay = (url + " " + (title ?? "")).toLowerCase();
   if (/news?ticker\/.*alle-[a-z-]+-news/.test(hay)) return false; // Bild News-Hubs
   return /liveblog|live-blog|live-ticker|liveticker|newsblog|en-direct|im[- ]minutentakt/.test(hay)
-    || /\/live\//.test(hay); // Le Monde: /…/live/…
+    || /\/live\//.test(hay) // Le Monde: /…/live/…
+    || /\+\+.+\+\+/.test(title ?? ""); // Tagesschau-Konvention: "Liveblog: ++ Meldung ++"
 }
 const TYPE_MAP: Record<string, string> = {
   LiveBlogPosting: "liveblog", OpinionNewsArticle: "opinion", AnalysisNewsArticle: "analysis",
@@ -923,6 +924,48 @@ async function retopicArticles() {
   console.log("Top-Übergänge:"); for (const [k, n] of top) console.log(`  ${k}: ${n}`);
 }
 
+// retype: article_type für ALLE Artikel neu bewerten — ohne Rendering, rein aus DB-Daten.
+// Nötig, weil die Erstklassifikation oft lief, BEVOR der Titel bekannt war (isLiveContent
+// sah nur die URL). Jetzt mit Titel: Tagesschau-"++ Meldung ++"-Liveblogs etc. werden erkannt.
+// Zusätzlich die empirische Regel: 2+ Erweiterungen = über Zeit wachsender Timeline-Artikel.
+async function retypeArticles() {
+  console.log("retype: article_type aus URL + Titel + Wachstums-Historie neu bewerten…");
+  const PAGE = 1000;
+  let from = 0, scanned = 0, changed = 0;
+  const changes: Record<string, number> = {};
+
+  while (true) {
+    const { data: arts, error } = await sb.from("articles")
+      .select("id,url,title,article_type,extension_count")
+      .order("id", { ascending: true }).range(from, from + PAGE - 1);
+    if (error) { console.error(error.message); break; }
+    if (!arts?.length) break;
+
+    for (const a of arts as any[]) {
+      scanned++;
+      const cur = a.article_type ?? "news";
+      let next = cur;
+      if (isLiveContent(a.url, a.title)) {
+        if (cur !== "liveblog" && cur !== "timeline") next = "liveblog";
+      } else if ((a.extension_count ?? 0) >= 2 && (cur === "news" || cur === null)) {
+        next = "timeline";
+      }
+      if (next !== cur) {
+        await sb.from("articles").update({ article_type: next }).eq("id", a.id);
+        changed++;
+        const k = `${cur}→${next}`;
+        changes[k] = (changes[k] ?? 0) + 1;
+      }
+    }
+    console.log(`  ${scanned} geprüft · ${changed} umklassifiziert`);
+    if (arts.length < PAGE) break;
+    from += PAGE;
+  }
+
+  console.log(`\nFertig: ${scanned} geprüft, ${changed} Typen geändert.`);
+  for (const [k, n] of Object.entries(changes).sort((a, b) => b[1] - a[1])) console.log(`  ${k}: ${n}`);
+}
+
 // rekeyword: Rendert Artikel OHNE Keyword-Verknüpfung neu und trägt Keywords nach
 // (für Backlog nach Extractor-Verbesserung; priorisiert Quellen mit den größten Lücken).
 async function rekeywordArticles(sources: Source[]) {
@@ -982,6 +1025,7 @@ async function run() {
   if (MODE === "enrich")     { await enrichArticles(data as Source[]); return; }
   if (MODE === "reclassify") { await reclassifyPages(data as Source[]); return; }
   if (MODE === "retopic")    { await retopicArticles(); return; }
+  if (MODE === "retype")     { await retypeArticles(); return; }
   if (MODE === "rekeyword")  { await rekeywordArticles(data as Source[]); return; }
 
   const browser = await chromium.launch();

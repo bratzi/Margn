@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { fetchAllRows } from "@/lib/pgFetch";
+import { useMemo } from "react";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS } from "@/components/TimeRangeFilter";
+import { makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
 // Themen-DNA: Agenda-Analyse nach dem Vorbild der Agenda-Setting-Forschung.
 //  - Heatmap Publizist × Thema, zeilennormiert ("Anteil am eigenen Output") → Agenda-Profil
@@ -23,28 +22,23 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 export default function TopicProfile() {
   const f = useFilters();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(false);
+  const loading = !f.corpusReady;
 
-  useEffect(() => {
-    if (!f.activeArr.length) { setRows([]); return; }
-    let cancelled = false;
-    setLoading(true);
-    const withFilters = (q: any) => {
-      if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
-      if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
-      return q;
-    };
-    fetchAllRows<Row>(
-      () => withFilters(supabase.from("page_overview").select("id", { count: "exact", head: true }).in("source_id", f.activeArr)),
-      (a, b) => withFilters(supabase.from("page_overview").select("topic, source_id, paywalled, author_status, word_count").in("source_id", f.activeArr)).range(a, b),
-    ).then((data) => {
-      if (cancelled) return;
-      setRows(data);
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [f.activeArr.join(","), f.rangeFrom, f.rangeTo]);
+  // Heatmap-Datenbasis aus dem gemeinsamen Corpus — gleiches Prädikat wie die Tabelle,
+  // nur ohne Themen-Filter (die Themen-Dimension zeigt die Heatmap selbst). Vorher
+  // ignorierte diese Komponente fast ALLE Filter und schloss undatierte Artikel aus.
+  const rows = useMemo<Row[]>(() => {
+    const snap = snapshotOf(f as any);
+    const match = makeMatcher(snap, [], f.kwIdSet, { topics: true });
+    const out: Row[] = [];
+    for (const r of f.corpus) {
+      if (!f.active.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      out.push(r);
+    }
+    return out;
+  }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
+      f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.kwIdSet]);
 
   const activeSources = useMemo(() => f.sources.filter((s) => f.active.has(s.id)), [f.sources, f.active]);
   const colorById = useMemo(

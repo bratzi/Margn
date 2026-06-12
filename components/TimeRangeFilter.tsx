@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { useFilters } from "@/components/FilterProvider";
+import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
-type TL = { source_id: number; day: string; n: number };
 export const PUB_COLORS = ["#3D63DD", "#1A7F55", "#CF4035", "#B0790C", "#0C8F86", "#8B5CF6", "#D6457A", "#0E7490"];
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000, VH = 100;
@@ -15,7 +14,6 @@ export default function TimeRangeFilter() {
   const f = useFilters();
   const { sources, activeArr, days, rangeIdx, setRangeIdx, trfOpen, setTrfOpen } = f;
   const N = days.length;
-  const [rows, setRows] = useState<TL[]>([]);
   const [h, setH] = useState(168);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<null | "from" | "to" | "band" | "resize">(null);
@@ -31,25 +29,36 @@ export default function TimeRangeFilter() {
   // Hover-Tooltip
   const [hoverDay, setHoverDay] = useState<HoverDay | null>(null);
 
-  useEffect(() => {
-    if (!activeArr.length) { setRows([]); return; }
-    supabase.rpc("publish_timeline_f", {
-      p_sources: activeArr, p_topics: f.topics.length ? f.topics : null,
-      p_paywall: f.paywall === "all" ? null : f.paywall, p_author: f.author === "all" ? null : f.author,
-      p_lang: f.lang === "all" ? null : f.lang,
-    }).then(({ data }) => setRows((data as TL[]) ?? []));
-  }, [activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang]);
-
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
+  // Säulen direkt aus dem gemeinsamen Corpus — GLEICHES Prädikat wie die Tabelle,
+  // nur ohne Zeitfilter (die Zeitachse ist ja der Chart selbst). Damit stimmen die
+  // Balken exakt mit den Tabellen-Treffern des jeweiligen Tages überein.
   const { series } = useMemo(() => {
-    const map = new Map<number, Map<string, number>>();
-    for (const r of rows) { if (!map.has(r.source_id)) map.set(r.source_id, new Map()); map.get(r.source_id)!.set(r.day, r.n); }
-    const ser = sources.filter((s) => act.has(s.id)).map((s) => ({ id: s.id, color: colorById.get(s.id)!, vals: days.map((d) => map.get(s.id)?.get(d) ?? 0) }));
+    const snap = snapshotOf(f as any);
+    const match = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
+    const dayIdx = new Map(days.map((d, i) => [d, i]));
+    const map = new Map<number, number[]>();
+    for (const r of f.corpus) {
+      if (!act.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      const t = effTime(r);
+      if (!t) continue;
+      const i = dayIdx.get(t.slice(0, 10));
+      if (i === undefined) continue;
+      let vals = map.get(r.source_id);
+      if (!vals) { vals = new Array(days.length).fill(0); map.set(r.source_id, vals); }
+      vals[i]++;
+    }
+    const ser = sources.filter((s) => act.has(s.id)).map((s) => ({
+      id: s.id, color: colorById.get(s.id)!, vals: map.get(s.id) ?? new Array(days.length).fill(0),
+    }));
     return { series: ser };
-  }, [rows, sources, act, days, colorById]);
+  }, [f.corpus, f.corpusReady, sources, act, days, colorById,
+      f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
+      f.subPats.join("|"), f.kwIdSet]);
 
   // Für abs-Modus: kumulierte Werte; für rel: Original
   const displaySeries = useMemo(() => {

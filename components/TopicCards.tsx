@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useMemo, useState } from "react";
 import { useFilters } from "@/components/FilterProvider";
 import { topicLabel } from "@/lib/topics";
+import { makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
 type K = { topic: string; articles: number; paywalled: number; au_named: number; au_total: number; new_7d: number; new_24h: number; outlets: number; timelines: number; avg_words: number; edits: number };
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
@@ -21,15 +21,44 @@ function Metric({ l, v, color, bar, extra }: { l: string; v: string; color?: str
 
 export default function TopicCards() {
   const f = useFilters();
-  const [rows, setRows] = useState<K[]>([]);
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (!f.activeArr.length) { setRows([]); return; }
-    const nn = (v: string) => (v === "all" ? null : v);
-    supabase.rpc("topic_kpis_f", { p_sources: f.activeArr, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_from: f.rangeFrom, p_to: f.rangeTo })
-      .then(({ data }) => setRows((data as K[]) ?? []));
-  }, [f.activeArr.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
+  // Themen-KPIs aus dem gemeinsamen Corpus — gleiches Prädikat wie die Tabelle,
+  // ohne die Themen-Dimension selbst (die zeigen die Karten ja).
+  const rows = useMemo<K[]>(() => {
+    if (!f.corpusReady || !f.active.size) return [];
+    const snap = snapshotOf(f as any);
+    const match = makeMatcher(snap, [], f.kwIdSet, { topics: true });
+    const now = Date.now();
+    const ms7d = now - 7 * 86400000, ms24h = now - 86400000;
+    type Agg = { articles: number; paywalled: number; au_named: number; au_total: number; new_7d: number; new_24h: number; sources: Set<number>; timelines: number; words: number; wordsN: number; edits: number };
+    const byTopic = new Map<string, Agg>();
+    for (const r of f.corpus) {
+      if (!f.active.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      const t = r.topic ?? "sonstiges";
+      let a = byTopic.get(t);
+      if (!a) { a = { articles: 0, paywalled: 0, au_named: 0, au_total: 0, new_7d: 0, new_24h: 0, sources: new Set(), timelines: 0, words: 0, wordsN: 0, edits: 0 }; byTopic.set(t, a); }
+      a.articles++;
+      if (r.paywalled === true) a.paywalled++;
+      if (r.author_status) { a.au_total++; if (r.author_status === "named") a.au_named++; }
+      const disc = r.discovered_at ? Date.parse(r.discovered_at) : null;
+      if (disc !== null && disc >= ms7d) a.new_7d++;
+      if (disc !== null && disc >= ms24h) a.new_24h++;
+      a.sources.add(r.source_id);
+      if (r.ptype === "timeline" || r.ptype === "blog") a.timelines++;
+      if (r.word_count && r.word_count > 0) { a.words += r.word_count; a.wordsN++; }
+      a.edits += r.edit_count ?? 0;
+    }
+    return [...byTopic.entries()]
+      .map(([topic, a]) => ({
+        topic, articles: a.articles, paywalled: a.paywalled, au_named: a.au_named, au_total: a.au_total,
+        new_7d: a.new_7d, new_24h: a.new_24h, outlets: a.sources.size, timelines: a.timelines,
+        avg_words: a.wordsN ? Math.round(a.words / a.wordsN) : 0, edits: a.edits,
+      }))
+      .sort((a, b) => b.articles - a.articles);
+  }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
+      f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.kwIdSet]);
 
   if (!rows.length) return null;
   const toggleOpen = (t: string) => setOpen((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });

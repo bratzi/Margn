@@ -1,21 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { fetchAllRows } from "@/lib/pgFetch";
+import { useMemo } from "react";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
+import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
-// „Auf einen Blick" — verdichtete Headline-Metriken mit Kontext statt drei isolierter
-// Tortendiagramme. Jede Kachel beantwortet eine Frage, die man der Rohtabelle nicht ansieht:
-// Wie viel? Wie schnell? Wie viel hinter Paywall? Wie transparent? Wie oft still geändert?
-// Wie tief? Was dominiert gerade? — inkl. Mini-Sparkline für den Volumen-Trend.
-
-type Row = {
-  source_id: number; outlet: string; topic: string | null; paywalled: boolean | null;
-  author_status: string | null; word_count: number | null; revision_count: number | null;
-  edit_count: number | null; published_at: string | null; discovered_at: string | null;
-};
+// „Auf einen Blick" — verdichtete Headline-Metriken mit Kontext.
+// Zählt über den gemeinsamen Corpus mit dem GLEICHEN Prädikat wie die Artikel-Tabelle
+// (inkl. Zeit-Fallback published_at → discovered_at und ALLER Filter). Vorher hatte diese
+// Komponente eine eigene, abweichende Query — die Zahlen passten nie zur Tabelle.
 
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 const short = (n: string) => n.replace(" Online", "");
@@ -35,72 +28,54 @@ function Spark({ vals, color }: { vals: number[]; color: string }) {
 
 export default function PulseBar() {
   const f = useFilters();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!f.activeArr.length) { setRows([]); return; }
-    let cancelled = false;
-    setLoading(true);
-    const nn = (v: string) => (v === "all" ? null : v);
-    const withF = (q: any) => {
-      if (f.topics.length) q = q.in("topic", f.topics);
-      if (f.paywall === "yes") q = q.eq("paywalled", true); else if (f.paywall === "no") q = q.eq("paywalled", false);
-      if (f.author !== "all") q = q.eq("author_status", f.author);
-      if (f.lang !== "all") q = q.eq("language", f.lang);
-      if (f.rangeFrom) q = q.gte("published_at", f.rangeFrom);
-      if (f.rangeTo) q = q.lte("published_at", f.rangeTo);
-      return q;
-    };
-    fetchAllRows<Row>(
-      () => withF(supabase.from("page_overview").select("id", { count: "exact", head: true }).in("source_id", f.activeArr)),
-      (a, b) => withF(supabase.from("page_overview")
-        .select("source_id, outlet, topic, paywalled, author_status, word_count, revision_count, edit_count, published_at, discovered_at")
-        .in("source_id", f.activeArr)).range(a, b),
-    ).then((data) => { if (!cancelled) { setRows(data); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [f.activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, f.rangeFrom, f.rangeTo]);
+  const nameById = useMemo(() => new Map(f.sources.map((s) => [s.id, short(s.name)])), [f.sources]);
 
   const m = useMemo(() => {
-    const n = rows.length;
-    let pw = 0, named = 0, au = 0, revAny = 0, edits = 0, words = 0, wordsN = 0;
-    const byOutlet = new Map<string, number>();
+    const snap = snapshotOf(f as any);
+    const match = makeMatcher(snap, f.subPats, f.kwIdSet);
+    const act = f.active;
+    let n = 0, pw = 0, named = 0, au = 0, revAny = 0, edits = 0, words = 0, wordsN = 0;
+    const bySource = new Map<number, number>();
     const byTopic = new Map<string, number>();
-    // Volumen-Sparkline über die letzten 14 Tage (nach published_at)
     const dayBuckets = new Map<string, number>();
-    for (const r of rows) {
+    for (const r of f.corpus) {
+      if (!act.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      n++;
       if (r.paywalled === true) pw++;
       if (r.author_status) { au++; if (r.author_status === "named") named++; }
       if ((r.revision_count ?? 0) > 0) revAny++;
       edits += r.edit_count ?? 0;
       if (r.word_count && r.word_count > 0) { words += r.word_count; wordsN++; }
-      byOutlet.set(r.outlet, (byOutlet.get(r.outlet) ?? 0) + 1);
+      bySource.set(r.source_id, (bySource.get(r.source_id) ?? 0) + 1);
       const t = r.topic ?? "sonstiges";
       byTopic.set(t, (byTopic.get(t) ?? 0) + 1);
-      if (r.published_at) { const d = r.published_at.slice(0, 10); dayBuckets.set(d, (dayBuckets.get(d) ?? 0) + 1); }
+      const et = effTime(r);
+      if (et) { const d = et.slice(0, 10); dayBuckets.set(d, (dayBuckets.get(d) ?? 0) + 1); }
     }
-    const days = [...dayBuckets.keys()].sort();
-    const last14 = days.slice(-14);
+    const daysSorted = [...dayBuckets.keys()].sort();
+    const last14 = daysSorted.slice(-14);
     const spark = last14.map((d) => dayBuckets.get(d) ?? 0);
-    // Tempo: Schnitt der letzten 7 vs. vorherige 7 Tage
     const recent = spark.slice(-7).reduce((a, b) => a + b, 0);
     const prior = spark.slice(-14, -7).reduce((a, b) => a + b, 0);
     const paceDelta = prior > 0 ? Math.round(((recent - prior) / prior) * 100) : null;
-    const topOutlet = [...byOutlet.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topSource = [...bySource.entries()].sort((a, b) => b[1] - a[1])[0];
     const topTopic = [...byTopic.entries()].sort((a, b) => b[1] - a[1])[0];
-    const perDay = days.length ? n / days.length : 0;
+    const perDay = daysSorted.length ? n / daysSorted.length : 0;
     return {
       n, pwPct: pct(pw, n), namedPct: pct(named, au),
       revPct: pct(revAny, n), edits,
       avgWords: wordsN ? Math.round(words / wordsN) : 0,
       avgRead: wordsN ? Math.round(words / wordsN / 200) : 0, // ~200 WPM
       spark, paceDelta, perDay,
-      topOutlet: topOutlet ? { name: short(topOutlet[0]), n: topOutlet[1], sh: pct(topOutlet[1], n) } : null,
+      topOutlet: topSource ? { name: nameById.get(topSource[0]) ?? "?", n: topSource[1], sh: pct(topSource[1], n) } : null,
       topTopic: topTopic ? { key: topTopic[0], n: topTopic[1], sh: pct(topTopic[1], n) } : null,
     };
-  }, [rows]);
+  }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
+      f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo,
+      f.subPats.join("|"), f.kwIdSet, nameById]);
 
-  if (loading && !rows.length) {
+  if (!f.corpusReady) {
     return (
       <>
         <h2 className="section-h">Auf einen Blick <span className="count">wird berechnet…</span></h2>

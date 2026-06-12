@@ -4,7 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
-import { fetchPagedSeq } from "@/lib/pgFetch";
+import { fetchAllRows } from "@/lib/pgFetch";
+import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, type CorpusRow } from "@/lib/filterCorpus";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
@@ -91,6 +92,12 @@ type Ctx = {
   resetAll: () => void;
   topicOpts: Opt[]; keywordOpts: Opt[]; subOpts: SubOpt[];
   catTree: Map<string, SubOpt[]>;
+  // Gemeinsamer Datenbestand für ALLE Analytics-Komponenten (eine Wahrheit, ein Prädikat).
+  corpus: CorpusRow[]; corpusReady: boolean;
+  // Keyword-Filter: Artikel-IDs des gewählten Keywords (null = kein Keyword-Filter aktiv)
+  kwIds: number[] | null; kwIdSet: Set<number> | null;
+  // Aufgelöste URL-Muster der gewählten Sub-Rubriken (kanonisch → roh, mehrsprachig)
+  subPats: string[];
   days: string[]; rangeIdx: { from: number; to: number }; setRangeIdx: (r: { from: number; to: number }) => void;
   rangeFrom: string | null; rangeTo: string | null;
   // Pinpoint: exaktes Zeitfenster (+ optional Quelle) aus einem Chart-Klick — überschreibt
@@ -189,68 +196,112 @@ export default function FilterProvider({ children }: { children: React.ReactNode
 
   const nn = (v: string) => (v === "all" ? null : v);
 
-  // dynamische Topic-Optionen (voller Filtersatz)
+  // ---------- Gemeinsamer Corpus: EINMAL laden, alle Komponenten zählen darüber ----------
+  // page_overview (nur erlaubte Seitentypen), neueste zuerst — wächst der Bestand über das
+  // Limit, fallen die ältesten raus. Langfristig gehört das in Server-Aggregation (RPCs),
+  // für den aktuellen Datenumfang ist der Client-Corpus die konsistenteste Lösung.
+  const [corpus, setCorpus] = useState<CorpusRow[]>([]);
+  const [corpusReady, setCorpusReady] = useState(false);
   useEffect(() => {
-    if (!active.size) { setTopicOpts([]); return; }
-    supabase.rpc("topic_opts_f", { p_sources: [...active], p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
-      .then(({ data }) => setTopicOpts((data ?? []).map((r: any) => ({ key: r.topic, label: topicLabel(r.topic), n: r.n }))));
-  }, [active, paywall, author, lang, rangeFrom, rangeTo]);
+    if (!sources.length) return;
+    let cancelled = false;
+    fetchAllRows<CorpusRow>(
+      () => supabase.from("page_overview").select("id", { count: "exact", head: true }).in("ptype", ALLOWED_PTYPES),
+      (a, b) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
+        .order("discovered_at", { ascending: false }).range(a, b) as any,
+      60000,
+    ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); } });
+    return () => { cancelled = true; };
+  }, [sources.length]);
+
+  // Keyword → Artikel-IDs (zentral, damit Tabelle UND Analytics dieselbe Menge nutzen)
+  const [kwIds, setKwIds] = useState<number[] | null>(null);
+  useEffect(() => {
+    if (keyword === "all") { setKwIds(null); return; }
+    let cancelled = false;
+    supabase.from("article_keywords").select("article_id, keywords!inner(term)").eq("keywords.term", keyword)
+      .then(({ data }) => { if (!cancelled) setKwIds((data ?? []).map((r: any) => r.article_id)); });
+    return () => { cancelled = true; };
+  }, [keyword]);
+  const kwIdSet = useMemo(() => (kwIds ? new Set(kwIds) : null), [kwIds]);
+
+  // dynamische Topic-Optionen — aus dem Corpus, mit dem GLEICHEN Prädikat wie die Tabelle
+  // (alle Filter außer Themen/Rubriken selbst). Zählt damit exakt das, was die Tabelle zeigt.
+  useEffect(() => {
+    if (!active.size || !corpusReady) { if (!active.size) setTopicOpts([]); return; }
+    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo } as any);
+    const match = makeMatcher(snap, [], kwIdSet, { topics: true });
+    const counts = new Map<string, number>();
+    for (const r of corpus) {
+      if (!active.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      const t = r.topic ?? "sonstiges";
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    setTopicOpts([...counts.entries()].sort((a, b) => b[1] - a[1])
+      .map(([key, n]) => ({ key, label: topicLabel(key), n })));
+  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, rangeFrom, rangeTo, kwIdSet]);
 
   // Unterthemen-Baum: verlagseigene Rubriken je kanonischem Topic — abgeleitet aus dem
   // URL-PFAD (nicht aus article_categories, das bei Bild/FAZ/n-tv/Tagesschau leer ist).
-  // Die URL trägt die Rubrik zuverlässig: faz.net/aktuell/politik/ausland/…, bild.de/sport/fussball/…
+  // Zählt über den Corpus mit dem Tabellen-Prädikat (ohne Themen-Dimension).
   const [catTree, setCatTree] = useState<Map<string, SubOpt[]>>(new Map());
   useEffect(() => {
-    if (!active.size) { setCatTree(new Map()); return; }
-    let cancelled = false;
-    fetchPagedSeq<any>((a, b) =>
-      supabase.from("page_overview").select("topic, source_id, url, published_at").in("source_id", [...active]).range(a, b),
-      25,
-    )
-      .then((data) => {
-        if (cancelled) return;
-        // raw-Rubriken je Topic sammeln (alle aktiven Quellen)
-        const agg = new Map<string, Map<string, { label: string; n: number; src: Set<number> }>>();
-        for (const r of data as any[]) {
-          if (rangeFrom && (!r.published_at || r.published_at < rangeFrom)) continue;
-          if (rangeTo && (!r.published_at || r.published_at > rangeTo)) continue;
-          const rubric = urlRubric(r.url);
-          if (!rubric) continue;
-          const topic = r.topic ?? "sonstiges";
-          if (!agg.has(topic)) agg.set(topic, new Map());
-          const m = agg.get(topic)!;
-          const e = m.get(rubric.raw) ?? { label: rubric.label, n: 0, src: new Set<number>() };
-          e.n++; e.src.add(r.source_id);
-          m.set(rubric.raw, e);
+    if (!active.size || !corpusReady) { if (!active.size) setCatTree(new Map()); return; }
+    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo } as any);
+    const match = makeMatcher(snap, [], kwIdSet, { topics: true });
+    // raw-Rubriken je Topic sammeln (alle aktiven Quellen)
+    const agg = new Map<string, Map<string, { label: string; n: number; src: Set<number> }>>();
+    for (const r of corpus) {
+      if (!active.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      const rubric = urlRubric(r.url);
+      if (!rubric) continue;
+      const topic = r.topic ?? "sonstiges";
+      if (!agg.has(topic)) agg.set(topic, new Map());
+      const m = agg.get(topic)!;
+      const e = m.get(rubric.raw) ?? { label: rubric.label, n: 0, src: new Set<number>() };
+      e.n++; e.src.add(r.source_id);
+      m.set(rubric.raw, e);
+    }
+    // Mehrsprachige Rubriken zu kanonischen Kategorien bündeln:
+    // "politik/ausland" + "politique/international" → beide unter "international"
+    const tree = new Map<string, SubOpt[]>();
+    for (const [topic, m] of agg) {
+      const groups = new Map<string, { label: string; n: number; src: Set<number>; rawKeys: string[]; topN: number }>();
+      for (const [raw, entry] of m) {
+        if (entry.n < 3) continue;
+        const cKey = toCanonKey(entry.label) ?? raw.replace(/\//g, "_");
+        const g = groups.get(cKey);
+        if (g) {
+          g.n += entry.n;
+          entry.src.forEach((id) => g.src.add(id));
+          g.rawKeys.push(raw);
+          if (entry.n > g.topN) { g.topN = entry.n; g.label = canonLabel(cKey, entry.label); }
+        } else {
+          groups.set(cKey, { label: canonLabel(cKey, entry.label), n: entry.n, src: new Set(entry.src), rawKeys: [raw], topN: entry.n });
         }
-        // Mehrsprachige Rubriken zu kanonischen Kategorien bündeln:
-        // "politik/ausland" + "politique/international" → beide unter "international"
-        const tree = new Map<string, SubOpt[]>();
-        for (const [topic, m] of agg) {
-          const groups = new Map<string, { label: string; n: number; src: Set<number>; rawKeys: string[]; topN: number }>();
-          for (const [raw, entry] of m) {
-            if (entry.n < 3) continue;
-            const cKey = toCanonKey(entry.label) ?? raw.replace(/\//g, "_");
-            const g = groups.get(cKey);
-            if (g) {
-              g.n += entry.n;
-              entry.src.forEach((id) => g.src.add(id));
-              g.rawKeys.push(raw);
-              if (entry.n > g.topN) { g.topN = entry.n; g.label = canonLabel(cKey, entry.label); }
-            } else {
-              groups.set(cKey, { label: canonLabel(cKey, entry.label), n: entry.n, src: new Set(entry.src), rawKeys: [raw], topN: entry.n });
-            }
-          }
-          const list = [...groups.entries()]
-            .map(([key, g]) => ({ key, label: g.label, n: g.n, sources: g.src.size, rawKeys: g.rawKeys }))
-            .sort((a, b) => b.n - a.n)
-            .slice(0, 24);
-          if (list.length) tree.set(topic, list);
-        }
-        setCatTree(tree);
-      });
-    return () => { cancelled = true; };
-  }, [active, rangeFrom, rangeTo]);
+      }
+      const list = [...groups.entries()]
+        .map(([key, g]) => ({ key, label: g.label, n: g.n, sources: g.src.size, rawKeys: g.rawKeys }))
+        .sort((a, b) => b.n - a.n)
+        .slice(0, 24);
+      if (list.length) tree.set(topic, list);
+    }
+    setCatTree(tree);
+  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, rangeFrom, rangeTo, kwIdSet]);
+
+  // Gewählte Sub-Rubriken → rohe URL-Muster (mehrsprachig, quellenübergreifend)
+  const subPats = useMemo(() => {
+    if (!subcats.length) return [];
+    return subcats.flatMap((key) => {
+      for (const opts of catTree.values()) {
+        const opt = opts.find((o) => o.key === key);
+        if (opt) return opt.rawKeys;
+      }
+      return [key];
+    });
+  }, [subcats.join("|||"), catTree]);
 
   // SubTopicBar-Optionen: abgeleitet aus dem Baum (bei genau einem gewählten Topic)
   useEffect(() => {
@@ -285,6 +336,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang,
     changed, setChanged, depth, setDepth, resetAll,
     topicOpts, keywordOpts, subOpts, catTree,
+    corpus, corpusReady, kwIds, kwIdSet, subPats,
     days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;

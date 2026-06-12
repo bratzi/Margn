@@ -16,6 +16,7 @@ import SubTopicBar from "@/components/SubTopicBar";
 import ExtLink from "@/components/ExtLink";
 import DataTable, { type Col } from "@/components/DataTable";
 import { topicLabel } from "@/lib/topics";
+import { applyServerFilters, snapshotOf } from "@/lib/filterCorpus";
 
 type Row = {
   id: number; article_id: number | null; url: string; title: string | null; outlet: string; country: string | null;
@@ -25,10 +26,11 @@ type Row = {
   edit_count: number | null; extension_count: number | null; lang_detected: string | null; scan_count: number | null;
 };
 
+// Nur noch journalistische Seitentypen — Videos/Werbung/Hubs sind global ausgeschlossen
+// (siehe ALLOWED_PTYPES in lib/filterCorpus.ts).
 const PTYPE: Record<string, { l: string; c: string }> = {
   artikel: { l: "Artikel", c: "neutral" }, paywall: { l: "Paywall", c: "lock" },
-  video: { l: "Video", c: "media" }, werbung: { l: "Werbung", c: "wait" },
-  hub: { l: "Hub", c: "neutral" }, blog: { l: "Timeline", c: "info" }, timeline: { l: "Timeline", c: "info" },
+  blog: { l: "Timeline", c: "info" }, timeline: { l: "Timeline", c: "info" },
 };
 const AUTHOR: Record<string, { l: string; c: string }> = {
   named: { l: "Autor", c: "ok" }, anonymous: { l: "Redaktion", c: "wait" },
@@ -44,68 +46,24 @@ export default function ArticleDashboard() {
   const [rowKw, setRowKw] = useState<Record<number, string[]>>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
-  const [kwIds, setKwIds] = useState<number[] | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   useEffect(() => { setUpdatedAt(new Date()); }, [f.ready]);
 
-  // Keyword → Artikel-IDs
-  useEffect(() => {
-    if (f.keyword === "all") { setKwIds(null); return; }
-    supabase.from("article_keywords").select("article_id, keywords!inner(term)").eq("keywords.term", f.keyword)
-      .then(({ data }) => setKwIds((data ?? []).map((r: any) => r.article_id)));
-  }, [f.keyword]);
-
   const loadRows = useCallback(async () => {
     if (!f.active.size) { setRows([]); setTotal(0); return; }
-    if (f.keyword !== "all" && kwIds === null) return;
-    const idFilter: number[] | null = kwIds;
+    if (f.keyword !== "all" && f.kwIds === null) return;
     // Pinpoint (Chart-Klick) kann auf EINE Quelle einschränken, sonst alle aktiven.
     const srcFilter = f.pinpoint?.sourceId != null ? [f.pinpoint.sourceId] : f.activeArr;
+    // ALLE Filterbedingungen kommen aus dem zentralen Modul (lib/filterCorpus.ts) —
+    // das exakte Spiegelbild des Prädikats, mit dem die Charts zählen.
     let q = supabase.from("page_overview").select("id,article_id,url,title,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", srcFilter);
-    if (f.status === "analyzed") q = q.eq("analyzed", true); else if (f.status === "backlog") q = q.eq("analyzed", false);
-    if (f.status === "new") q = q.lte("scan_count", 1); else if (f.status === "rescanned") q = q.gte("scan_count", 2);
-    if (f.paywall === "yes") q = q.eq("paywalled", true); else if (f.paywall === "no") q = q.eq("paywalled", false);
-    if (f.atype !== "all") q = q.eq("ptype", f.atype);
-    if (f.author !== "all") q = q.eq("author_status", f.author);
-    if (f.topics.length) q = q.in("topic", f.topics);
-    if (f.lang !== "all") q = q.eq("language", f.lang);
-    // Stille Änderungen: mind. eine nachträgliche Revision vs. unverändert
-    if (f.changed === "yes") q = q.gte("revision_count", 1);
-    else if (f.changed === "no") q = q.or("revision_count.is.null,revision_count.eq.0");
-    // Artikel-Tiefe nach Wortzahl
-    if (f.depth === "kurz") q = q.gt("word_count", 0).lt("word_count", 300);
-    else if (f.depth === "mittel") q = q.gte("word_count", 300).lte("word_count", 900);
-    else if (f.depth === "lang") q = q.gt("word_count", 900);
-    // Zeitfilter über EFFEKTIVE Zeit: published_at falls vorhanden, sonst discovered_at.
-    // Sonst fallen alle Artikel ohne Veröffentlichungsdatum aus dem Tagesfilter (bei Bild/
-    // Spiegel sind das viele) → Nutzer sah nur eine Handvoll Treffer statt aller des Tages.
-    if (f.rangeFrom && f.rangeTo) {
-      q = q.or(`and(published_at.gte.${f.rangeFrom},published_at.lte.${f.rangeTo}),and(published_at.is.null,discovered_at.gte.${f.rangeFrom},discovered_at.lte.${f.rangeTo})`);
-    } else if (f.rangeFrom) {
-      q = q.or(`published_at.gte.${f.rangeFrom},and(published_at.is.null,discovered_at.gte.${f.rangeFrom})`);
-    } else if (f.rangeTo) {
-      q = q.or(`published_at.lte.${f.rangeTo},and(published_at.is.null,discovered_at.lte.${f.rangeTo})`);
-    }
-    // Sub-Rubriken: URL-Pfadmuster (z.B. politik/ausland) — funktioniert quellenübergreifend,
-    // da die Rubrik im URL-Pfad steht (article_categories ist bei den meisten Quellen leer).
-    if (f.subcats.length) {
-      // Pro kanonaischer Kategorie alle zugehörigen URL-Muster (ggf. mehrsprachig) nutzen
-      const rawPats = f.subcats.flatMap((key) => {
-        for (const opts of f.catTree.values()) {
-          const opt = opts.find((o) => o.key === key);
-          if (opt) return opt.rawKeys;
-        }
-        return [key];
-      });
-      q = q.or(rawPats.map((s) => `url.ilike.%/${s}/%`).join(","));
-    }
-    if (idFilter) q = q.in("article_id", idFilter.length ? idFilter : [-1]);
+    q = applyServerFilters(q, snapshotOf(f as any), f.subPats, f.kwIds);
     const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, kwIds, f.keyword, f.subcats.join("|||"), page]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.kwIds, f.keyword, f.subPats.join("|"), page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subcats.join("|||"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId]);
+  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId]);
 
   useEffect(() => {
     const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];

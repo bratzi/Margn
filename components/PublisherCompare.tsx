@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useMemo, useState } from "react";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
+import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
 type Stat = {
   source_id: number; articles: number; paywalled: number;
   au_named: number; au_anon: number; au_none: number;
-  video: number; werbung: number; hub: number; new_7d: number;
 };
 
 type Period = "7d" | "30d" | "90d" | "dyn";
@@ -61,11 +60,8 @@ function DeltaPP({ cur, prev, baseOk }: { cur: number; prev: number; baseOk: boo
 export default function PublisherCompare() {
   const f = useFilters();
   const { sources, activeArr: activeSources, topics, days, rangeIdx } = f;
-  const [stats, setStats] = useState<Stat[]>([]);
-  const [prevStats, setPrevStats] = useState<Stat[]>([]);
   const [period, setPeriod] = useState<Period>("7d");
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
-  const prevMap = useMemo(() => new Map(prevStats.map((s) => [s.source_id, s])), [prevStats]);
 
   // Berechne curFrom/curTo/prevFrom/prevTo je nach Modus
   const { curFrom, curTo, prevFrom, periodDays } = useMemo(() => {
@@ -82,18 +78,36 @@ export default function PublisherCompare() {
     return { curFrom: cf, curTo: now, prevFrom: pf, periodDays: d };
   }, [period, days, rangeIdx]);
 
-  useEffect(() => {
-    if (!activeSources.length) { setStats([]); setPrevStats([]); return; }
-    const nn = (v: string) => (v === "all" ? null : v);
-    const base = { p_sources: activeSources, p_topics: topics.length ? topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang) };
-    Promise.all([
-      supabase.rpc("publisher_stats_f", { ...base, p_from: curFrom.toISOString(), p_to: curTo.toISOString() }),
-      supabase.rpc("publisher_stats_f", { ...base, p_from: prevFrom.toISOString(), p_to: curFrom.toISOString() }),
-    ]).then(([cur, prev]) => {
-      setStats((cur.data as Stat[]) ?? []);
-      setPrevStats((prev.data as Stat[]) ?? []);
-    });
-  }, [activeSources.join(","), topics.join(","), f.paywall, f.author, f.lang, curFrom.toISOString(), curTo.toISOString(), prevFrom.toISOString()]);
+  // Beide Perioden aus dem gemeinsamen Corpus — gleiches Prädikat wie die Tabelle
+  // (alle Filter außer Zeit; die Perioden bringt der Vergleich selbst mit).
+  // Videos/Werbung/Hubs sind damit automatisch raus — vorher zählte die RPC sie mit.
+  const { stats, prevMap } = useMemo(() => {
+    const snap = snapshotOf(f as any);
+    const match = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
+    const act = new Set(activeSources);
+    const curFromMs = curFrom.getTime(), curToMs = curTo.getTime(), prevFromMs = prevFrom.getTime();
+    const mk = (): Stat => ({ source_id: 0, articles: 0, paywalled: 0, au_named: 0, au_anon: 0, au_none: 0 });
+    const cur = new Map<number, Stat>(), prev = new Map<number, Stat>();
+    for (const r of f.corpus) {
+      if (!act.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      const t = effTime(r);
+      if (!t) continue;
+      const ms = Date.parse(t);
+      const target = ms >= curFromMs && ms <= curToMs ? cur : ms >= prevFromMs && ms < curFromMs ? prev : null;
+      if (!target) continue;
+      let s = target.get(r.source_id);
+      if (!s) { s = mk(); s.source_id = r.source_id; target.set(r.source_id, s); }
+      s.articles++;
+      if (r.paywalled === true) s.paywalled++;
+      if (r.author_status === "named") s.au_named++;
+      else if (r.author_status === "anonymous") s.au_anon++;
+      else if (r.author_status === "none") s.au_none++;
+    }
+    return { stats: [...cur.values()], prevMap: prev };
+  }, [f.corpus, f.corpusReady, activeSources.join(","), topics.join(","), f.status, f.paywall,
+      f.atype, f.author, f.lang, f.changed, f.depth, f.subPats.join("|"), f.kwIdSet,
+      curFrom.getTime(), curTo.getTime(), prevFrom.getTime()]);
 
   if (!stats.length) return null;
   const nm = (id: number) => short(nameById.get(id)?.name ?? "?");

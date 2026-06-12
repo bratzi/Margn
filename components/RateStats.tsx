@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS } from "@/components/TimeRangeFilter";
+import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
-type B = { source_id: number; bucket: string; n: number };
 type Unit = "minute" | "hour" | "day" | "week";
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000, VH = 220;
@@ -23,7 +22,6 @@ function isoWeek(d: Date): number {
 export default function RateStats() {
   const f = useFilters();
   const { sources, activeArr } = f;
-  const [rows, setRows] = useState<B[]>([]);
   const [manual, setManual] = useState<"auto" | Unit>("auto");
   // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
   const [hoverDot, setHoverDot] = useState<{ sid: number; idx: number; x: number; y: number } | null>(null);
@@ -74,15 +72,6 @@ export default function RateStats() {
   // Dichte/Override zurücksetzen, wenn Modus oder Zeitraum wechselt
   useEffect(() => { setDens(null); setAutoUnitOverride(null); setHoverDot(null); }, [manual, fromIso, toIso]);
 
-  useEffect(() => {
-    if (!activeArr.length) { setRows([]); return; }
-    const nn = (v: string) => (v === "all" ? null : v);
-    supabase.rpc("publish_buckets_f", {
-      p_sources: activeArr, p_topics: f.topics.length ? f.topics : null, p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang),
-      p_from: fromIso, p_to: toIso, p_bucket: unit,
-    }).limit(10000).then(({ data }) => setRows((data as B[]) ?? []));
-  }, [activeArr.join(","), f.topics.join(","), f.paywall, f.author, f.lang, fromIso, toIso, unit]);
-
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
@@ -116,21 +105,34 @@ export default function RateStats() {
     return out;
   }, [fromIso, toIso, unit]);
 
-  const { series, maxVal } = useMemo(() => {
+  // Zählung direkt aus dem gemeinsamen Corpus — gleiches Prädikat wie die Tabelle,
+  // Zeitfenster ist der gewählte Zeitstrahl-Bereich, Bucketing über die EFFEKTIVE Zeit
+  // (published_at, sonst discovered_at — vorher fielen undatierte Artikel ganz raus).
+  const { series, maxVal, total } = useMemo(() => {
+    const snap = { ...snapshotOf(f as any), rangeFrom: fromIso, rangeTo: toIso };
+    const match = makeMatcher(snap, f.subPats, f.kwIdSet);
     const map = new Map<number, Map<string, number>>();
-    for (const r of rows) {
+    let tot = 0;
+    for (const r of f.corpus) {
+      if (!act.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      const t = effTime(r);
+      if (!t) continue;
+      const k = truncTo(t, unit).toISOString();
       if (!map.has(r.source_id)) map.set(r.source_id, new Map());
       const m = map.get(r.source_id)!;
-      const k = truncTo(r.bucket, unit).toISOString();
-      m.set(k, (m.get(k) ?? 0) + r.n);
+      m.set(k, (m.get(k) ?? 0) + 1);
+      tot++;
     }
     const ser = sources.filter((s) => act.has(s.id)).map((s) => ({
       id: s.id, color: colorById.get(s.id)!,
       vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0),
     }));
     const mx = Math.max(1, ...ser.flatMap((s) => s.vals));
-    return { series: ser, maxVal: mx };
-  }, [rows, sources, act, buckets, unit]);
+    return { series: ser, maxVal: mx, total: tot };
+  }, [f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso,
+      f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
+      f.subPats.join("|"), f.kwIdSet]);
 
   const NB = buckets.length;
   const availW = (containerW > 0 ? containerW : VW) - PAD_L - PAD_R;
@@ -234,7 +236,6 @@ export default function RateStats() {
     requestAnimationFrame(() => document.querySelector(".dt-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" }));
   };
 
-  const total = series.reduce((s, x) => s + x.vals.reduce((a, b) => a + b, 0), 0);
   const fromD = new Date(fromIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   const toD = new Date(toIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   // X-Achsen-Dichte richtet sich nach der ECHTEN Breite: je weiter gezoomt (mehr px je
@@ -360,7 +361,7 @@ export default function RateStats() {
         </div>
       </h2>
       <div className="panel pad">
-        {!rows.length ? (
+        {!total ? (
           <p className="faint" style={{ fontSize: 13 }}>Keine veröffentlichten Artikel im gewählten Zeitraum.</p>
         ) : (
           <>
