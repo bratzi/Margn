@@ -1,12 +1,15 @@
 name: analyze
 on:
   schedule:
-    - cron: "30 */6 * * *"   # alle 6 Stunden – Batch (kein Chromium), arbeitet entdeckte Seiten ab
+    - cron: "30 */3 * * *"   # alle 3 Stunden – rendert NEU entdeckte Artikel und reichert sie voll an
   workflow_dispatch:
+concurrency:
+  group: analyze
+  cancel-in-progress: false
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,10 +19,23 @@ jobs:
           cache-dependency-path: scraper/package-lock.json
       - run: npm ci
         working-directory: scraper
+      - name: Cache Playwright-Browser
+        id: pw
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('scraper/package-lock.json') }}
+      - run: npx playwright install chromium
+        working-directory: scraper
+        if: steps.pw.outputs.cache-hit != 'true'
+      - run: npx playwright install-deps chromium
+        working-directory: scraper
       - run: npm run scrape
         working-directory: scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "analyze"
-          CRAWL_MAX_PAGES: "8000"
+          CRAWL_MAX_PAGES: "2000"
+          CRAWL_DELAY_MS: "60"
+          CRAWL_CONCURRENCY: "10"

@@ -710,21 +710,38 @@ async function analyzeBacklog() {
   const batch = [...bySrc.values()].reduce((s, a) => s + a.length, 0);
   console.log(`Entdeckt: ${discovered.length} | analysiert: ${done.size} | offen: ${openTotal} | dieser Lauf: ${batch} (max ${perSource}/Quelle)`);
 
-  // Kein Chromium mehr nötig: wir speichern nur URL + Metadaten (no content/embed).
-  // Direkt batch-upsertn aus pages → articles.
-  for (const [sid, urls] of bySrc) {
-    const src = srcById.get(sid);
-    const CHUNK = 200;
-    let ok = 0;
-    for (let i = 0; i < urls.length; i += CHUNK) {
-      const chunk = urls.slice(i, i + CHUNK);
-      const rows = chunk.map((url) => ({ source_id: sid, url, last_seen: new Date().toISOString() }));
-      const { error } = await sb.from("articles").upsert(rows, { onConflict: "url", ignoreDuplicates: false });
-      if (error) console.error("FEHLER batch:", error.message);
-      else ok += chunk.length;
-    }
-    console.log(`Quelle ${src.base_url}: ${ok}/${urls.length} analysiert.`);
+  // Neue Artikel werden DIREKT gerendert und voll angereichert (Titel, Wörter, Datum,
+  // Autoren, Keywords) — statt nur nackte URLs einzufügen. So kommen neue Artikel OHNE den
+  // separaten enrich-Job mit Metadaten in die DB; enrich bleibt nur für den Altbestand.
+  const queue: { url: string; sid: number }[] = [];
+  for (const [sid, urls] of bySrc) for (const url of urls) queue.push({ url, sid });
+  const browser = await chromium.launch();
+  let done2 = 0, ok = 0;
+  const total = queue.length;
+  async function worker() {
+    const ctx = await browser.newContext({ userAgent: UA });
+    try {
+      while (true) {
+        const item = queue.shift();
+        if (!item) break;
+        try {
+          const { html } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
+          if (html) {
+            // Selbst-Korrektur: stellt sich eine entdeckte „Artikel"-URL als Hub/Video heraus,
+            // nicht als Artikel führen.
+            const cls = classifyRendered(item.url, html);
+            if (cls.kind === "article") { await saveArticleFull(item.sid, item.url, html); ok++; }
+            else { await sb.from("pages").update({ kind: cls.kind }).eq("url", item.url); }
+          }
+        } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
+        if (++done2 % 50 === 0) console.log(`  ${done2}/${total} gerendert (${ok} Artikel)…`);
+        await sleep(DELAY_MS);
+      }
+    } finally { await ctx.close(); }
   }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  await browser.close();
+  console.log(`Fertig: ${done2} gerendert, ${ok} Artikel voll angereichert.`);
 }
 
 // enrich-Modus: Alle articles ohne Titel mit Chromium rendern und Metadaten nachtragen.
