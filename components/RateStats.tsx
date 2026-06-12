@@ -336,8 +336,14 @@ export default function RateStats() {
   };
   const zoomMod = dens !== null || autoUnitOverride !== null;
 
-  // Dots zeigen, solange sie nicht zu dicht stehen (px-Abstand der Buckets)
-  const showDots = effDens >= 7;
+  // Datenpunkte zeigen, wenn sie nicht zu dicht stehen — ODER wenn die Daten dünn sind
+  // (z.B. Minuten-Modus: viele leere Buckets, aber nur wenige echte Punkte → diese exakt
+  // minutengenau als Dots zeigen, statt sie wegen niedriger Dichte auszublenden).
+  const nonZeroPts = useMemo(
+    () => series.reduce((s, ser) => s + ser.vals.reduce((a, v) => a + (v > 0 ? 1 : 0), 0), 0),
+    [series],
+  );
+  const showDots = effDens >= 7 || nonZeroPts <= 280;
 
   return (
     <>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import LandingStats from "@/components/LandingStats";
+import LandingBg from "@/components/LandingBg";
 
 export const metadata = {
   title: "margn — Was Nachrichtenseiten ändern, nachdem sie publiziert haben",
@@ -76,6 +77,7 @@ export default function Landing() {
 
       {/* Hero */}
       <section className="ld-hero">
+        <LandingBg variant="network" />
         <p className="ld-overline">Offenes Medienobservatorium · DE &amp; FR</p>
         <h1 className="ld-h1">
           Was Nachrichtenseiten ändern,<br />
@@ -110,6 +112,7 @@ export default function Landing() {
 
       {/* Methodik */}
       <section className="ld-section ld-section-alt" id="methodik">
+        <LandingBg variant="flow" />
         <p className="ld-overline">Methodik</p>
         <h2 className="ld-h2">Drei Schritte, stündlich wiederholt</h2>
         <div className="ld-steps">
@@ -145,6 +148,7 @@ export default function Landing() {
 
       {/* Abschluss-CTA */}
       <section className="ld-final">
+        <LandingBg variant="network" />
         <h2 className="ld-h2">Selbst nachsehen, was sich geändert hat.</h2>
         <Link href="/articles" className="ld-cta">Zum Dashboard</Link>
       </section>

@@ -796,9 +796,14 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 }
 
 /* ---------- Themen-DNA (TopicProfile) ---------- */
-/* Insight-Cards */
-.tp-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 14px; }
-.tp-insight { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; }
+/* Insight-Karussell: horizontal scrollbar, viele Fakten */
+.tp-insights-scroll { overflow-x: auto; margin-bottom: 14px; padding-bottom: 6px; scroll-snap-type: x proximity; }
+.tp-insights-scroll::-webkit-scrollbar { height: 7px; }
+.tp-insights-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+.tp-insights-scroll::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+.tp-insights-track { display: flex; gap: 10px; width: max-content; }
+.tp-insight { flex: 0 0 230px; scroll-snap-align: start; display: flex; flex-direction: column; gap: 2px; padding: 13px 15px; transition: transform .14s, border-color .14s; }
+.tp-insight:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
 .tp-insight-icon { font-size: 16px; line-height: 1; margin-bottom: 4px; }
 .tp-insight-value { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums; }
 .tp-insight-label { font-size: 12px; font-weight: 650; color: var(--accent); margin-top: 1px; }
@@ -1049,3 +1054,12 @@ a.art-title:hover { color: var(--accent); text-decoration: underline; }
   .ld-hero { padding: 64px 20px 48px; }
   .ld-section { padding: 56px 20px; }
 }
+
+/* Animierte Sektions-Hintergründe (dezent, hinter dem Inhalt) */
+.ld-hero, .ld-section-alt, .ld-final { position: relative; overflow: hidden; }
+.ld-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none;
+  opacity: .7;
+  -webkit-mask-image: radial-gradient(ellipse 75% 80% at 50% 45%, #000 50%, transparent 100%);
+          mask-image: radial-gradient(ellipse 75% 80% at 50% 45%, #000 50%, transparent 100%); }
+.ld-hero > :not(.ld-bg), .ld-section-alt > :not(.ld-bg), .ld-final > :not(.ld-bg) { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) { .ld-bg { display: none; } }

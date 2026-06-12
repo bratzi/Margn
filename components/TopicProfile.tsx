@@ -90,87 +90,107 @@ export default function TopicProfile() {
     return { total, totalPw, topicsSorted, pubs, byTopic };
   }, [rows, activeSources]);
 
-  // Auto-Insights: Fakten, die man der Rohtabelle nicht ansieht
+  // Auto-Insights: viele Fakten, die man der Rohtabelle nicht ansieht — in ZUFÄLLIGER Reihenfolge.
   const insights = useMemo(() => {
     const { total, totalPw, topicsSorted, pubs, byTopic } = model;
     const out: { icon: string; value: string; label: string; caption: string }[] = [];
     if (!total || !pubs.length) return out;
 
+    // Publisher-Rollups (Paywall/Autoren/Tiefe je Quelle)
+    const pubRoll = pubs.map((p) => {
+      let pw = 0, named = 0, au = 0, words = 0, wordsN = 0;
+      for (const [, c] of p.cells) { pw += c.pw; named += c.named; au += c.au; words += c.words; wordsN += c.wordsN; }
+      return { name: p.name, total: p.total, diversity: p.diversity, pwSh: p.total ? pw / p.total : 0,
+        namedSh: au ? named / au : 0, anonSh: au ? (au - named) / au : 0, avgWords: wordsN ? Math.round(words / wordsN) : 0 };
+    });
+    const big = pubRoll.filter((p) => p.total >= 50);
+    const topicBig = topicsSorted.filter((t) => byTopic.get(t)!.n >= 30);
+
     // 1) Stärkste Spezialisierung (Affinity-Index)
     let spec: { pub: string; topic: string; idx: number; share: number } | null = null;
     for (const p of pubs) {
-      if (p.total < 80) continue;
+      if (p.total < 60) continue;
       for (const t of topicsSorted) {
         const c = p.cells.get(t);
-        if (!c || c.n < 20) continue;
+        if (!c || c.n < 15) continue;
         const idx = (c.n / p.total) / (byTopic.get(t)!.n / total);
         if (idx >= 1.4 && (!spec || idx > spec.idx)) spec = { pub: p.name, topic: t, idx, share: c.n / p.total };
       }
     }
-    if (spec) out.push({
-      icon: "🎯", value: `${spec.idx.toFixed(1).replace(".", ",")}×`,
-      label: `${spec.pub} → ${topicLabel(spec.topic)}`,
-      caption: `${pct(spec.share)} des eigenen Outputs — ${spec.idx.toFixed(1).replace(".", ",")}-fach über dem Marktschnitt`,
-    });
+    if (spec) out.push({ icon: "🎯", value: `${spec.idx.toFixed(1).replace(".", ",")}×`, label: `${spec.pub} → ${topicLabel(spec.topic)}`,
+      caption: `${pct(spec.share)} des eigenen Outputs — ${spec.idx.toFixed(1).replace(".", ",")}-fach über dem Marktschnitt` });
 
-    // 2) Themen-Dominanz (Share of Voice)
+    // 2) Share of Voice (Themen-Dominanz)
     let dom: { pub: string; topic: string; sov: number } | null = null;
-    for (const t of topicsSorted) {
-      const g = byTopic.get(t)!;
-      if (g.n < 40) continue;
-      for (const p of pubs) {
-        const c = p.cells.get(t);
-        if (!c) continue;
-        const sov = c.n / g.n;
-        if (sov >= 0.4 && (!dom || sov > dom.sov)) dom = { pub: p.name, topic: t, sov };
-      }
-    }
-    if (dom) out.push({
-      icon: "📣", value: pct(dom.sov),
-      label: `Share of Voice: ${topicLabel(dom.topic)}`,
-      caption: `${dom.pub} liefert ${pct(dom.sov)} aller ${topicLabel(dom.topic)}-Artikel im Feld`,
-    });
+    for (const t of topicBig) { const g = byTopic.get(t)!;
+      for (const p of pubs) { const c = p.cells.get(t); if (!c) continue; const sov = c.n / g.n;
+        if (sov >= 0.35 && (!dom || sov > dom.sov)) dom = { pub: p.name, topic: t, sov }; } }
+    if (dom) out.push({ icon: "📣", value: pct(dom.sov), label: `Share of Voice: ${topicLabel(dom.topic)}`,
+      caption: `${dom.pub} liefert ${pct(dom.sov)} aller ${topicLabel(dom.topic)}-Artikel im Feld` });
 
-    // 3) Meistmonetarisiertes Thema (Paywall-Quote vs. Schnitt)
-    let mon: { topic: string; sh: number } | null = null;
-    for (const t of topicsSorted) {
-      const g = byTopic.get(t)!;
-      if (g.n < 40) continue;
-      const sh = g.pw / g.n;
-      if (!mon || sh > mon.sh) mon = { topic: t, sh };
-    }
-    if (mon && mon.sh > 0.02) out.push({
-      icon: "💰", value: pct(mon.sh),
-      label: `Paywall-Spitzenreiter: ${topicLabel(mon.topic)}`,
-      caption: `Gesamtschnitt ${pct(totalPw / total)} — dieses Thema gilt als besonders zahlungswürdig`,
-    });
+    // 3) Meistmonetarisiertes Thema
+    const monT = [...topicBig].map((t) => ({ t, sh: byTopic.get(t)!.pw / byTopic.get(t)!.n })).sort((a, b) => b.sh - a.sh)[0];
+    if (monT && monT.sh > 0.02) out.push({ icon: "💰", value: pct(monT.sh), label: `Paywall-Spitzenreiter: ${topicLabel(monT.t)}`,
+      caption: `Feld-Schnitt ${pct(totalPw / total)} — dieses Thema gilt als besonders zahlungswürdig` });
 
-    // 4) Transparenteste Berichterstattung (namentliche Autoren)
-    let tra: { topic: string; sh: number } | null = null;
-    for (const t of topicsSorted) {
-      const g = byTopic.get(t)!;
-      if (g.au < 40) continue;
-      const sh = g.named / g.au;
-      if (!tra || sh > tra.sh) tra = { topic: t, sh };
-    }
-    if (tra) out.push({
-      icon: "✍️", value: pct(tra.sh),
-      label: `Autoren-Klarheit: ${topicLabel(tra.topic)}`,
-      caption: "Höchster Anteil namentlich gekennzeichneter Artikel",
-    });
+    // 4) Am freiesten zugängliches Thema
+    const freeT = [...topicBig].map((t) => ({ t, sh: byTopic.get(t)!.pw / byTopic.get(t)!.n })).sort((a, b) => a.sh - b.sh)[0];
+    if (freeT) out.push({ icon: "🔓", value: pct(1 - freeT.sh), label: `Am offensten: ${topicLabel(freeT.t)}`,
+      caption: `${pct(1 - freeT.sh)} frei lesbar — die niedrigste Paywall-Quote im Feld` });
 
-    // 5) Breiteste vs. fokussierteste Agenda (Entropie)
-    const withDiv = pubs.filter((p) => p.total >= 60);
-    if (withDiv.length >= 2) {
-      const sorted = [...withDiv].sort((a, b) => b.diversity - a.diversity);
-      const broad = sorted[0], narrow = sorted[sorted.length - 1];
-      out.push({
-        icon: "🧭", value: pct(broad.diversity),
-        label: `Themen-Vielfalt: ${broad.name}`,
-        caption: `Breiteste Agenda im Feld — ${narrow.name} ist am stärksten fokussiert (${pct(narrow.diversity)})`,
-      });
-    }
-    return out.slice(0, 5);
+    // 5) Transparentestes Thema (namentliche Autoren)
+    const traT = [...topicBig].filter((t) => byTopic.get(t)!.au >= 20).map((t) => ({ t, sh: byTopic.get(t)!.named / byTopic.get(t)!.au })).sort((a, b) => b.sh - a.sh)[0];
+    if (traT) out.push({ icon: "✍️", value: pct(traT.sh), label: `Autoren-Klarheit: ${topicLabel(traT.t)}`,
+      caption: "Höchster Anteil namentlich gekennzeichneter Artikel" });
+
+    // 6) Tiefstes Thema (Ø Wörter)
+    const deepT = [...topicBig].map((t) => ({ t, w: byTopic.get(t)!.wordsN >= 5 ? byTopic.get(t)!.words / byTopic.get(t)!.wordsN : 0 })).sort((a, b) => b.w - a.w)[0];
+    if (deepT && deepT.w > 0) out.push({ icon: "📖", value: `${Math.round(deepT.w).toLocaleString("de-DE")}`, label: `Längste Artikel: ${topicLabel(deepT.t)}`,
+      caption: `Ø ${Math.round(deepT.w).toLocaleString("de-DE")} Wörter — ≈ ${Math.round(deepT.w / 200)} min Lesezeit` });
+
+    // 7) Breiteste vs. fokussierteste Agenda (Entropie)
+    if (big.length >= 2) { const s = [...big].sort((a, b) => b.diversity - a.diversity); const broad = s[0], narrow = s[s.length - 1];
+      out.push({ icon: "🧭", value: pct(broad.diversity), label: `Breiteste Agenda: ${broad.name}`,
+        caption: `Vielfältigste Themenmischung — ${narrow.name} ist am fokussiertesten (${pct(narrow.diversity)})` }); }
+
+    // 8) Paywall-König (Publisher)
+    const pwKing = [...big].sort((a, b) => b.pwSh - a.pwSh)[0];
+    if (pwKing && pwKing.pwSh > 0.05) out.push({ icon: "🔒", value: pct(pwKing.pwSh), label: `Paywall-König: ${pwKing.name}`,
+      caption: `Höchster Anteil kostenpflichtiger Artikel im Vergleich` });
+
+    // 9) Transparenteste Quelle
+    const traP = [...big].sort((a, b) => b.namedSh - a.namedSh)[0];
+    if (traP && traP.namedSh > 0) out.push({ icon: "🪪", value: pct(traP.namedSh), label: `Transparenteste Quelle: ${traP.name}`,
+      caption: `Nennt am häufigsten echte Autorennamen` });
+
+    // 10) Anonymste Quelle
+    const anonP = [...big].sort((a, b) => b.anonSh - a.anonSh)[0];
+    if (anonP && anonP.anonSh > 0.3) out.push({ icon: "🕵️", value: pct(anonP.anonSh), label: `Am anonymsten: ${anonP.name}`,
+      caption: `Höchster Anteil Redaktion/Agentur statt Autorennamen` });
+
+    // 11) Produktivste Quelle
+    const prolific = [...pubRoll].sort((a, b) => b.total - a.total)[0];
+    if (prolific) out.push({ icon: "⚡", value: prolific.total.toLocaleString("de-DE"), label: `Produktivste Quelle: ${prolific.name}`,
+      caption: `Meiste Artikel im aktuellen Filter` });
+
+    // 12) Ausführlichste Quelle (Ø Wörter)
+    const wordy = [...big].filter((p) => p.avgWords > 0).sort((a, b) => b.avgWords - a.avgWords)[0];
+    if (wordy) out.push({ icon: "📝", value: wordy.avgWords.toLocaleString("de-DE"), label: `Ausführlichste Quelle: ${wordy.name}`,
+      caption: `Ø ${wordy.avgWords.toLocaleString("de-DE")} Wörter pro Artikel` });
+
+    // 13) Größtes Themenfeld
+    const topT = topicsSorted.map((t) => ({ t, n: byTopic.get(t)!.n })).sort((a, b) => b.n - a.n)[0];
+    if (topT) out.push({ icon: "🗂️", value: pct(topT.n / total), label: `Größtes Themenfeld: ${topicLabel(topT.t)}`,
+      caption: `${topT.n.toLocaleString("de-DE")} Artikel — ${pct(topT.n / total)} des gesamten Outputs` });
+
+    // 14) Kürzeste Artikel (Thema)
+    const shortT = [...topicBig].map((t) => ({ t, w: byTopic.get(t)!.wordsN >= 5 ? byTopic.get(t)!.words / byTopic.get(t)!.wordsN : 1e9 })).filter((x) => x.w < 1e9).sort((a, b) => a.w - b.w)[0];
+    if (shortT) out.push({ icon: "⏱️", value: `${Math.round(shortT.w).toLocaleString("de-DE")}`, label: `Kürzeste Artikel: ${topicLabel(shortT.t)}`,
+      caption: `Ø ${Math.round(shortT.w).toLocaleString("de-DE")} Wörter — schnelle Meldungen` });
+
+    // Zufällige Reihenfolge (Fisher-Yates), neu gemischt bei jedem Daten-/Filter-Wechsel.
+    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+    return out;
   }, [model]);
 
   // Monetarisierung, Transparenz & Tiefe je Thema (für die Mini-Charts)
@@ -215,17 +235,19 @@ export default function TopicProfile() {
         <span className="count">Agenda-Profil · Spezialisierung · Monetarisierung — {total.toLocaleString("de-DE")} Artikel</span>
       </h2>
 
-      {/* Auto-Insights: was man der Tabelle nicht ansieht */}
+      {/* Auto-Insights: horizontal scrollbares Fakten-Karussell (zufällige Reihenfolge) */}
       {insights.length > 0 && (
-        <div className="tp-insights data-fade-in">
-          {insights.map((i) => (
-            <div key={i.label} className="tp-insight panel">
-              <span className="tp-insight-icon">{i.icon}</span>
-              <span className="tp-insight-value">{i.value}</span>
-              <span className="tp-insight-label">{i.label}</span>
-              <span className="tp-insight-caption">{i.caption}</span>
-            </div>
-          ))}
+        <div className="tp-insights-scroll data-fade-in">
+          <div className="tp-insights-track">
+            {insights.map((i, idx) => (
+              <div key={`${i.label}-${idx}`} className="tp-insight panel">
+                <span className="tp-insight-icon">{i.icon}</span>
+                <span className="tp-insight-value">{i.value}</span>
+                <span className="tp-insight-label">{i.label}</span>
+                <span className="tp-insight-caption">{i.caption}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
