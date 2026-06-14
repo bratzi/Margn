@@ -23,9 +23,6 @@ export default function TimeRangeFilter() {
   liveRef.current = live;
   useEffect(() => { if (!drag) setLive(rangeIdx); }, [rangeIdx, drag]);
 
-  // Absolut-/Relativ-Modus (abs = kumulativ hochgezählt, rel = pro Tag)
-  const [mode, setMode] = useState<"rel" | "abs">("rel");
-
   // Hover-Tooltip
   const [hoverDay, setHoverDay] = useState<HoverDay | null>(null);
 
@@ -60,19 +57,10 @@ export default function TimeRangeFilter() {
       f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
       f.subPats.join("|"), f.kwIdSet]);
 
-  // Für abs-Modus: kumulierte Werte; für rel: Original
-  const displaySeries = useMemo(() => {
-    if (mode === "rel") return series;
-    return series.map((s) => {
-      let sum = 0;
-      return { ...s, vals: s.vals.map((v) => { sum += v; return sum; }) };
-    });
-  }, [series, mode]);
-
   const maxTotal = useMemo(() => {
-    const tot = days.map((_, i) => displaySeries.reduce((sum, s) => sum + s.vals[i], 0));
+    const tot = days.map((_, i) => series.reduce((sum, s) => sum + s.vals[i], 0));
     return Math.max(1, ...tot);
-  }, [displaySeries, days]);
+  }, [series, days]);
 
   const X = (i: number) => (i / (N - 1)) * VW;
   const colW = (VW / N) * 0.72;
@@ -140,11 +128,6 @@ export default function TimeRangeFilter() {
       <div className="trf-head">
         <div className="trf-title">Veröffentlichungs-Zeitraum <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
         <div className="trf-legend">{series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}</div>
-        {/* Absolut / Relativ Schalter */}
-        <div className="seg seg-xs trf-mode-seg">
-          <button className={mode === "rel" ? "on" : ""} onClick={() => setMode("rel")} title="Pro Tag – jede Säule zeigt die Artikel dieses Tages">rel</button>
-          <button className={mode === "abs" ? "on" : ""} onClick={() => setMode("abs")} title="Kumulativ – hochgezählte Summe über die Zeit">abs</button>
-        </div>
         {(live.from > 0 || live.to < N - 1) && <button className="trf-reset" onClick={() => { setLive({ from: 0, to: N - 1 }); setRangeIdx({ from: 0, to: N - 1 }); }}>Zurücksetzen</button>}
         <button className="rail-toggle" onClick={() => setTrfOpen(false)} title="Einklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg></button>
       </div>
@@ -158,7 +141,7 @@ export default function TimeRangeFilter() {
         <svg className="trf-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
           {days.map((_, i) => {
             let yb = VH;
-            return <g key={i}>{displaySeries.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
+            return <g key={i}>{series.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
           })}
         </svg>
 
