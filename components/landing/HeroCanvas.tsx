@@ -2,24 +2,19 @@
 
 import { useEffect, useRef } from "react";
 
-// Hero-Hintergrund: abstrakte Zeitungsspalten, die langsam nach oben
-// strömen — ein Feld aus „Textzeilen" (Wort-Balken). Gelegentlich wird ein
-// Wort STILL EDITIERT: kurz rot durchgestrichen, dann in veränderter Breite
-// grün neu geschrieben, bevor es sich beruhigt. Das ist exakt das Kernmotiv
-// des Observatoriums (Silent Edits) — eigenständig statt generischem
-// Partikel-/Netz-Effekt. Normales Alpha-Blending (kein Ausbrennen), zur
-// Mitte hin ausgedünnt für lesbare Typo. DPR-gedeckelt, pausiert außerhalb
-// des Viewports, reduced-motion-bewusst, Maus enthüllt nahe Zeilen.
+// Hero-Hintergrund: ein abstraktes Strömungsfeld (curl-artiges Flow-Field).
+// Hunderte haarfeine Partikel folgen einem unsichtbaren, langsam
+// verformenden Vektorfeld und hinterlassen kurze, weiche Spuren. Der Cursor
+// ist eine Kraft: er erzeugt einen Wirbel/Sog, um den sich die Strömung
+// biegt. Bewusst monochrom, niedrige Deckkraft, KEIN additives Ausbrennen
+// (jeder Frame wird sauber gelöscht — Spuren entstehen nur aus dem
+// Bewegungssegment), zur Mitte hin ausgedünnt für lesbare Typo.
+// DPR-gedeckelt, pausiert außerhalb des Viewports, reduced-motion-bewusst.
 
-type Word = { x: number; w: number; baseW: number; edit: { t0: number; newW: number } | null };
-type Line = { y: number; words: Word[]; bold: boolean };
-type Col = { x: number; w: number; lines: Line[]; stackH: number; speed: number; scroll: number };
+type P = { x: number; y: number; px: number; py: number; spd: number; life: number; max: number; tone: number; a: number };
 
-const INK = [150, 160, 185];
-const RED = [255, 111, 97];
-const GREEN = [67, 217, 163];
-const ACC2 = [159, 178, 255];
-const EDIT_DUR = 1700;
+const A1 = [110, 138, 255]; // #6e8aff
+const A2 = [159, 178, 255]; // #9fb2ff
 
 export default function HeroCanvas() {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -37,47 +32,28 @@ export default function HeroCanvas() {
     const small = window.matchMedia("(max-width: 768px)").matches;
 
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-    const rgba = (c: number[], a: number) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
 
     let W = 0, H = 0;
-    const COLN = small ? 2 : 3;
-    const ROWH = small ? 24 : 30;
-    const PAD = small ? 14 : 40;
-    const GUT = small ? 22 : 64;
-    const MINW = small ? 12 : 16;
-    const MAXW = small ? 46 : 70;
+    const COUNT = small ? 230 : 600;
+    let ps: P[] = [];
+    let t = Math.random() * 1000;
 
-    let cols: Col[] = [];
-
-    const genWords = (colW: number): Word[] => {
-      const words: Word[] = [];
-      let x = 0;
-      const stop = colW * rnd(0.62, 1); // mal volle, mal ragged-rechts Zeile
-      while (x < stop) {
-        const w = rnd(MINW, MAXW);
-        if (x + w > colW) break;
-        words.push({ x, w, baseW: w, edit: null });
-        x += w + rnd(7, 13);
-      }
-      return words;
+    const spawn = (p: P, fresh = false) => {
+      p.x = Math.random() * W;
+      p.y = Math.random() * H;
+      p.px = p.x; p.py = p.y;
+      p.spd = rnd(0.5, 1.5);
+      p.max = rnd(60, 230);
+      p.life = fresh ? Math.random() * p.max : 0;
+      p.tone = Math.random();
+      p.a = rnd(0.06, 0.2);
     };
 
     const build = () => {
-      cols = [];
-      const colW = (W - 2 * PAD - GUT * (COLN - 1)) / COLN;
-      const n = Math.ceil((H + 2 * ROWH) / ROWH) + 1;
-      for (let c = 0; c < COLN; c++) {
-        const lines: Line[] = [];
-        for (let i = 0; i < n; i++) {
-          lines.push({ y: i * ROWH, words: genWords(colW), bold: i % 6 === 2 });
-        }
-        cols.push({
-          x: PAD + c * (colW + GUT), w: colW, lines,
-          stackH: n * ROWH, speed: rnd(8, 13) * (small ? 0.8 : 1), scroll: 0,
-        });
-      }
+      ps = Array.from({ length: COUNT }, () => {
+        const p = {} as P; spawn(p, true); return p;
+      });
     };
 
     const resize = () => {
@@ -89,23 +65,30 @@ export default function HeroCanvas() {
       canvas.style.width = W + "px";
       canvas.style.height = H + "px";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      build();
+      if (!ps.length) build();
     };
 
     const ro = new ResizeObserver(resize);
     ro.observe(host);
     resize();
+    build();
 
-    // Maus (Desktop): Enthüllung naher Zeilen + leichte Parallaxe
-    const mouse = { x: -9999, y: -9999, active: false, px: 0, tx: 0 };
+    // Strömungsrichtung an (x,y,t) — billiges, organisches Pseudo-Feld aus
+    // überlagerten Sinuswellen (Domain-Warping). Gibt einen Winkel zurück.
+    const flow = (x: number, y: number) => {
+      const s = 0.0016;
+      let a = Math.sin(x * s + t * 0.20) + Math.sin(y * s * 1.2 - t * 0.16) + Math.sin((x + y) * s * 0.7 + t * 0.22);
+      a += 0.5 * Math.sin(x * s * 2.4 - y * s * 1.7 + t * 0.12);
+      return a * 1.4;
+    };
+
+    // Maus als Kraft (Wirbel + leichter Sog)
+    const mouse = { x: -9999, y: -9999, active: false };
     const onMove = (e: PointerEvent) => {
       const r = host.getBoundingClientRect();
-      mouse.x = e.clientX - r.left;
-      mouse.y = e.clientY - r.top;
-      mouse.active = true;
-      mouse.tx = (mouse.x / W - 0.5) * 16;
+      mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; mouse.active = true;
     };
-    const onLeave = () => { mouse.active = false; mouse.x = -9999; mouse.y = -9999; mouse.tx = 0; };
+    const onLeave = () => { mouse.active = false; mouse.x = -9999; mouse.y = -9999; };
     if (!small && !reduced) {
       window.addEventListener("pointermove", onMove, { passive: true });
       host.addEventListener("pointerleave", onLeave);
@@ -116,109 +99,72 @@ export default function HeroCanvas() {
       const nx = (x / W - 0.5) * 2;
       const ny = (y / H - 0.46) * 2.05;
       const d = Math.sqrt(nx * nx * 0.82 + ny * ny);
-      return clamp01((d - 0.3) / 0.52);
-    };
-
-    // Silent-Edit-Planer: startet gelegentlich eine Wort-Änderung auf einer
-    // sichtbaren Zeile (max. wenige gleichzeitig).
-    let nextEdit = 0;
-    const activeEdits = () => cols.reduce((s, c) => s + c.lines.reduce((a, l) => a + l.words.filter((w) => w.edit).length, 0), 0);
-    const scheduleEdit = (now: number) => {
-      if (now < nextEdit) return;
-      nextEdit = now + rnd(500, 1100);
-      if (activeEdits() >= (small ? 2 : 4)) return;
-      const col = cols[(Math.random() * cols.length) | 0];
-      const onScreen = col.lines.filter((l) => {
-        const sy = ((l.y - col.scroll) % col.stackH + col.stackH) % col.stackH;
-        return sy > ROWH && sy < H - ROWH;
-      });
-      if (!onScreen.length) return;
-      const line = onScreen[(Math.random() * onScreen.length) | 0];
-      const cand = line.words.filter((w) => !w.edit);
-      if (!cand.length) return;
-      const word = cand[(Math.random() * cand.length) | 0];
-      word.edit = { t0: now, newW: rnd(MINW, MAXW) };
+      return clamp01((d - 0.26) / 0.5);
     };
 
     let raf = 0, visible = true, last = performance.now();
+    const MR = small ? 150 : 230, MR2 = MR * MR;
 
-    const step = (now: number) => {
-      const ds = Math.min(0.05, (now - last) / 1000);
-      last = now;
-      mouse.px += (mouse.tx - mouse.px) * 0.05;
+    const drawParticle = (p: P, dt: number) => {
+      p.px = p.x; p.py = p.y;
+      const ang = flow(p.x, p.y);
+      let vx = Math.cos(ang) * p.spd, vy = Math.sin(ang) * p.spd;
 
-      ctx.clearRect(0, 0, W, H);
-      ctx.save();
-      ctx.translate(mouse.px, 0);
-
-      if (!reduced) scheduleEdit(now);
-
-      const mx = mouse.x - mouse.px, my = mouse.y;
-      const REV = small ? 120 : 170, REV2 = REV * REV;
-
-      for (const col of cols) {
-        if (!reduced) col.scroll += col.speed * ds;
-        for (const line of col.lines) {
-          let sy = ((line.y - col.scroll) % col.stackH + col.stackH) % col.stackH - ROWH;
-          if (sy < -ROWH || sy > H + ROWH) continue;
-          const h = line.bold ? 3.6 : 2.6;
-          const yMid = sy + ROWH / 2;
-
-          for (const word of line.words) {
-            let w = word.w, col3 = INK, boost = 0, strikeX = 0, strikeA = 0;
-
-            if (word.edit) {
-              const p = (now - word.edit.t0) / EDIT_DUR;
-              if (p >= 1) {
-                word.w = word.baseW = word.edit.newW;
-                word.edit = null;
-                w = word.w;
-              } else {
-                // Breite morpht in der mittleren Phase
-                w = p < 0.3 ? word.baseW : p < 0.62 ? lerp(word.baseW, word.edit.newW, (p - 0.3) / 0.32) : word.edit.newW;
-                // Farbe: ink → grün → ink
-                col3 = p < 0.3 ? INK : p < 0.62 ? GREEN.map((g, i) => lerp(INK[i], g, (p - 0.3) / 0.32)) : GREEN.map((g, i) => lerp(g, INK[i], (p - 0.62) / 0.38));
-                boost = Math.sin(clamp01(p) * Math.PI) * 0.42;
-                // Durchstreichung wächst zuerst, blendet dann aus
-                strikeX = word.baseW * clamp01(p / 0.26);
-                strikeA = (1 - clamp01((p - 0.28) / 0.22)) * 0.85;
-              }
-            }
-
-            const cx = col.x + word.x;
-            const fade = centerFade(cx + w / 2, yMid);
-            if (fade <= 0.002) continue;
-            let a = (line.bold ? 0.26 : 0.2) * fade + boost * fade;
-
-            // Maus-Enthüllung
-            if (mouse.active) {
-              const dx = cx + w / 2 - mx, dy = yMid - my;
-              const d2 = dx * dx + dy * dy;
-              if (d2 < REV2) {
-                const close = 1 - Math.sqrt(d2) / REV;
-                a += close * close * 0.5 * fade;
-                col3 = col3.map((v, i) => lerp(v, ACC2[i], close * 0.55));
-              }
-            }
-
-            ctx.fillStyle = rgba(col3, a);
-            ctx.fillRect(cx, yMid - h / 2, w, h);
-
-            if (strikeA > 0.01) {
-              ctx.fillStyle = rgba(RED, strikeA * fade);
-              ctx.fillRect(cx, yMid - 0.9, strikeX, 1.8);
-            }
-          }
+      let near = 0;
+      if (mouse.active) {
+        const dx = p.x - mouse.x, dy = p.y - mouse.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < MR2) {
+          const d = Math.sqrt(d2) + 0.001;
+          const f = 1 - d / MR;
+          near = f;
+          // Wirbel (tangential) + leichter Sog nach außen
+          vx += (-dy / d) * f * 3.0 + (dx / d) * f * 0.7;
+          vy += (dx / d) * f * 3.0 + (dy / d) * f * 0.7;
         }
       }
 
-      ctx.restore();
+      p.x += vx * dt; p.y += vy * dt;
+      p.life += dt;
+
+      // Respawn bei Lebensende oder außerhalb (mit Rand)
+      if (p.life > p.max || p.x < -30 || p.x > W + 30 || p.y < -30 || p.y > H + 30) {
+        spawn(p);
+        return;
+      }
+
+      const fade = centerFade(p.x, p.y);
+      if (fade <= 0.002) return;
+      // weiches Ein-/Ausblenden über die Lebensdauer
+      const lifeFade = Math.sin(clamp01(p.life / p.max) * Math.PI);
+      const c = p.tone < 0.5 ? A1 : A2;
+      const alpha = (p.a + near * 0.4) * fade * lifeFade;
+      if (alpha < 0.004) return;
+
+      ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
+      ctx.lineWidth = near > 0.4 ? 1.5 : 1;
+      ctx.beginPath();
+      ctx.moveTo(p.px, p.py);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    };
+
+    const step = (now: number) => {
+      const dt = Math.min(2.4, (now - last) / 16.67);
+      last = now;
+      if (!reduced) t += dt * 0.016;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.lineCap = "round";
+      for (const p of ps) drawParticle(p, dt);
     };
 
     const loop = (now: number) => { step(now); raf = requestAnimationFrame(loop); };
 
     if (reduced) {
+      // statisches Feld: einen kurzen Schritt zeichnen
       last = performance.now();
+      for (const p of ps) { p.life = p.max * 0.5; }
       step(last + 16);
     } else {
       const io = new IntersectionObserver(([e]) => {
