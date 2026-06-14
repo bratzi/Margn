@@ -92,30 +92,36 @@ html.lenis, html.lenis body { height: auto; }
   content: ""; position: absolute; z-index: -1; top: 0; bottom: 0;
   left: 50%; width: 100vw; transform: translateX(-50%); pointer-events: none;
   background-image:
-    radial-gradient(44% 58% at 14% -8%, rgba(110, 138, 255, 0.07), transparent 72%),
-    radial-gradient(40% 52% at 94% 108%, rgba(159, 178, 255, 0.05), transparent 72%),
-    radial-gradient(circle, rgba(242, 240, 233, 0.05) 1px, transparent 1.6px);
-  background-size: 100% 100%, 100% 100%, 32px 32px;
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 11%, #000 89%, transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0, #000 11%, #000 89%, transparent 100%);
+    radial-gradient(56% 72% at 10% -12%, rgba(110, 138, 255, 0.18), transparent 68%),
+    radial-gradient(52% 64% at 98% 112%, rgba(159, 178, 255, 0.14), transparent 70%),
+    linear-gradient(rgba(242, 240, 233, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 240, 233, 0.055) 1px, transparent 1px),
+    radial-gradient(circle, rgba(159, 178, 255, 0.14) 1.5px, transparent 2px);
+  background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px, 64px 64px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 94%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 94%, transparent 100%);
 }
 /* Abwechselnde Glow-Seiten für Rhythmus über die Sektionen hinweg */
 #abdeckung.mg-section::before {
   background-image:
-    radial-gradient(44% 58% at 88% -8%, rgba(110, 138, 255, 0.07), transparent 72%),
-    radial-gradient(40% 52% at 6% 108%, rgba(159, 178, 255, 0.05), transparent 72%),
-    radial-gradient(circle, rgba(242, 240, 233, 0.05) 1px, transparent 1.6px);
-  background-size: 100% 100%, 100% 100%, 32px 32px;
+    radial-gradient(56% 72% at 90% -12%, rgba(110, 138, 255, 0.18), transparent 68%),
+    radial-gradient(52% 64% at 4% 112%, rgba(159, 178, 255, 0.14), transparent 70%),
+    linear-gradient(rgba(242, 240, 233, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 240, 233, 0.055) 1px, transparent 1px),
+    radial-gradient(circle, rgba(159, 178, 255, 0.14) 1.5px, transparent 2px);
+  background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px, 64px 64px;
 }
 #transparenz.mg-section::before {
   background-image:
-    radial-gradient(54% 60% at 50% -10%, rgba(110, 138, 255, 0.06), transparent 70%),
-    radial-gradient(circle, rgba(242, 240, 233, 0.05) 1px, transparent 1.6px);
-  background-size: 100% 100%, 32px 32px;
+    radial-gradient(64% 70% at 50% -14%, rgba(110, 138, 255, 0.16), transparent 66%),
+    linear-gradient(rgba(242, 240, 233, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 240, 233, 0.055) 1px, transparent 1px),
+    radial-gradient(circle, rgba(159, 178, 255, 0.14) 1.5px, transparent 2px);
+  background-size: 100% 100%, 64px 64px, 64px 64px, 64px 64px;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .mg-section::before { animation: mg-bg-breathe 14s ease-in-out infinite; }
-  @keyframes mg-bg-breathe { 50% { opacity: 0.74; } }
+  .mg-section::before { animation: mg-bg-breathe 13s ease-in-out infinite; }
+  @keyframes mg-bg-breathe { 50% { opacity: 0.82; } }
 }
 
 /* ---------------------------------------------------------------- Nav */
@@ -361,9 +367,10 @@ html.lenis, html.lenis body { height: auto; }
 .mg-anatomy {
   position: relative; border-bottom: 1px solid var(--mg-line);
   background:
-    radial-gradient(46% 40% at 8% 0%, rgba(110, 138, 255, 0.06), transparent 70%),
-    radial-gradient(46% 44% at 100% 100%, rgba(159, 178, 255, 0.05), transparent 72%),
-    radial-gradient(circle, rgba(242, 240, 233, 0.04) 1px, transparent 1.6px) 0 0 / 32px 32px,
+    radial-gradient(50% 46% at 6% 0%, rgba(110, 138, 255, 0.15), transparent 68%),
+    radial-gradient(52% 50% at 100% 100%, rgba(159, 178, 255, 0.12), transparent 70%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--mg-bg-2);
 }
 .mg-anatomy-pin { position: relative; }
@@ -450,8 +457,9 @@ html.lenis, html.lenis body { height: auto; }
 .mg-stats {
   border-top: 1px solid var(--mg-line); border-bottom: 1px solid var(--mg-line);
   background:
-    radial-gradient(60% 120% at 50% 0%, rgba(110, 138, 255, 0.05), transparent 72%),
-    radial-gradient(circle, rgba(242, 240, 233, 0.04) 1px, transparent 1.6px) 0 0 / 32px 32px,
+    radial-gradient(70% 140% at 50% 0%, rgba(110, 138, 255, 0.13), transparent 70%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--mg-bg);
 }
 .mg-stats-in {
@@ -474,7 +482,12 @@ html.lenis, html.lenis body { height: auto; }
 }
 
 /* ---------------------------------------------------------------- Methodik */
-.mg-method { background: var(--mg-bg-2); border-top: 1px solid var(--mg-line); border-bottom: 1px solid var(--mg-line); }
+.mg-method {
+  border-top: 1px solid var(--mg-line); border-bottom: 1px solid var(--mg-line);
+  background:
+    radial-gradient(64% 80% at 50% -8%, rgba(110, 138, 255, 0.13), transparent 70%),
+    var(--mg-bg-2);
+}
 .mg-steps { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(24px, 4vw, 56px); }
 .mg-steps::before {
   content: ""; position: absolute; top: 27px; left: 27px; right: 18%; height: 1px;
@@ -565,8 +578,9 @@ html.lenis, html.lenis body { height: auto; }
   padding: clamp(110px, 16vw, 200px) var(--mg-pad);
   border-top: 1px solid var(--mg-line);
   background:
-    radial-gradient(ellipse 60% 50% at 50% 115%, rgba(110, 138, 255, 0.16), transparent 70%),
-    radial-gradient(circle, rgba(242, 240, 233, 0.045) 1px, transparent 1.6px) 0 0 / 32px 32px,
+    radial-gradient(ellipse 72% 56% at 50% 116%, rgba(110, 138, 255, 0.22), transparent 70%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--mg-bg-2);
 }
 .mg-final .mg-h2 { font-size: clamp(38px, 6.4vw, 88px); max-width: 13em; margin-left: auto; margin-right: auto; }
@@ -581,7 +595,10 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------------------------------------------------------------- Footer */
 .mg-foot {
   border-top: 1px solid var(--mg-line);
-  background: radial-gradient(circle, rgba(242, 240, 233, 0.035) 1px, transparent 1.6px) 0 0 / 32px 32px, var(--mg-bg);
+  background:
+    linear-gradient(rgba(242, 240, 233, 0.04) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.04) 1px, transparent 1px) 0 0 / 64px 64px,
+    var(--mg-bg);
 }
 .mg-foot-in {
   max-width: var(--mg-max); margin: 0 auto; padding: clamp(36px, 5vw, 64px) var(--mg-pad);
