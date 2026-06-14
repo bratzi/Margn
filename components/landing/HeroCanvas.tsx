@@ -1,218 +1,249 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import * as THREE from "three";
 
-// Hero-Hintergrund: ein Meer aus „Textzeilen" — Punktreihen in Wort-Gruppen,
-// die wie Druckzeilen wirken und von Simplex-Noise als ruhige Welle bewegt
-// werden. Metapher: zwischen den Zeilen lesen. GPU-seitig (Vertex-Shader),
-// DPR-gedeckelt, pausiert außerhalb des Viewports, reduced-motion-bewusst.
+// Hero-Hintergrund: ein ruhiges „Story-Constellation"-Netz — driftende
+// Datenknoten, die sich zu Clustern verbinden, wenn sie nah beieinander
+// liegen. Metapher: das sprachübergreifende Zusammenführen derselben
+// Geschichte. Bewusst zurückhaltend — NORMALES Alpha-Blending (kein
+// additives „Ausbrennen"), niedrige Deckkraft, zur Mitte hin ausgedünnt,
+// damit die Typografie lesbar bleibt. DPR-gedeckelt, pausiert außerhalb des
+// Viewports, reduced-motion-bewusst. Maus erzeugt einen sanften Fokus
+// (nahe Knoten leuchten auf + verbinden sich zum Cursor) und eine leichte
+// Parallaxe der gesamten Ebene.
 
-const VERT = /* glsl */ `
-  uniform float uTime;
-  uniform float uSize;
-  attribute float aSeed;
-  varying float vMix;
-  varying float vAlpha;
-
-  // 2D-Simplex-Noise (Ashima / Ian McEwan, public domain)
-  vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-  float snoise(vec2 v){
-    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
-    vec2 i  = floor(v + dot(v, C.yy));
-    vec2 x0 = v - i + dot(i, C.xx);
-    vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-    vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
-    i = mod(i, 289.0);
-    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
-    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-    m = m*m; m = m*m;
-    vec3 x = 2.0 * fract(p * C.www) - 1.0;
-    vec3 h = abs(x) - 0.5;
-    vec3 ox = floor(x + 0.5);
-    vec3 a0 = x - ox;
-    m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
-    vec3 g;
-    g.x  = a0.x  * x0.x  + h.x  * x0.y;
-    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-    return 130.0 * dot(m, g);
-  }
-
-  void main() {
-    vec3 p = position;
-    float t = uTime * 0.085;
-    float n = snoise(vec2(p.x * 0.16 + t, p.z * 0.32 - t * 0.6));
-    n += 0.45 * snoise(vec2(p.x * 0.45 - t * 1.4, p.z * 0.8 + t));
-    p.y += n * 0.85;
-
-    vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    gl_Position = projectionMatrix * mv;
-
-    float dist = -mv.z;
-    gl_PointSize = uSize * aSeed * (1.0 + n * 0.55) * (9.0 / dist);
-
-    vMix = smoothstep(-1.0, 1.2, n);
-    // Tiefen- und Rand-Fade: hinten und seitlich auslaufen lassen
-    float edge = 1.0 - smoothstep(7.0, 13.0, abs(p.x));
-    float depth = 1.0 - smoothstep(4.0, 11.0, dist - 4.0);
-    vAlpha = edge * depth * (0.35 + 0.65 * vMix) * step(0.01, aSeed);
-  }
-`;
-
-const FRAG = /* glsl */ `
-  precision mediump float;
-  uniform vec3 uColA;
-  uniform vec3 uColB;
-  varying float vMix;
-  varying float vAlpha;
-  void main() {
-    vec2 uv = gl_PointCoord - 0.5;
-    float d = length(uv);
-    float disc = smoothstep(0.5, 0.18, d);
-    vec3 col = mix(uColA, uColB, vMix);
-    gl_FragColor = vec4(col, disc * vAlpha);
-  }
-`;
+type Node = {
+  x: number; y: number; vx: number; vy: number;
+  r: number; a: number; hub: boolean; phase: number;
+};
 
 export default function HeroCanvas() {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+    const host = ref.current;
+    if (!host) return;
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return; // kein 2D-Context — CSS-Hintergrund übernimmt
+    host.appendChild(canvas);
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const small = window.matchMedia("(max-width: 768px)").matches;
 
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: "high-performance" });
-    } catch {
-      return; // kein WebGL — CSS-Hintergrund übernimmt
-    }
-    renderer.setPixelRatio(Math.min(small ? 1.5 : 2, window.devicePixelRatio || 1));
-    el.appendChild(renderer.domElement);
+    // Palette, abgestimmt auf die Landing-Variablen (#6e8aff / #9fb2ff).
+    const ACCENT = [110, 138, 255];
+    const ACCENT2 = [159, 178, 255];
+    const rgba = (c: number[], a: number) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 60);
-    const camBase = new THREE.Vector3(0, 2.35, 7.6);
-    camera.position.copy(camBase);
+    let W = 0, H = 0; // CSS-Pixel
+    const LINK = small ? 104 : 134; // Verbindungsdistanz
+    const LINK2 = LINK * LINK;
+    const COUNT = small ? 66 : 150;
 
-    // Punktraster: Zeilen × Spalten, gruppiert in „Wörter" mit Lücken
-    const COLS = small ? 140 : 230;
-    const ROWS = small ? 46 : 72;
-    const SPAN_X = 24, SPAN_Z = 13;
-    const N = COLS * ROWS;
-    const pos = new Float32Array(N * 3);
-    const seed = new Float32Array(N);
-    let i = 0;
-    for (let r = 0; r < ROWS; r++) {
-      let run = 0, s = 0;
-      for (let c = 0; c < COLS; c++) {
-        if (run <= 0) {
-          run = 2 + Math.floor(Math.random() * 7); // Wortlänge
-          s = 0.55 + Math.random() * 0.9;          // „Schriftstärke" je Wort
-        }
-        run--;
-        pos[i * 3] = (c / (COLS - 1) - 0.5) * SPAN_X;
-        pos[i * 3 + 1] = 0;
-        pos[i * 3 + 2] = (r / (ROWS - 1) - 0.5) * SPAN_Z;
-        seed[i] = run === 0 ? 0 : s; // Wortzwischenraum bleibt leer
-        i++;
-      }
-    }
+    let nodes: Node[] = [];
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute("aSeed", new THREE.BufferAttribute(seed, 1));
-
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: VERT,
-      fragmentShader: FRAG,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        uTime: { value: 0 },
-        uSize: { value: (small ? 30 : 34) * renderer.getPixelRatio() },
-        uColA: { value: new THREE.Color("#27304f") },
-        uColB: { value: new THREE.Color("#6e8aff") },
-      },
-    });
-
-    const points = new THREE.Points(geo, mat);
-    points.position.y = -0.6;
-    scene.add(points);
-
-    // Maus-Parallaxe (nur Desktop), sanft nachgeführt
-    const mouse = { x: 0, y: 0, tx: 0, ty: 0 };
-    const onMove = (e: PointerEvent) => {
-      mouse.tx = (e.clientX / window.innerWidth - 0.5) * 2;
-      mouse.ty = (e.clientY / window.innerHeight - 0.5) * 2;
+    const build = () => {
+      nodes = Array.from({ length: COUNT }, () => {
+        const hub = Math.random() < 0.09;
+        return {
+          x: Math.random() * W,
+          y: Math.random() * H,
+          vx: rnd(-1, 1) * 0.15,
+          vy: rnd(-1, 1) * 0.15,
+          r: hub ? rnd(2.2, 3.2) : rnd(0.8, 1.9),
+          a: hub ? rnd(0.8, 1) : rnd(0.32, 0.7),
+          hub,
+          phase: Math.random() * Math.PI * 2,
+        };
+      });
     };
-    if (!small && !reduced) window.addEventListener("pointermove", onMove, { passive: true });
 
     const resize = () => {
-      const w = el.clientWidth || 1, h = el.clientHeight || 1;
-      renderer.setSize(w, h, false);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
+      W = host.clientWidth || 1;
+      H = host.clientHeight || 1;
+      const dpr = Math.min(small ? 1.5 : 2, window.devicePixelRatio || 1);
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width = W + "px";
+      canvas.style.height = H + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (!nodes.length) build();
     };
+
     const ro = new ResizeObserver(resize);
-    ro.observe(el);
+    ro.observe(host);
     resize();
+    build();
+
+    // Maus (nur Desktop): sanfter Fokus + Parallaxe.
+    const mouse = { x: -9999, y: -9999, active: false, px: 0, py: 0, tx: 0, ty: 0 };
+    const onMove = (e: PointerEvent) => {
+      const r = host.getBoundingClientRect();
+      mouse.x = e.clientX - r.left;
+      mouse.y = e.clientY - r.top;
+      mouse.active = true;
+      mouse.tx = (mouse.x / W - 0.5) * 18;
+      mouse.ty = (mouse.y / H - 0.5) * 14;
+    };
+    const onLeave = () => { mouse.active = false; mouse.x = -9999; mouse.y = -9999; mouse.tx = 0; mouse.ty = 0; };
+    if (!small && !reduced) {
+      window.addEventListener("pointermove", onMove, { passive: true });
+      host.addEventListener("pointerleave", onLeave);
+    }
+
+    // Zentrums-Maske: elliptisch zur Mitte (Typo) hin ausdünnen → Text lesbar.
+    // 0 in der Mitte, 1 am Rand.
+    const centerFade = (x: number, y: number) => {
+      const nx = (x / W - 0.5) * 2;
+      const ny = (y / H - 0.46) * 2.05;
+      const d = Math.sqrt(nx * nx * 0.82 + ny * ny);
+      return Math.min(1, Math.max(0, (d - 0.3) / 0.52));
+    };
 
     let raf = 0;
     let visible = true;
-    const cleanupFns: Array<() => void> = [];
-    const clock = new THREE.Clock();
-    let elapsed = Math.random() * 100; // nicht immer dieselbe Startwelle
+    let last = performance.now();
 
-    const frame = () => {
-      elapsed += clock.getDelta();
-      mat.uniforms.uTime.value = elapsed;
-      mouse.x += (mouse.tx - mouse.x) * 0.04;
-      mouse.y += (mouse.ty - mouse.y) * 0.04;
-      camera.position.x = camBase.x + mouse.x * 0.55;
-      camera.position.y = camBase.y - mouse.y * 0.3;
-      camera.lookAt(0, -0.4, 0);
-      renderer.render(scene, camera);
+    const step = (now: number) => {
+      const dt = Math.min(2.4, (now - last) / 16.67);
+      last = now;
+
+      // Parallaxe sanft nachführen
+      mouse.px += (mouse.tx - mouse.px) * 0.045;
+      mouse.py += (mouse.ty - mouse.py) * 0.045;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      ctx.translate(mouse.px, mouse.py);
+
+      // Bewegung + sanftes Wrappen
+      for (const n of nodes) {
+        n.x += n.vx * dt;
+        n.y += n.vy * dt;
+        if (n.x < -24) n.x = W + 24; else if (n.x > W + 24) n.x = -24;
+        if (n.y < -24) n.y = H + 24; else if (n.y > H + 24) n.y = -24;
+      }
+
+      // Verbindungen (O(n²), bei ~150 Knoten unkritisch)
+      ctx.lineWidth = 1;
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        const fa = centerFade(a.x, a.y);
+        if (fa <= 0.001) continue;
+        for (let j = i + 1; j < nodes.length; j++) {
+          const b = nodes[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > LINK2) continue;
+          const fb = centerFade(b.x, b.y);
+          const close = 1 - Math.sqrt(d2) / LINK;
+          const alpha = close * close * 0.15 * Math.min(fa, fb);
+          if (alpha < 0.004) continue;
+          ctx.strokeStyle = rgba(ACCENT, alpha);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+
+      // Maus-Fokus: Linien Cursor → nahe Knoten + leichte Anziehung
+      if (mouse.active) {
+        const mx = mouse.x - mouse.px, my = mouse.y - mouse.py;
+        const MR = small ? 150 : 205, MR2 = MR * MR;
+        for (const n of nodes) {
+          const dx = n.x - mx, dy = n.y - my;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > MR2) continue;
+          const dist = Math.sqrt(d2) + 0.0001;
+          const close = 1 - dist / MR;
+          const alpha = close * close * 0.38 * centerFade(n.x, n.y);
+          if (alpha >= 0.004) {
+            ctx.strokeStyle = rgba(ACCENT2, alpha);
+            ctx.beginPath();
+            ctx.moveTo(mx, my);
+            ctx.lineTo(n.x, n.y);
+            ctx.stroke();
+          }
+          n.vx += (-dx / dist) * 0.0022 * close * dt;
+          n.vy += (-dy / dist) * 0.0022 * close * dt;
+        }
+      }
+
+      // Geschwindigkeit dämpfen + Mindest-Drift erhalten
+      for (const n of nodes) {
+        n.vx *= 0.99; n.vy *= 0.99;
+        if (Math.hypot(n.vx, n.vy) < 0.05) {
+          n.vx += rnd(-1, 1) * 0.012;
+          n.vy += rnd(-1, 1) * 0.012;
+        }
+      }
+
+      // Knoten zeichnen (Hubs pulsieren dezent)
+      const t = now * 0.001;
+      for (const n of nodes) {
+        const f = centerFade(n.x, n.y);
+        if (f <= 0.001) continue;
+        const pulse = n.hub ? 0.78 + 0.22 * Math.sin(t + n.phase) : 1;
+        ctx.fillStyle = rgba(n.hub ? ACCENT2 : ACCENT, n.a * 0.52 * f * pulse);
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        ctx.fill();
+        if (n.hub) {
+          ctx.fillStyle = rgba(ACCENT2, n.a * 0.12 * f * pulse);
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.r * 3.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
     };
 
-    const loop = () => {
-      frame();
+    const loop = (now: number) => {
+      step(now);
       raf = requestAnimationFrame(loop);
     };
 
     if (reduced) {
-      // Ein statisches Bild genügt
-      frame();
+      last = performance.now();
+      step(last + 16); // ein statisches Bild genügt
     } else {
       const io = new IntersectionObserver(([e]) => {
-        const wasVisible = visible;
+        const was = visible;
         visible = e.isIntersecting;
-        if (visible && !wasVisible) { clock.getDelta(); raf = requestAnimationFrame(loop); }
+        if (visible && !was) { last = performance.now(); raf = requestAnimationFrame(loop); }
         if (!visible) cancelAnimationFrame(raf);
       });
-      io.observe(el);
+      io.observe(host);
+      last = performance.now();
       raf = requestAnimationFrame(loop);
       const onVis = () => {
         cancelAnimationFrame(raf);
-        if (!document.hidden && visible) { clock.getDelta(); raf = requestAnimationFrame(loop); }
+        if (!document.hidden && visible) { last = performance.now(); raf = requestAnimationFrame(loop); }
       };
       document.addEventListener("visibilitychange", onVis);
-      cleanupFns.push(() => { io.disconnect(); document.removeEventListener("visibilitychange", onVis); });
+
+      return () => {
+        cancelAnimationFrame(raf);
+        io.disconnect();
+        document.removeEventListener("visibilitychange", onVis);
+        window.removeEventListener("pointermove", onMove);
+        host.removeEventListener("pointerleave", onLeave);
+        ro.disconnect();
+        if (canvas.parentNode) host.removeChild(canvas);
+      };
     }
 
     return () => {
       cancelAnimationFrame(raf);
-      cleanupFns.forEach((fn) => fn());
       window.removeEventListener("pointermove", onMove);
+      host.removeEventListener("pointerleave", onLeave);
       ro.disconnect();
-      geo.dispose();
-      mat.dispose();
-      renderer.dispose();
-      el.removeChild(renderer.domElement);
+      if (canvas.parentNode) host.removeChild(canvas);
     };
   }, []);
 

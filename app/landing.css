@@ -150,11 +150,12 @@ html.lenis, html.lenis body { height: auto; }
 .mg-hero-canvas { position: absolute; inset: 0; z-index: -2; }
 .mg-hero-canvas canvas { display: block; width: 100%; height: 100%; }
 .mg-hero::before {
-  /* Vignette über dem Canvas, hält die Typo lesbar */
+  /* Ruhiger dunkler Pool HINTER dem Text (Mitte), Ränder bleiben frei für das
+     Constellation-Netz; oben für die Nav, unten weicher Übergang in die Seite. */
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(ellipse 90% 62% at 50% 44%, rgba(10, 11, 15, 0) 30%, rgba(10, 11, 15, 0.82) 100%),
-    linear-gradient(180deg, rgba(10, 11, 15, 0.5), rgba(10, 11, 15, 0) 28%, rgba(10, 11, 15, 0) 62%, var(--mg-bg) 99%);
+    radial-gradient(ellipse 64% 48% at 50% 43%, rgba(10, 11, 15, 0.8) 0%, rgba(10, 11, 15, 0.42) 46%, rgba(10, 11, 15, 0) 76%),
+    linear-gradient(180deg, rgba(10, 11, 15, 0.62) 0%, rgba(10, 11, 15, 0) 24%, rgba(10, 11, 15, 0) 60%, var(--mg-bg) 100%);
 }
 .mg-hero .mg-overline { justify-content: center; }
 .mg-hero .mg-overline::after { content: ""; width: 28px; height: 1px; background: var(--mg-accent); opacity: 0.7; }
