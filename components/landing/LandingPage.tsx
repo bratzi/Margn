@@ -9,6 +9,7 @@ import Lenis from "lenis";
 import HeroCanvas from "@/components/landing/HeroCanvas";
 import DiffCycler from "@/components/landing/DiffCycler";
 import Anatomy from "@/components/landing/Anatomy";
+import FeatureReveal from "@/components/landing/FeatureReveal";
 
 gsap.registerPlugin(ScrollTrigger, SplitText);
 
@@ -21,53 +22,11 @@ function W({ children }: { children: React.ReactNode }) {
   );
 }
 
-const MARQUEE = [
-  "Silent Edits",
-  "Themen-DNA",
-  "Paywall-Monitoring",
-  "Publizisten-Benchmark",
-  "Unterthemen-Radar",
-  "Publikationsrhythmen",
-];
-
-const FEATURES = [
-  {
-    n: "01",
-    title: "Silent Edits",
-    text: "Jeder Scan wird versioniert. Wort für Wort sichtbar, was sich nach der Veröffentlichung geändert hat — rot entfernt, grün ergänzt.",
-  },
-  {
-    n: "02",
-    title: "Themen-DNA",
-    text: "Agenda-Profile nach dem Vorbild der Agenda-Setting-Forschung: Wer setzt wie stark auf welches Thema — und wer liegt doppelt über dem Marktschnitt?",
-  },
-  {
-    n: "03",
-    title: "Paywall-Monitoring",
-    text: "Welche Inhalte gelten als zahlungswürdig? Paywall-Quoten je Thema und Publizist, im Zeitvergleich mit der Vorperiode — ehrlich gerechnet.",
-  },
-  {
-    n: "04",
-    title: "Publizisten-Benchmark",
-    text: "Volumen, Publikations-Tempo, Autoren-Transparenz: jede Quelle im direkten Vergleich — mit expliziter Vergleichsbasis statt schöner, leerer Zahlen.",
-  },
-  {
-    n: "05",
-    title: "Zeitverlauf bis zur Minute",
-    text: "Publikationsrhythmen von Kalenderwochen bis auf Minuten zoombar. Ein Klick auf einen Datenpunkt filtert die Artikelliste exakt auf dieses Zeitfenster.",
-  },
-  {
-    n: "06",
-    title: "Unterthemen-Radar",
-    text: "Verlagseigene Rubriken wie Politik · Ausland oder Sport · Fußball, quellenübergreifend und mehrsprachig aus den URL-Strukturen abgeleitet.",
-  },
-];
-
 const STEPS = [
   {
     n: "01",
     title: "Erfassen",
-    text: "Quellen aus Deutschland und Frankreich werden stündlich gelesen — schonend, per RSS und freundlicher Crawl-Rate.",
+    text: "Leitmedien aus mehreren Ländern werden stündlich gelesen — schonend, per RSS und freundlicher Crawl-Rate. Weitere Märkte kommen laufend hinzu.",
   },
   {
     n: "02",
@@ -133,18 +92,14 @@ export default function LandingPage() {
     };
     root.addEventListener("click", onAnchorClick);
 
-    /* ---------- Nav: Zustand + Verstecken bei Scroll-Down ---------- */
-    let lastY = window.scrollY;
+    /* ---------- Nav: fix, nur Zustandswechsel (Blur) beim Scrollen ---------- */
     const onScroll = () => {
       const nav = navRef.current;
       if (!nav) return;
-      const y = window.scrollY;
-      nav.classList.toggle("is-scrolled", y > 24);
-      nav.classList.toggle("is-hidden", y > 480 && y > lastY + 4);
-      if (y < lastY - 4 || y <= 480) nav.classList.remove("is-hidden");
-      lastY = y;
+      nav.classList.toggle("is-scrolled", window.scrollY > 24);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
 
     const ctx = gsap.context(() => {
       if (reduced) return;
@@ -306,11 +261,11 @@ export default function LandingPage() {
       {/* ---------------- Hero ---------------- */}
       <section className="mg-hero">
         <HeroCanvas />
-        <p className="mg-overline">Offenes Medienobservatorium · DE — FR</p>
+        <p className="mg-overline">Offenes Medienobservatorium · mehrsprachig</p>
         <h1 className="mg-h1">
           <W>Was</W> <W>Nachrichtenseiten</W>{" "}
           <W>
-            <DiffCycler words={["ändern", "entschärfen", "umschreiben", "streichen"]} />,
+            <DiffCycler words={["verändern", "entschärfen", "umschreiben", "streichen"]} />,
           </W>
           <br />
           <W>
@@ -319,9 +274,9 @@ export default function LandingPage() {
           <W>sie</W> <W>publiziert</W> <W>haben.</W>
         </h1>
         <p className="mg-hero-sub">
-          margn beobachtet deutsche und französische Leitmedien, versioniert
-          jeden Artikel stündlich und macht sichtbar, was zwischen den Zeilen
-          passiert: <strong>stille Edits</strong>, Agenda-Profile,
+          margn beobachtet Leitmedien über Länder- und Sprachgrenzen hinweg,
+          versioniert jeden Artikel stündlich und macht sichtbar, was zwischen
+          den Zeilen passiert: <strong>stille Edits</strong>, Agenda-Profile,
           Paywall-Strategien.
         </p>
         <div className="mg-hero-cta">
@@ -342,14 +297,8 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---------------- Marquee ---------------- */}
-      <div className="mg-marquee" aria-hidden>
-        <div className="mg-marquee-track">
-          {[...MARQUEE, ...MARQUEE].map((m, i) => (
-            <span key={i}>{m}</span>
-          ))}
-        </div>
-      </div>
+      {/* ---------------- Funktionen (interaktiv) ---------------- */}
+      <FeatureReveal />
 
       {/* ---------------- Anatomie (Pin) ---------------- */}
       <Anatomy />
@@ -387,29 +336,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---------------- Funktionen ---------------- */}
-      <section className="mg-section" id="funktionen">
-        <div className="mg-head">
-          <p className="mg-overline">Funktionen</p>
-          <h2 className="mg-h2" data-split>
-            Sechs Blicke <em>hinter</em> die Schlagzeile
-          </h2>
-          <p className="mg-lede" data-reveal="0">
-            Kennzahlen, die man auf den ersten Blick nicht sieht — über alle
-            Publizisten hinweg normalisiert und ehrlich gerechnet.
-          </p>
-        </div>
-        <div className="mg-features">
-          {FEATURES.map((f) => (
-            <div className="mg-feat" key={f.n} data-reveal="0">
-              <span className="n">/{f.n}</span>
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* ---------------- Methodik ---------------- */}
       <section className="mg-method" id="methodik">
         <div className="mg-section">
@@ -441,12 +367,13 @@ export default function LandingPage() {
         <div className="mg-head">
           <p className="mg-overline">Abdeckung</p>
           <h2 className="mg-h2" data-split>
-            Zwei Sprachen, <em>eine</em> Geschichte
+            Viele Sprachen, <em>eine</em> Geschichte
           </h2>
           <p className="mg-lede" data-reveal="0">
             Mehrsprachige Embeddings legen dieselbe Story über Sprachgrenzen
-            zusammen: deutsche und französische Berichterstattung landen im
-            selben Cluster — und werden mit derselben Methodik vermessen.
+            zusammen: Berichterstattung aus verschiedenen Ländern landet im
+            selben Cluster — mit derselben Methodik vermessen. Weitere Märkte
+            kommen laufend hinzu.
           </p>
         </div>
         <div className="mg-pair">
@@ -527,8 +454,8 @@ export default function LandingPage() {
             </span>
             <p className="mg-foot-claim">
               Liest, was zwischen den Zeilen steht: stille Änderungen,
-              Agenda-Profile und Paywall-Strategien deutscher und
-              französischer Leitmedien.
+              Agenda-Profile und Paywall-Strategien von Leitmedien über
+              Länder- und Sprachgrenzen hinweg.
             </p>
           </div>
           <div>
