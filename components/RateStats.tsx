@@ -258,14 +258,23 @@ export default function RateStats() {
   const maxLabels = Math.max(2, Math.floor(naturalWidth / LABEL_MIN_PX));
   const axisStep = Math.max(1, Math.ceil((NB - 1) / maxLabels));
 
-  // Im "abs"-Modus: kumulierte Summe pro Quelle (Y-Achse zählt aufwärts).
+  // Im "abs"-Modus: Tageskumulierung — Reset auf 0 bei Tageswechsel (Lokalzeit).
   const displaySeries = useMemo(() => {
     if (timeFormat !== "abs") return series;
+    const dayKey = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
     return series.map((s) => {
-      let running = 0;
-      return { ...s, vals: s.vals.map((v) => (running += v)) };
+      let running = 0, curDay = "";
+      return {
+        ...s,
+        vals: s.vals.map((v, i) => {
+          const day = dayKey(buckets[i]);
+          if (day !== curDay) { running = 0; curDay = day; }
+          running += v;
+          return running;
+        }),
+      };
     });
-  }, [series, timeFormat]);
+  }, [series, timeFormat, buckets]);
 
   const displayMaxVal = useMemo(
     () => Math.max(1, ...displaySeries.flatMap((s) => s.vals)),
