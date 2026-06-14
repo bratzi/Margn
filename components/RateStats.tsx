@@ -245,15 +245,6 @@ export default function RateStats() {
   const maxLabels = Math.max(2, Math.floor(naturalWidth / LABEL_MIN_PX));
   const axisStep = Math.max(1, Math.ceil((NB - 1) / maxLabels));
 
-  const yTicks = useMemo(() => {
-    const nTicks = 4;
-    const step = Math.ceil(displayMaxVal / nTicks) || 1;
-    const ticks: number[] = [];
-    for (let v = 0; v <= displayMaxVal; v += step) ticks.push(v);
-    if (ticks[ticks.length - 1] < displayMaxVal) ticks.push(displayMaxVal);
-    return ticks;
-  }, [displayMaxVal]);
-
   // Im "abs"-Modus: kumulierte Summe pro Quelle (Y-Achse zählt aufwärts).
   const displaySeries = useMemo(() => {
     if (timeFormat !== "abs") return series;
@@ -267,6 +258,15 @@ export default function RateStats() {
     () => Math.max(1, ...displaySeries.flatMap((s) => s.vals)),
     [displaySeries],
   );
+
+  const yTicks = useMemo(() => {
+    const nTicks = 4;
+    const step = Math.ceil(displayMaxVal / nTicks) || 1;
+    const ticks: number[] = [];
+    for (let v = 0; v <= displayMaxVal; v += step) ticks.push(v);
+    if (ticks[ticks.length - 1] < displayMaxVal) ticks.push(displayMaxVal);
+    return ticks;
+  }, [displayMaxVal]);
 
   const hoverInfo = useMemo(() => {
     if (!hoverDot) return null;
