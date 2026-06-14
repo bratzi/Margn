@@ -23,7 +23,7 @@ export default function RateStats() {
   const f = useFilters();
   const { sources, activeArr } = f;
   const [manual, setManual] = useState<"auto" | Unit>("auto");
-  const [timeFormat, setTimeFormat] = useState<"abs" | "rel">("abs");
+  const [timeFormat, setTimeFormat] = useState<"abs" | "rel">("rel");
   // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
   const [hoverDot, setHoverDot] = useState<{ sid: number; idx: number; x: number; y: number } | null>(null);
   const [containerW, setContainerW] = useState(0);
@@ -142,7 +142,7 @@ export default function RateStats() {
   // Erlaubter Dichtebereich PRO EINHEIT — bewusst weit gespannt, damit man lange innerhalb
   // einer Einheit strecken UND stauchen kann, bevor (im Dynamik-Modus) die Einheit springt.
   // maxDens (strecken): großzügig, feinere Einheiten brauchen weniger px je Bucket.
-  const maxDens = unit === "minute" ? 60 : unit === "hour" ? 130 : unit === "day" ? 150 : 240;
+  const maxDens = unit === "minute" ? 120 : unit === "hour" ? 400 : unit === "day" ? 600 : 900;
   // minDens (stauchen): unter fitDens erlaubt → Achse wird gestaucht (Buckets rücken zusammen),
   // aber nie unter ~1,5 px/Bucket (sonst unlesbar). Erst dann springt die Einheit gröber.
   const minDensFloor = unit === "minute" ? 0.4 : unit === "hour" ? 1.2 : unit === "day" ? 3 : 6;
@@ -155,7 +155,7 @@ export default function RateStats() {
   const stretched = naturalWidth > availW + 1; // breiter als Container → scrollbar
 
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
-  const Y = (v: number) => PAD_T + CH - (v / maxVal) * CH;
+  const Y = (v: number) => PAD_T + CH - (v / displayMaxVal) * CH;
 
   // Bei feinen Einheiten (Minute/Stunde) sind viele Buckets leer. Die Linie soll dann NICHT
   // zwischen den Punkten auf 0 abstürzen, sondern die vorhandenen Punkte direkt verbinden.
@@ -201,26 +201,8 @@ export default function RateStats() {
     return out;
   }, [buckets, unit]);
 
-  // Relative Zeit-Formatierung
-  const fmtRelative = (iso: string) => {
-    const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMins = Math.round(diffMs / 60000);
-    const diffHours = Math.round(diffMs / 3600000);
-    const diffDays = Math.round(diffMs / 86400000);
-
-    if (diffMins < 1) return "jetzt";
-    if (diffMins < 60) return `vor ${diffMins}m`;
-    if (diffHours < 24) return `vor ${diffHours}h`;
-    if (diffDays < 7) return `vor ${diffDays}d`;
-    if (diffDays < 30) return `vor ${Math.round(diffDays / 7)}w`;
-    return `vor ${Math.round(diffDays / 30)}M`;
-  };
-
   // Alle Labels in LOKALER Zeit des Endnutzers.
   const fmtAxis = (iso: string) => {
-    if (timeFormat === "rel") return fmtRelative(iso);
     const d = new Date(iso);
     if (unit === "minute") return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
     if (unit === "hour") return String(d.getHours()).padStart(2, "0") + ":00";
@@ -229,7 +211,6 @@ export default function RateStats() {
   };
   // Volles Datum+Zeit für den Dot-Tooltip
   const fmtFull = (iso: string) => {
-    if (timeFormat === "rel") return fmtRelative(iso);
     const d = new Date(iso);
     if (unit === "minute") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
     if (unit === "hour") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
@@ -266,26 +247,40 @@ export default function RateStats() {
 
   const yTicks = useMemo(() => {
     const nTicks = 4;
-    const step = Math.ceil(maxVal / nTicks) || 1;
+    const step = Math.ceil(displayMaxVal / nTicks) || 1;
     const ticks: number[] = [];
-    for (let v = 0; v <= maxVal; v += step) ticks.push(v);
-    if (ticks[ticks.length - 1] < maxVal) ticks.push(maxVal);
+    for (let v = 0; v <= displayMaxVal; v += step) ticks.push(v);
+    if (ticks[ticks.length - 1] < displayMaxVal) ticks.push(displayMaxVal);
     return ticks;
-  }, [maxVal]);
+  }, [displayMaxVal]);
+
+  // Im "abs"-Modus: kumulierte Summe pro Quelle (Y-Achse zählt aufwärts).
+  const displaySeries = useMemo(() => {
+    if (timeFormat !== "abs") return series;
+    return series.map((s) => {
+      let running = 0;
+      return { ...s, vals: s.vals.map((v) => (running += v)) };
+    });
+  }, [series, timeFormat]);
+
+  const displayMaxVal = useMemo(
+    () => Math.max(1, ...displaySeries.flatMap((s) => s.vals)),
+    [displaySeries],
+  );
 
   const hoverInfo = useMemo(() => {
     if (!hoverDot) return null;
-    const s = series.find((x) => x.id === hoverDot.sid);
+    const s = displaySeries.find((x) => x.id === hoverDot.sid);
     if (!s) return null;
     return { name: nameById.get(s.id)!, color: s.color, val: s.vals[hoverDot.idx], when: fmtFull(buckets[hoverDot.idx]) };
-  }, [hoverDot, series, buckets, timeFormat]);
+  }, [hoverDot, displaySeries, buckets, timeFormat]);
 
   // Mausrad: kontrolliert in beide Richtungen stauchen/strecken.
   // Dynamisch-Modus: an den Dichte-Enden springt die EINHEIT (grob ↔ fein).
   // pointerRatio = relative Position im Content [0..1]; pointerPx = Pixel im sichtbaren Container.
   function applyZoom(dir: 1 | -1, pointerRatio: number, pointerPx: number) {
     const cur = effDens;
-    const STEP = 1.12; // feinere, langsamere Schritte → man zoomt lange innerhalb einer Einheit
+    const STEP = 1.07; // langsame Schritte → man bleibt länger innerhalb einer Einheit
     let next = dir > 0 ? cur * STEP : cur / STEP;
 
     if (manual === "auto") {
@@ -361,8 +356,8 @@ export default function RateStats() {
   // (z.B. Minuten-Modus: viele leere Buckets, aber nur wenige echte Punkte → diese exakt
   // minutengenau als Dots zeigen, statt sie wegen niedriger Dichte auszublenden).
   const nonZeroPts = useMemo(
-    () => series.reduce((s, ser) => s + ser.vals.reduce((a, v) => a + (v > 0 ? 1 : 0), 0), 0),
-    [series],
+    () => displaySeries.reduce((s, ser) => s + ser.vals.reduce((a, v) => a + (v > 0 ? 1 : 0), 0), 0),
+    [displaySeries],
   );
   const showDots = effDens >= 7 || nonZeroPts <= 280;
 
@@ -372,8 +367,8 @@ export default function RateStats() {
         Publikationen über Zeit
         <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span>
         <div className="seg" style={{ marginLeft: "auto" }}>
-          <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")} title="Absolute Zeit (Datum/Uhrzeit)">Abs.</button>
-          <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")} title="Relative Zeit (vor X Stunden)">Rel.</button>
+          <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")} title="Pro Zeiteinheit (relative Häufigkeit)">Rel.</button>
+          <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")} title="Kumuliert (absolut aufsteigend)">Abs.</button>
           <div style={{ width: 1, background: "var(--line)", margin: "0 4px" }} />
           <button className={manual === "auto" ? "on" : ""} onClick={() => setManual("auto")} title="Dynamisch">⟳ Dynamisch</button>
           {/* Minuten nur bei kurzem Zeitraum (sonst zu viele Buckets für die RPC) */}
@@ -437,28 +432,25 @@ export default function RateStats() {
                 <line x1={PAD_L} y1={PAD_T + CH} x2={totalSvgW - PAD_R} y2={PAD_T + CH}
                   stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
 
-                {series.map((s) => (
+                {displaySeries.map((s) => (
                   <path key={`a${s.id}`} d={areaPath(s.vals)} fill={s.color} opacity={0.12} />
                 ))}
-                {series.map((s) => (
+                {displaySeries.map((s) => (
                   <path key={`l${s.id}`} d={smoothPath(s.vals)} fill="none"
                     stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                     vectorEffect="non-scaling-stroke" />
                 ))}
 
                 {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot */}
-                {showDots && series.map((s) => s.vals.map((v, i) => {
+                {showDots && displaySeries.map((s) => s.vals.map((v, i) => {
                   if (v <= 0) return null;
                   const isHover = hoverDot?.sid === s.id && hoverDot?.idx === i;
                   return (
                     <g key={`${s.id}-${i}`}>
-                      {/* dezenter Pulsier-Ring (stärker als zuvor, mit Stil) */}
                       <circle cx={X(i)} cy={Y(v)} r="4" fill={s.color} className="rate-pulse" style={{ ["--c" as any]: s.color }} />
-                      {/* Kern-Dot */}
                       <circle cx={X(i)} cy={Y(v)} r={isHover ? 5.5 : 3.4} fill={s.color}
                         stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
                         className="rate-dot" />
-                      {/* Hitbox: Hover zeigt Tooltip, Klick filtert die Tabelle auf dieses Fenster+Quelle */}
                       <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: "pointer" }}
                         onMouseEnter={() => !panRef.current && setHoverDot({ sid: s.id, idx: i, x: X(i), y: Y(v) })}
                         onMouseLeave={() => setHoverDot((h) => (h?.sid === s.id && h?.idx === i ? null : h))}
