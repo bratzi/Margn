@@ -245,6 +245,7 @@ export default function RateStats() {
     f.setPinpoint({
       from: start.toISOString(), to: end.toISOString(), sourceId: sid,
       label: `${nameById.get(sid)} · ${fmtFull(buckets[idx])}`,
+      ...(timeFormat === "abs" ? { limit: 1 } : {}),
     });
     // sanft zur Tabelle scrollen, damit die Wirkung sichtbar ist
     requestAnimationFrame(() => document.querySelector(".dt-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" }));

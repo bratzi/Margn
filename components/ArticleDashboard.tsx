@@ -58,9 +58,12 @@ export default function ArticleDashboard() {
     // das exakte Spiegelbild des Prädikats, mit dem die Charts zählen.
     let q = supabase.from("page_overview").select("id,article_id,url,title,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", srcFilter);
     q = applyServerFilters(q, snapshotOf(f as any), f.subPats, f.kwIds);
-    const { data, count } = await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
+    const pinLimit = f.pinpoint?.limit;
+    const { data, count } = pinLimit
+      ? await q.order("published_at", { ascending: true }).limit(pinLimit)
+      : await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.kwIds, f.keyword, f.subPats.join("|"), page]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.pinpoint?.limit, f.kwIds, f.keyword, f.subPats.join("|"), page]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
   useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId]);
