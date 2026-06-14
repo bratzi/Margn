@@ -7,9 +7,8 @@ import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
 type Unit = "minute" | "hour" | "day" | "week";
 const short = (n: string) => n.replace(" Online", "");
-const VW = 1000, VH = 220;
+const VW = 1000;
 const PAD_L = 44, PAD_B = 24, PAD_T = 18, PAD_R = 12;
-const CH = VH - PAD_T - PAD_B;
 
 // ISO-Kalenderwoche aus LOKALEN Datumskomponenten (konsistent mit der lokalen Bucketing-Zeit).
 function isoWeek(d: Date): number {
@@ -24,6 +23,10 @@ export default function RateStats() {
   const { sources, activeArr } = f;
   const [manual, setManual] = useState<"auto" | Unit>("auto");
   const [timeFormat, setTimeFormat] = useState<"abs" | "rel">("rel");
+  const [chartH, setChartH] = useState(220);
+  const [resizing, setResizing] = useState(false);
+  const VH = chartH;
+  const CH = VH - PAD_T - PAD_B;
   // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
   const [hoverDot, setHoverDot] = useState<{ sid: number; idx: number; x: number; y: number } | null>(null);
   const [containerW, setContainerW] = useState(0);
@@ -61,6 +64,16 @@ export default function RateStats() {
     roRef.current?.disconnect();
     scrollRef.current?.removeEventListener("wheel", nativeWheelRef.current);
   }, []);
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY, startH = chartH;
+    setResizing(true);
+    const onMove = (ev: PointerEvent) => setChartH(Math.max(100, Math.min(600, startH + ev.clientY - startY)));
+    const onUp = () => { setResizing(false); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   const fromIso = f.days[f.rangeIdx.from] + "T00:00:00Z";
   const toIso = f.days[f.rangeIdx.to] + "T23:59:59Z";
@@ -381,7 +394,8 @@ export default function RateStats() {
           <button className={manual === "week" ? "on" : ""} onClick={() => setManual("week")}>Woche</button>
         </div>
       </h2>
-      <div className="panel pad">
+      <div className="panel pad" style={{ position: "relative" }}>
+        <div className="trf-resize" onPointerDown={startResize} title="Höhe ziehen" style={{ cursor: resizing ? "row-resize" : undefined }}><span /></div>
         {!total ? (
           <p className="faint" style={{ fontSize: 13 }}>Keine veröffentlichten Artikel im gewählten Zeitraum.</p>
         ) : (
@@ -395,14 +409,29 @@ export default function RateStats() {
               </span>
             </div>
 
-            <div
-              ref={measure}
-              className={`rate-scroll ${stretched ? "can-pan" : ""} ${panning ? "is-panning" : ""}`}
-              onScroll={(e) => {
-                const sl = (e.target as HTMLDivElement).scrollLeft;
-                if (axisRef.current) axisRef.current.scrollLeft = sl;
-              }}
-            >
+            <div style={{ position: "relative" }}>
+              {/* Sticky Y-Achse — scrollt nicht mit dem Chart */}
+              <svg
+                style={{ position: "absolute", left: 0, top: 0, zIndex: 2, pointerEvents: "none", background: "var(--surface)" }}
+                width={PAD_L}
+                height={VH}
+              >
+                {yTicks.map((v) => (
+                  <text key={v} x={PAD_L - 6} y={Y(v)} textAnchor="end" dominantBaseline="middle"
+                    fontSize="9" fill="var(--faint)">{v}</text>
+                ))}
+                <line x1={PAD_L - 1} y1={PAD_T} x2={PAD_L - 1} y2={PAD_T + CH}
+                  stroke="var(--line)" strokeWidth="1" />
+              </svg>
+
+              <div
+                ref={measure}
+                className={`rate-scroll ${stretched ? "can-pan" : ""} ${panning ? "is-panning" : ""}`}
+                onScroll={(e) => {
+                  const sl = (e.target as HTMLDivElement).scrollLeft;
+                  if (axisRef.current) axisRef.current.scrollLeft = sl;
+                }}
+              >
               <svg
                 key={`${unit}-${NB}`}
                 viewBox={`0 0 ${totalSvgW} ${VH}`}
@@ -419,8 +448,6 @@ export default function RateStats() {
                   <g key={v}>
                     <line x1={PAD_L} y1={Y(v)} x2={totalSvgW - PAD_R} y2={Y(v)}
                       stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                    <text x={PAD_L - 6} y={Y(v)} textAnchor="end" dominantBaseline="middle"
-                      fontSize="9" fill="var(--faint)">{v}</text>
                   </g>
                 ))}
 
@@ -475,6 +502,7 @@ export default function RateStats() {
                   </div>
                 </div>
               )}
+            </div>
             </div>
 
             <div className="rate-axis-wrap" ref={axisRef}>
