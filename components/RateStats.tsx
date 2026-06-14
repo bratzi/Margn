@@ -268,6 +268,9 @@ export default function RateStats() {
     return ticks;
   }, [displayMaxVal]);
 
+  // Originale (nicht-kumulative) Werte pro Quelle — für Dot-Sichtbarkeit im abs-Modus.
+  const origById = useMemo(() => new Map(series.map((s) => [s.id, s.vals])), [series]);
+
   const hoverInfo = useMemo(() => {
     if (!hoverDot) return null;
     const s = displaySeries.find((x) => x.id === hoverDot.sid);
@@ -443,7 +446,7 @@ export default function RateStats() {
 
                 {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot */}
                 {showDots && displaySeries.map((s) => s.vals.map((v, i) => {
-                  if (v <= 0) return null;
+                  if ((origById.get(s.id)?.[i] ?? 0) <= 0) return null;
                   const isHover = hoverDot?.sid === s.id && hoverDot?.idx === i;
                   return (
                     <g key={`${s.id}-${i}`}>
