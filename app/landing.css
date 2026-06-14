@@ -82,8 +82,41 @@ html.lenis, html.lenis body { height: auto; }
 .mg-lede { color: var(--mg-muted); font-size: clamp(15px, 1.6vw, 17.5px); line-height: 1.75; max-width: 620px; margin: 0; }
 .mg-mono { font-family: var(--mg-mono); }
 
-.mg-section { position: relative; max-width: var(--mg-max); margin: 0 auto; padding: clamp(88px, 12vw, 160px) var(--mg-pad); }
+.mg-section { position: relative; isolation: isolate; max-width: var(--mg-max); margin: 0 auto; padding: clamp(88px, 12vw, 160px) var(--mg-pad); }
 .mg-section > .mg-head { margin-bottom: clamp(40px, 6vw, 72px); }
+
+/* Sektions-Atmosphäre: full-bleed Blueprint-Raster + weiche Akzent-Glows,
+   vertikal maskiert (oben/unten ausgeblendet) → Tiefe ohne leere Flächen,
+   Typo bleibt ruhig. -1 unter dem Inhalt dank isolation: isolate. */
+.mg-section::before {
+  content: ""; position: absolute; z-index: -1; top: 0; bottom: 0;
+  left: 50%; width: 100vw; transform: translateX(-50%); pointer-events: none;
+  background-image:
+    radial-gradient(44% 58% at 14% -8%, rgba(110, 138, 255, 0.07), transparent 72%),
+    radial-gradient(40% 52% at 94% 108%, rgba(159, 178, 255, 0.05), transparent 72%),
+    radial-gradient(circle, rgba(242, 240, 233, 0.05) 1px, transparent 1.6px);
+  background-size: 100% 100%, 100% 100%, 32px 32px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 11%, #000 89%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 11%, #000 89%, transparent 100%);
+}
+/* Abwechselnde Glow-Seiten für Rhythmus über die Sektionen hinweg */
+#abdeckung.mg-section::before {
+  background-image:
+    radial-gradient(44% 58% at 88% -8%, rgba(110, 138, 255, 0.07), transparent 72%),
+    radial-gradient(40% 52% at 6% 108%, rgba(159, 178, 255, 0.05), transparent 72%),
+    radial-gradient(circle, rgba(242, 240, 233, 0.05) 1px, transparent 1.6px);
+  background-size: 100% 100%, 100% 100%, 32px 32px;
+}
+#transparenz.mg-section::before {
+  background-image:
+    radial-gradient(54% 60% at 50% -10%, rgba(110, 138, 255, 0.06), transparent 70%),
+    radial-gradient(circle, rgba(242, 240, 233, 0.05) 1px, transparent 1.6px);
+  background-size: 100% 100%, 32px 32px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mg-section::before { animation: mg-bg-breathe 14s ease-in-out infinite; }
+  @keyframes mg-bg-breathe { 50% { opacity: 0.74; } }
+}
 
 /* ---------------------------------------------------------------- Nav */
 .mg-nav {
@@ -325,7 +358,14 @@ html.lenis, html.lenis body { height: auto; }
 @keyframes mg-fade { from { opacity: 0; } }
 
 /* ---------------------------------------------------------------- Anatomie (Pin) */
-.mg-anatomy { position: relative; background: var(--mg-bg-2); border-bottom: 1px solid var(--mg-line); }
+.mg-anatomy {
+  position: relative; border-bottom: 1px solid var(--mg-line);
+  background:
+    radial-gradient(46% 40% at 8% 0%, rgba(110, 138, 255, 0.06), transparent 70%),
+    radial-gradient(46% 44% at 100% 100%, rgba(159, 178, 255, 0.05), transparent 72%),
+    radial-gradient(circle, rgba(242, 240, 233, 0.04) 1px, transparent 1.6px) 0 0 / 32px 32px,
+    var(--mg-bg-2);
+}
 .mg-anatomy-pin { position: relative; }
 .mg-anatomy-stage {
   min-height: 100svh; display: grid; align-content: center;
@@ -407,7 +447,13 @@ html.lenis, html.lenis body { height: auto; }
 }
 
 /* ---------------------------------------------------------------- Stats */
-.mg-stats { border-top: 1px solid var(--mg-line); border-bottom: 1px solid var(--mg-line); background: var(--mg-bg); }
+.mg-stats {
+  border-top: 1px solid var(--mg-line); border-bottom: 1px solid var(--mg-line);
+  background:
+    radial-gradient(60% 120% at 50% 0%, rgba(110, 138, 255, 0.05), transparent 72%),
+    radial-gradient(circle, rgba(242, 240, 233, 0.04) 1px, transparent 1.6px) 0 0 / 32px 32px,
+    var(--mg-bg);
+}
 .mg-stats-in {
   max-width: var(--mg-max); margin: 0 auto;
   display: grid; grid-template-columns: repeat(4, 1fr);
@@ -520,6 +566,7 @@ html.lenis, html.lenis body { height: auto; }
   border-top: 1px solid var(--mg-line);
   background:
     radial-gradient(ellipse 60% 50% at 50% 115%, rgba(110, 138, 255, 0.16), transparent 70%),
+    radial-gradient(circle, rgba(242, 240, 233, 0.045) 1px, transparent 1.6px) 0 0 / 32px 32px,
     var(--mg-bg-2);
 }
 .mg-final .mg-h2 { font-size: clamp(38px, 6.4vw, 88px); max-width: 13em; margin-left: auto; margin-right: auto; }
@@ -532,7 +579,10 @@ html.lenis, html.lenis body { height: auto; }
 }
 
 /* ---------------------------------------------------------------- Footer */
-.mg-foot { border-top: 1px solid var(--mg-line); background: var(--mg-bg); }
+.mg-foot {
+  border-top: 1px solid var(--mg-line);
+  background: radial-gradient(circle, rgba(242, 240, 233, 0.035) 1px, transparent 1.6px) 0 0 / 32px 32px, var(--mg-bg);
+}
 .mg-foot-in {
   max-width: var(--mg-max); margin: 0 auto; padding: clamp(36px, 5vw, 64px) var(--mg-pad);
   display: grid; grid-template-columns: 2fr 1fr 1fr; gap: clamp(24px, 4vw, 48px);
