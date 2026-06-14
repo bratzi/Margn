@@ -101,6 +101,30 @@ export default function LandingPage() {
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
 
+    /* ---------- Raster-Glow unter dem Cursor ---------- */
+    const glowEls = finePointer
+      ? Array.from(root.querySelectorAll<HTMLElement>(".mg-section, .mg-anatomy, .mg-stats, .mg-final, .mg-foot"))
+      : [];
+    let glowRaf = 0;
+    const onGlow = (e: PointerEvent) => {
+      if (glowRaf) return;
+      glowRaf = requestAnimationFrame(() => {
+        glowRaf = 0;
+        for (const el of glowEls) {
+          const r = el.getBoundingClientRect();
+          const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+          if (inside) {
+            el.style.setProperty("--mx", `${e.clientX}px`);
+            el.style.setProperty("--my", `${e.clientY - r.top}px`);
+            el.style.setProperty("--spot", "1");
+          } else if (el.style.getPropertyValue("--spot") === "1") {
+            el.style.setProperty("--spot", "0");
+          }
+        }
+      });
+    };
+    if (glowEls.length) window.addEventListener("pointermove", onGlow, { passive: true });
+
     const ctx = gsap.context(() => {
       if (reduced) return;
 
@@ -227,6 +251,8 @@ export default function LandingPage() {
       removeCursor?.();
       root.removeEventListener("click", onAnchorClick);
       window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("pointermove", onGlow);
+      if (glowRaf) cancelAnimationFrame(glowRaf);
       if (rafCb) gsap.ticker.remove(rafCb);
       lenis?.destroy();
     };

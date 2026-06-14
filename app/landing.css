@@ -88,32 +88,59 @@ html.lenis, html.lenis body { height: auto; }
 /* Sektions-Atmosphäre: full-bleed Blueprint-Raster + weiche Akzent-Glows,
    vertikal maskiert (oben/unten ausgeblendet) → Tiefe ohne leere Flächen,
    Typo bleibt ruhig. -1 unter dem Inhalt dank isolation: isolate. */
-/* Atmosphärisches Licht statt Muster: große, weiche Akzent-Blooms, je
-   Sektion anders komponiert — Tiefe & Vielfalt ohne ein einziges Raster.
+/* Blueprint-Raster (dezent) + weiche Akzent-Blooms je Sektion. Das Raster
+   ist die ruhende Schicht; unter dem Cursor leuchtet es auf (siehe ::after).
    Full-bleed, vertikal maskiert für weiche Übergänge. */
 .mg-section::before {
   content: ""; position: absolute; z-index: -1; top: 0; bottom: 0;
   left: 50%; width: 100vw; transform: translateX(-50%); pointer-events: none;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 7%, #000 93%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 7%, #000 93%, transparent 100%);
-  background:
-    radial-gradient(62% 80% at 8% -12%, rgba(110, 138, 255, 0.20), transparent 60%),
-    radial-gradient(58% 76% at 102% 112%, rgba(159, 178, 255, 0.15), transparent 62%);
+  background-image:
+    radial-gradient(60% 78% at 8% -12%, rgba(110, 138, 255, 0.17), transparent 62%),
+    radial-gradient(56% 74% at 102% 112%, rgba(159, 178, 255, 0.13), transparent 64%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px;
 }
-/* Abdeckung — zwei Lichtquellen aus gegenüberliegenden Ecken (Konvergenz) */
 #abdeckung.mg-section::before {
-  background:
-    radial-gradient(60% 78% at 94% -12%, rgba(110, 138, 255, 0.20), transparent 60%),
-    radial-gradient(58% 76% at -2% 112%, rgba(159, 178, 255, 0.16), transparent 62%);
+  background-image:
+    radial-gradient(60% 78% at 94% -12%, rgba(110, 138, 255, 0.17), transparent 62%),
+    radial-gradient(56% 74% at -2% 112%, rgba(159, 178, 255, 0.14), transparent 64%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px;
 }
-/* Transparenz — eine ruhige, klare Lichtquelle von oben */
 #transparenz.mg-section::before {
-  background:
-    radial-gradient(80% 72% at 50% -18%, rgba(110, 138, 255, 0.17), transparent 60%);
+  background-image:
+    radial-gradient(80% 72% at 50% -18%, rgba(110, 138, 255, 0.15), transparent 60%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 64px 64px, 64px 64px;
 }
+
+/* Interaktiver Schein: dieselbe Rasterung, hell, nur in einem Kreis um den
+   Cursor sichtbar (Maske folgt --mx/--my, per JS gesetzt). Linien „glühen"
+   dort, wo man hinfährt. Perfekt deckungsgleich mit dem ruhenden Raster. */
+.mg-section::after,
+.mg-anatomy::after,
+.mg-stats::after,
+.mg-final::after,
+.mg-foot::after {
+  content: ""; position: absolute; z-index: -1; top: 0; bottom: 0;
+  left: 50%; width: 100vw; transform: translateX(-50%); pointer-events: none;
+  opacity: var(--spot, 0); transition: opacity 0.35s ease;
+  background-image:
+    linear-gradient(rgba(159, 178, 255, 0.55) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(159, 178, 255, 0.55) 1px, transparent 1px);
+  background-size: 64px 64px, 64px 64px;
+  -webkit-mask-image: radial-gradient(circle 150px at var(--mx, -200px) var(--my, -200px), #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%);
+  mask-image: radial-gradient(circle 150px at var(--mx, -200px) var(--my, -200px), #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%);
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .mg-section::before { animation: mg-bg-breathe 16s ease-in-out infinite; }
-  @keyframes mg-bg-breathe { 50% { opacity: 0.78; transform: translateX(-50%) scale(1.04); } }
+  @keyframes mg-bg-breathe { 50% { opacity: 0.82; } }
 }
 
 /* ---------------------------------------------------------------- Nav */
@@ -357,10 +384,12 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Anatomie (Pin) */
 .mg-anatomy {
-  position: relative; border-bottom: 1px solid var(--mg-line);
+  position: relative; isolation: isolate; border-bottom: 1px solid var(--mg-line);
   background:
     radial-gradient(56% 60% at 4% -4%, rgba(110, 138, 255, 0.17), transparent 64%),
     radial-gradient(60% 64% at 102% 104%, rgba(159, 178, 255, 0.13), transparent 66%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--mg-bg-2);
 }
 .mg-anatomy-pin { position: relative; }
@@ -445,9 +474,12 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Stats */
 .mg-stats {
+  position: relative; isolation: isolate;
   border-top: 1px solid var(--mg-line); border-bottom: 1px solid var(--mg-line);
   background:
     radial-gradient(90% 150% at 50% -20%, rgba(110, 138, 255, 0.15), transparent 66%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--mg-bg);
 }
 .mg-stats-in {
@@ -562,12 +594,14 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Finale */
 .mg-final {
-  position: relative; text-align: center; overflow: clip;
+  position: relative; isolation: isolate; text-align: center; overflow: clip;
   padding: clamp(110px, 16vw, 200px) var(--mg-pad);
   border-top: 1px solid var(--mg-line);
   background:
     radial-gradient(ellipse 80% 60% at 50% 118%, rgba(110, 138, 255, 0.24), transparent 68%),
     radial-gradient(50% 50% at 50% -10%, rgba(159, 178, 255, 0.08), transparent 70%),
+    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--mg-bg-2);
 }
 .mg-final .mg-h2 { font-size: clamp(38px, 6.4vw, 88px); max-width: 13em; margin-left: auto; margin-right: auto; }
@@ -581,9 +615,12 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Footer */
 .mg-foot {
+  position: relative; isolation: isolate;
   border-top: 1px solid var(--mg-line);
   background:
     radial-gradient(70% 120% at 50% 0%, rgba(110, 138, 255, 0.06), transparent 70%),
+    linear-gradient(rgba(242, 240, 233, 0.045) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(242, 240, 233, 0.045) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--mg-bg);
 }
 .mg-foot-in {
