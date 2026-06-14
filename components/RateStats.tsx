@@ -23,6 +23,7 @@ export default function RateStats() {
   const f = useFilters();
   const { sources, activeArr } = f;
   const [manual, setManual] = useState<"auto" | Unit>("auto");
+  const [timeFormat, setTimeFormat] = useState<"abs" | "rel">("abs");
   // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
   const [hoverDot, setHoverDot] = useState<{ sid: number; idx: number; x: number; y: number } | null>(null);
   const [containerW, setContainerW] = useState(0);
@@ -200,8 +201,26 @@ export default function RateStats() {
     return out;
   }, [buckets, unit]);
 
+  // Relative Zeit-Formatierung
+  const fmtRelative = (iso: string) => {
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.round(diffMs / 60000);
+    const diffHours = Math.round(diffMs / 3600000);
+    const diffDays = Math.round(diffMs / 86400000);
+
+    if (diffMins < 1) return "jetzt";
+    if (diffMins < 60) return `vor ${diffMins}m`;
+    if (diffHours < 24) return `vor ${diffHours}h`;
+    if (diffDays < 7) return `vor ${diffDays}d`;
+    if (diffDays < 30) return `vor ${Math.round(diffDays / 7)}w`;
+    return `vor ${Math.round(diffDays / 30)}M`;
+  };
+
   // Alle Labels in LOKALER Zeit des Endnutzers.
   const fmtAxis = (iso: string) => {
+    if (timeFormat === "rel") return fmtRelative(iso);
     const d = new Date(iso);
     if (unit === "minute") return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
     if (unit === "hour") return String(d.getHours()).padStart(2, "0") + ":00";
@@ -210,6 +229,7 @@ export default function RateStats() {
   };
   // Volles Datum+Zeit für den Dot-Tooltip
   const fmtFull = (iso: string) => {
+    if (timeFormat === "rel") return fmtRelative(iso);
     const d = new Date(iso);
     if (unit === "minute") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
     if (unit === "hour") return d.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
@@ -258,7 +278,7 @@ export default function RateStats() {
     const s = series.find((x) => x.id === hoverDot.sid);
     if (!s) return null;
     return { name: nameById.get(s.id)!, color: s.color, val: s.vals[hoverDot.idx], when: fmtFull(buckets[hoverDot.idx]) };
-  }, [hoverDot, series, buckets]);
+  }, [hoverDot, series, buckets, timeFormat]);
 
   // Mausrad: kontrolliert in beide Richtungen stauchen/strecken.
   // Dynamisch-Modus: an den Dichte-Enden springt die EINHEIT (grob ↔ fein).
@@ -352,6 +372,9 @@ export default function RateStats() {
         Publikationen über Zeit
         <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span>
         <div className="seg" style={{ marginLeft: "auto" }}>
+          <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")} title="Absolute Zeit (Datum/Uhrzeit)">Abs.</button>
+          <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")} title="Relative Zeit (vor X Stunden)">Rel.</button>
+          <div style={{ width: 1, background: "var(--line)", margin: "0 4px" }} />
           <button className={manual === "auto" ? "on" : ""} onClick={() => setManual("auto")} title="Dynamisch">⟳ Dynamisch</button>
           {/* Minuten nur bei kurzem Zeitraum (sonst zu viele Buckets für die RPC) */}
           {spanDays <= 3 && <button className={manual === "minute" ? "on" : ""} onClick={() => setManual("minute")} title="Minutengenau">Minute</button>}
