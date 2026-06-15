@@ -110,7 +110,18 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .nextrun svg { color: var(--accent); flex-shrink: 0; }
 .nextrun .nr-label { font-size: 11px; color: var(--muted); flex: 1; }
 .nextrun .nr-time { font-size: 12.5px; font-weight: 600; color: var(--ink); letter-spacing: .02em; }
-@media (max-width: 860px) { .nextrun { margin: 0; border: 0; background: transparent; padding: 0 6px; } .nextrun .nr-label { display: none; } }
+/* Mehrzeiliges Status-Widget: Crawl + Analyse mit Countdown + Live-Badge */
+.nextrun-multi { flex-direction: column; align-items: stretch; gap: 6px; }
+.nextrun-multi .nr-head { display: flex; align-items: center; justify-content: space-between; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.nextrun-multi .nr-row { display: flex; align-items: center; gap: 7px; }
+.nextrun-multi .nr-row svg { color: var(--accent); flex-shrink: 0; }
+.nextrun-multi .nr-label { font-size: 11px; color: var(--muted); flex: 1; display: flex; align-items: center; gap: 6px; }
+.nextrun .nr-ivl { font-style: normal; font-size: 9.5px; color: var(--faint); border: 1px solid var(--line); border-radius: 999px; padding: 1px 5px; }
+.nextrun .nr-time.is-dim { color: var(--faint); }
+.nextrun .nr-live { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+.nextrun .nr-live i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: nr-pulse 1.2s ease-in-out infinite; }
+@keyframes nr-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.6); } }
+@media (max-width: 860px) { .nextrun { margin: 0; border: 0; background: transparent; padding: 0 6px; } .nextrun .nr-head { display: none; } .nextrun-multi .nr-label .nr-ivl { display: none; } }
 
 .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; transition: all .15s; }
 .theme-toggle:hover { color: var(--ink); border-color: var(--line-2); }
