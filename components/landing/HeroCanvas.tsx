@@ -72,7 +72,7 @@ export default function HeroCanvas() {
     const resize = () => {
       W = host.clientWidth || 1;
       H = host.clientHeight || 1;
-      dpr = Math.min(small ? 1.5 : 2, window.devicePixelRatio || 1);
+      dpr = Math.min(small ? 1.3 : 1.5, window.devicePixelRatio || 1);
       for (const cv of [canvas, veil]) {
         cv.width = Math.round(W * dpr);
         cv.height = Math.round(H * dpr);
@@ -208,7 +208,14 @@ export default function HeroCanvas() {
       if (mouse.active) ring(mouse.x, mouse.y, LENS, 0.2);
     };
 
-    const loop = (now: number) => { frame(now); raf = requestAnimationFrame(loop); };
+    // Auf ~30 fps drosseln — der Reveal braucht keine 60 fps, halbiert die
+    // teuren Veil-Blits und das drawImage pro Frame.
+    const FRAME_MS = 33;
+    const loop = (now: number) => {
+      raf = requestAnimationFrame(loop);
+      if (now - last < FRAME_MS) return;
+      frame(now);
+    };
 
     if (reduced) {
       last = performance.now();

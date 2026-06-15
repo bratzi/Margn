@@ -108,7 +108,7 @@ export default function LandingPage() {
 
     /* ---------- Raster-Glow unter dem Cursor ---------- */
     const glowEls = finePointer
-      ? Array.from(root.querySelectorAll<HTMLElement>(".mg-section, .mg-anatomy, .mg-stats, .mg-final, .mg-foot"))
+      ? Array.from(root.querySelectorAll<HTMLElement>(".mg-section, .mg-stats, .mg-foot"))
       : [];
     let glowRaf = 0;
     const onGlow = (e: PointerEvent) => {

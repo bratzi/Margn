@@ -55,15 +55,19 @@ html.lenis, html.lenis body { height: auto; }
 
 /* Körnung über allem — Zeitungspapier-Textur */
 .mg-grain {
-  position: fixed; inset: -50%; z-index: 80; pointer-events: none;
+  position: fixed; inset: -6%; z-index: 80; pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  opacity: 0.05; mix-blend-mode: overlay;
-  animation: mg-grain 0.9s steps(2) infinite;
+  opacity: 0.045;
+  /* mix-blend-mode: overlay war teuer (blendet jeden Frame den ganzen
+     Hintergrund). Normales Overlay mit niedriger Deckkraft ist optisch
+     fast gleich, aber deutlich günstiger. */
+  animation: mg-grain 1.2s steps(2) infinite;
+  will-change: transform;
 }
 @keyframes mg-grain {
   0% { transform: translate(0, 0); }
-  50% { transform: translate(2%, -1.4%); }
-  100% { transform: translate(-1.6%, 1%); }
+  50% { transform: translate(1.5%, -1%); }
+  100% { transform: translate(-1.2%, 0.8%); }
 }
 
 /* Typografie-Bausteine */
@@ -123,9 +127,7 @@ html.lenis, html.lenis body { height: auto; }
    Cursor sichtbar (Maske folgt --mx/--my, per JS gesetzt). Linien „glühen"
    dort, wo man hinfährt. Perfekt deckungsgleich mit dem ruhenden Raster. */
 .mg-section::after,
-.mg-anatomy::after,
 .mg-stats::after,
-.mg-final::after,
 .mg-foot::after {
   content: ""; position: absolute; z-index: -1; top: 0; bottom: 0;
   left: 50%; width: 100vw; transform: translateX(-50%); pointer-events: none;
@@ -385,12 +387,16 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------------------------------------------------------------- Anatomie (Pin) */
 .mg-anatomy {
   position: relative; isolation: isolate; border-bottom: 1px solid var(--mg-line);
-  background:
-    radial-gradient(56% 60% at 4% -4%, rgba(110, 138, 255, 0.17), transparent 64%),
-    radial-gradient(60% 64% at 102% 104%, rgba(159, 178, 255, 0.13), transparent 66%),
-    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
-    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
-    var(--mg-bg-2);
+  /* Behandelte Zeitungstextur: entsättigt (saturation), abgedunkelt
+     (multiply), Akzent-Schein (screen). Foto wird zur Atmosphäre, nicht laut. */
+  background-color: var(--mg-bg-2);
+  background-image:
+    radial-gradient(60% 70% at 8% -6%, rgba(110, 138, 255, 0.20), transparent 62%),
+    linear-gradient(180deg, rgba(10, 11, 15, 0.86), rgba(10, 11, 15, 0.93)),
+    linear-gradient(rgba(120, 128, 150, 1), rgba(120, 128, 150, 1)),
+    url(/landing/anatomy.jpg);
+  background-repeat: no-repeat; background-position: center; background-size: cover;
+  background-blend-mode: screen, multiply, saturation, normal;
 }
 .mg-anatomy-pin { position: relative; }
 .mg-anatomy-stage {
@@ -597,12 +603,15 @@ html.lenis, html.lenis body { height: auto; }
   position: relative; isolation: isolate; text-align: center; overflow: clip;
   padding: clamp(110px, 16vw, 200px) var(--mg-pad);
   border-top: 1px solid var(--mg-line);
-  background:
-    radial-gradient(ellipse 80% 60% at 50% 118%, rgba(110, 138, 255, 0.24), transparent 68%),
-    radial-gradient(50% 50% at 50% -10%, rgba(159, 178, 255, 0.08), transparent 70%),
-    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
-    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
-    var(--mg-bg-2);
+  /* Behandelte Tinten-/Rauch-Textur als dramatischer Abschluss */
+  background-color: var(--mg-bg-2);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 118%, rgba(110, 138, 255, 0.28), transparent 66%),
+    linear-gradient(180deg, rgba(10, 11, 15, 0.80), rgba(10, 11, 15, 0.92)),
+    linear-gradient(rgba(120, 128, 150, 1), rgba(120, 128, 150, 1)),
+    url(/landing/final.jpg);
+  background-repeat: no-repeat; background-position: center; background-size: cover;
+  background-blend-mode: screen, multiply, saturation, normal;
 }
 .mg-final .mg-h2 { font-size: clamp(38px, 6.4vw, 88px); max-width: 13em; margin-left: auto; margin-right: auto; }
 .mg-final .mg-h2 del { color: var(--mg-red); text-decoration: line-through; text-decoration-thickness: 0.06em; }
