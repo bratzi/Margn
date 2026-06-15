@@ -210,7 +210,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       () => supabase.from("page_overview").select("id", { count: "exact", head: true }).in("ptype", ALLOWED_PTYPES),
       (a, b) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
         .order("discovered_at", { ascending: false }).range(a, b) as any,
-      60000,
+      // Cap der clientseitigen Analytics-Menge (neueste zuerst). Angehoben, damit
+      // Charts/Optionen auch bei größerem/älterem Bestand vollständig sind.
+      // Langfristig gehört diese Aggregation server-seitig (RPC), dann cap-frei.
+      100000,
     ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); } });
     return () => { cancelled = true; };
   }, [sources.length, corpusGen]);

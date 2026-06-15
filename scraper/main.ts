@@ -773,6 +773,31 @@ async function analyzeBacklog() {
   // separaten enrich-Job mit Metadaten in die DB; enrich bleibt nur für den Altbestand.
   const queue: { url: string; sid: number }[] = [];
   for (const [sid, urls] of bySrc) for (const url of urls) queue.push({ url, sid });
+
+  // Restbudget mit RE-SCANS füllen: die am LÄNGSTEN nicht geprüften jüngeren
+  // Artikel erneut rendern → stille Edits werden auch außerhalb der Top-Seiten
+  // erkannt (nicht nur auf denen, die der Crawl ohnehin neu rendert). Kostet
+  // keine Extra-Minuten — nutzt nur das ohnehin vorhandene analyze-Budget.
+  const newCount = queue.length;
+  const remaining = MAX_PAGES - queue.length;
+  if (remaining > 0) {
+    const days = Number(process.env.RESCAN_DAYS ?? 4);
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const inQueue = new Set(queue.map((q) => q.url));
+    const { data: recent } = await sb.from("articles")
+      .select("url,source_id,last_seen")
+      .in("source_id", activeIds)
+      .not("title", "is", null)
+      .or(`published_at.gte.${since},discovered_at.gte.${since}`)
+      .order("last_seen", { ascending: true })
+      .limit(remaining + 200);
+    for (const r of (recent ?? []) as any[]) {
+      if (queue.length >= MAX_PAGES) break;
+      if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); }
+    }
+    console.log(`Re-Scan aufgefüllt: ${queue.length - newCount} jüngere Artikel (< ${days} Tage, ältester Scan zuerst)`);
+  }
+
   const browser = await chromium.launch();
   let done2 = 0, ok = 0;
   const total = queue.length;
