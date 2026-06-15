@@ -92,11 +92,16 @@ export default function LandingPage() {
     };
     root.addEventListener("click", onAnchorClick);
 
-    /* ---------- Nav: fix, nur Zustandswechsel (Blur) beim Scrollen ---------- */
+    /* ---------- Nav-Blur + Scroll-Fortschritt ---------- */
+    const prog = root.querySelector<HTMLElement>(".mg-progress > i");
     const onScroll = () => {
       const nav = navRef.current;
-      if (!nav) return;
-      nav.classList.toggle("is-scrolled", window.scrollY > 24);
+      if (nav) nav.classList.toggle("is-scrolled", window.scrollY > 24);
+      if (prog) {
+        const d = document.documentElement;
+        const max = d.scrollHeight - d.clientHeight;
+        prog.style.transform = `scaleX(${max > 0 ? Math.min(1, window.scrollY / max) : 0})`;
+      }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
@@ -261,6 +266,7 @@ export default function LandingPage() {
   return (
     <div className="mg" ref={rootRef}>
       <div className="mg-grain" aria-hidden />
+      <div className="mg-progress" aria-hidden><i /></div>
       <div className="mg-cursor" ref={cursorRef} aria-hidden />
 
       {/* ---------------- Nav ---------------- */}
@@ -507,6 +513,7 @@ export default function LandingPage() {
             </ul>
           </div>
         </div>
+        <div className="mg-foot-mark" aria-hidden>margn</div>
         <div className="mg-foot-base">
           <div>
             <span>© 2026 margn — offenes Medienobservatorium</span>

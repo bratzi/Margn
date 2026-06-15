@@ -675,6 +675,47 @@ html.lenis, html.lenis body { height: auto; }
 }
 @media (pointer: coarse) { .mg-cursor { display: none; } }
 
+/* ---------------------------------------------------- Quick Wins / Politur */
+/* Scroll-Fortschritt: leuchtende Linie ganz oben */
+.mg-progress { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 70; pointer-events: none; }
+.mg-progress > i {
+  display: block; height: 100%; width: 100%; transform: scaleX(0); transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--mg-accent), var(--mg-accent-2));
+  box-shadow: 0 0 12px rgba(110, 138, 255, 0.7); will-change: transform;
+}
+
+/* Leuchtende Akzent-Wörter (cinematic luminous accent) */
+.mg-h1 em, .mg-h2 em { text-shadow: 0 0 30px rgba(110, 138, 255, 0.45); }
+.mg-final .mg-h2 ins { text-shadow: 0 0 30px rgba(67, 217, 163, 0.4); }
+
+/* Etwas größere, mutigere Hero-Headline */
+.mg-h1 { font-size: clamp(44px, 8vw, 116px); }
+
+/* Mikrointeraktionen */
+.mg-trust-item { transition: background-color 0.3s, box-shadow 0.35s; }
+.mg-trust-item:hover { background: var(--mg-bg-2); box-shadow: inset 0 2px 0 0 var(--mg-accent); }
+.mg-trust-item:hover .t-n { color: var(--mg-accent-2); }
+.mg-pair-card { transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s, box-shadow 0.4s; }
+.mg-pair-card:hover { transform: translateY(-4px); border-color: var(--mg-line-2); box-shadow: 0 24px 54px -32px rgba(110, 138, 255, 0.6); }
+.mg-stat { transition: background-color 0.3s; }
+.mg-stat:hover { background: rgba(110, 138, 255, 0.05); }
+
+/* Tastatur-Fokus sichtbar (a11y + Politur) */
+.mg a:focus-visible, .mg button:focus-visible {
+  outline: 2px solid var(--mg-accent-2); outline-offset: 3px; border-radius: 6px;
+}
+
+/* XXL-Wortmarke im Footer (bold typography trend) */
+.mg-foot-mark {
+  font-family: var(--mg-display); font-weight: 600; line-height: 0.78;
+  font-size: clamp(96px, 26vw, 380px); letter-spacing: -0.04em; text-align: center;
+  margin: clamp(20px, 4vw, 60px) 0 -0.12em; padding: 0 var(--mg-pad);
+  color: transparent; -webkit-text-stroke: 1px rgba(159, 178, 255, 0.16);
+  background: linear-gradient(180deg, rgba(159, 178, 255, 0.12), transparent 78%);
+  -webkit-background-clip: text; background-clip: text;
+  user-select: none; pointer-events: none; overflow: clip;
+}
+
 /* ---------------------------------------------------------------- Reveals */
 [data-reveal] { will-change: transform, opacity; }
 
