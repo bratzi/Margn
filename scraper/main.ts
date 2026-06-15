@@ -18,6 +18,9 @@ const MAX_FETCHES = Number(process.env.CRAWL_MAX_FETCHES ?? MAX_PAGES * 10); // 
 const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);     // Linktiefe ab Startseite
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 100);     // Höflichkeitspause (kein Embed mehr → kürzer)
 const CONCURRENCY = Number(process.env.CRAWL_CONCURRENCY ?? 4); // parallele Browser-Tabs
+// Hartes Gesamt-Zeitbudget für den articles-Crawl (Schutz vor CI-Job-Timeout).
+// Wird gleichmäßig auf die Quellen verteilt; jede Quelle stoppt an ihrer Frist.
+const TIME_BUDGET_MS = Number(process.env.CRAWL_TIME_BUDGET_MS ?? 16 * 60 * 1000);
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
 // "articles":   crawlen + Artikel speichern (Metadaten).
@@ -420,7 +423,7 @@ async function expandTimeline(page: import("playwright").Page): Promise<void> {
 async function renderPage(ctx: BrowserContext, url: string, expand = false): Promise<{ status: number; html: string | null }> {
   const page = await ctx.newPage();
   try {
-    const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+    const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     const status = resp?.status() ?? 0;
     if (expand) await expandTimeline(page);
     const html = await page.content();
@@ -639,7 +642,7 @@ async function addEdges(fromId: number, toUrls: string[]) {
 }
 
 // Rekursiver, begrenzter Chromium-Crawl einer Quelle.
-async function crawlSource(ctx: BrowserContext, src: Source) {
+async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
   const visited = new Set<string>();
   const queued = new Set<string>();
   // Zwei FIFO-Queues: Artikel-Links werden zuerst abgearbeitet (Budget füllt sich mit echten
@@ -667,21 +670,24 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
 
     const live = isLiveContent(s.url, null);
     const predicted = classifyUrl(s.url);
-    const articleLike = predicted === "article" || predicted === "unknown" || live;
 
-    // HTML beschaffen — Artikel rendern (teuer, budgetiert), Rubriken billig per HTTP.
+    // NUR echte Artikel/Liveblogs rendern (teuer, budgetiert). Alles andere —
+    // Rubriken/Hubs/„unknown"/Medien/Service — billig per HTTP entdecken, damit
+    // der Crawl auch bei Tiefe 4 schnell bleibt. Entpuppt sich eine billig
+    // geholte Seite als Artikel, wird ihr Knoten unten korrekt als 'article'
+    // markiert → der analyze-Job rendert sie nach.
     let html: string | null = null;
     let didRender = false;
-    if (articleLike) {
-      // Render-Budget erschöpft? Artikel bleibt als entdeckter Knoten — der
-      // analyze-Job rendert ihn später. So bleibt der Lauf günstig & tief.
+    if (predicted === "article" || live) {
+      // Render-Budget erschöpft? Artikel bleibt als entdeckter Knoten — analyze rendert nach.
       if (renders >= MAX_PAGES) return;
       html = (await renderPage(ctx, s.url, live)).html;
       if (html) { renders++; didRender = true; }
     } else {
       html = await fetchHtml(s.url);
       if (html) fetches++;
-      // JS-lastiger Hub (kaum Links im rohen HTML) → einmal rendern, falls Budget übrig.
+      // Notnagel: link-arme JS-Seite (kaum Links im Roh-HTML) → einmal rendern,
+      // damit die Entdeckung nicht abreißt; nur wenn Render-Budget übrig.
       if ((!html || (s.depth < MAX_DEPTH && sameDomainLinks(html, src.base_url, s.url).length < 5)) && renders < MAX_PAGES) {
         const r = (await renderPage(ctx, s.url)).html;
         if (r) { html = r; renders++; didRender = true; }
@@ -715,8 +721,8 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
     : (articleQ.shift() ?? sectionQ.shift());
 
   async function worker() {
-    // Läuft bis das Discovery-Budget erschöpft ist ODER nichts mehr in der Queue.
-    while (pages < MAX_FETCHES) {
+    // Läuft bis Discovery-Budget erschöpft, Queue leer ODER Zeitfrist erreicht.
+    while (pages < MAX_FETCHES && Date.now() < deadline) {
       const s = next();
       if (!s) break;
       await processOne(s);
@@ -1111,12 +1117,21 @@ async function run() {
   if (MODE === "rekeyword")  { await rekeywordArticles(data as Source[]); return; }
 
   const browser = await chromium.launch();
+  const sources = (data ?? []) as Source[];
+  // Gesamt-Zeitbudget gleichmäßig auf die Quellen verteilen → der Lauf endet
+  // garantiert vor dem CI-Job-Timeout, jede Quelle bekommt eine faire Frist.
+  const runDeadline = Date.now() + TIME_BUDGET_MS;
   try {
-    for (const src of (data ?? []) as Source[]) {
-      console.log(`\n=== ${src.base_url} ===`);
+    for (let i = 0; i < sources.length; i++) {
+      const src = sources[i];
+      if (Date.now() >= runDeadline) { console.log("Zeitbudget erreicht — restliche Quellen übersprungen."); break; }
+      // Restzeit auf die noch ausstehenden Quellen aufteilen.
+      const remainingSrc = sources.length - i;
+      const srcDeadline = Math.min(runDeadline, Date.now() + Math.floor((runDeadline - Date.now()) / remainingSrc));
+      console.log(`\n=== ${src.base_url} (Frist: ${Math.round((srcDeadline - Date.now()) / 1000)}s) ===`);
       const ctx = await browser.newContext({ userAgent: UA, locale: src.language === "fr" ? "fr-FR" : "de-DE" });
       try {
-        await crawlSource(ctx, src);
+        await crawlSource(ctx, src, srcDeadline);
       } finally {
         await ctx.close();
       }
