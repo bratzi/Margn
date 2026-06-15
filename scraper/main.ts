@@ -197,13 +197,40 @@ function extractMeta(html: string, url: string) {
     metaContent(html, "og:image", "twitter:image") ??
     article.image?.url ?? article.image ?? null;
 
+  // Datum ROBUST über mehrere Quellen ziehen — Publizisten legen datePublished
+  // mal aufs NewsArticle, mal auf WebPage/BlogPosting/@graph, mal nur als Meta
+  // oder <time>. Frühere Logik („nur das eine Article-Objekt") verfehlte n-tv
+  // (kein Article-@type) und FAZ (mehrere Blöcke) → fälschlich „kein Datum".
+  const validDate = (s: unknown): string | null => {
+    if (typeof s !== "string" || !s.trim()) return null;
+    return Number.isNaN(Date.parse(s)) ? null : s.trim();
+  };
+  const anyLdField = (field: string): string | null => {
+    for (const d of ld) { const v = validDate(d?.[field]); if (v) return v; }
+    return null;
+  };
+  const rawJsonDate = (field: string): string | null => {
+    const m = new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`, "i").exec(html);
+    return validDate(m?.[1]);
+  };
+  const timeTagDate = (): string | null => {
+    const m = /<time\b[^>]*\b(?:itemprop=["']datePublished["']|pubdate)[^>]*\bdatetime=["']([^"']+)["']/i.exec(html)
+      ?? /<time\b[^>]*\bdatetime=["']([^"']+)["'][^>]*\b(?:itemprop=["']datePublished["']|pubdate)/i.exec(html);
+    return validDate(m?.[1]);
+  };
+
   const published_at =
-    metaContent(html, "article:published_time") ??
-    article.datePublished ?? null;
+    validDate(metaContent(html, "article:published_time", "og:article:published_time")) ??
+    validDate(article.datePublished) ??
+    anyLdField("datePublished") ??
+    rawJsonDate("datePublished") ??
+    timeTagDate() ?? null;
 
   const modified_at =
-    metaContent(html, "article:modified_time") ??
-    article.dateModified ?? null;
+    validDate(metaContent(html, "article:modified_time", "og:updated_time")) ??
+    validDate(article.dateModified) ??
+    anyLdField("dateModified") ??
+    rawJsonDate("dateModified") ?? null;
 
   // Paywall: JSON-LD isAccessibleForFree ist maßgeblich (verlässlich pro Artikel).
   // CSS-Pattern NUR als Fallback, wenn KEIN JSON-LD-Signal existiert – sonst markiert
