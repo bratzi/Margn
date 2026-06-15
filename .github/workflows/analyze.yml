@@ -1,7 +1,7 @@
 name: analyze
 on:
   schedule:
-    - cron: "30 */3 * * *"   # alle 3 Stunden – rendert NEU entdeckte Artikel und reichert sie voll an
+    - cron: "30 */4 * * *"   # alle 4 Stunden – rendert NEU entdeckte Artikel (Backlog aus dem Crawl) voll an
   workflow_dispatch:
 concurrency:
   group: analyze
@@ -9,7 +9,7 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,6 +36,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "analyze"
-          CRAWL_MAX_PAGES: "2000"
+          CRAWL_MAX_PAGES: "1500"
           CRAWL_DELAY_MS: "60"
           CRAWL_CONCURRENCY: "10"
