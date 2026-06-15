@@ -191,7 +191,8 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
               {orderedCols.map((c) => (
                 <th key={c.key} style={{ width: colW(c), cursor: c.sortable !== false ? "pointer" : "default" }}
                   className={`${pinned.has(c.key) ? "dt-pinned" : ""} ${dragOver === c.key ? "dt-dragover" : ""}`}
-                  draggable onDragStart={() => { dragCol.current = c.key; }}
+                  draggable
+                  onDragStart={(e) => { if (resizing.current) { e.preventDefault(); return; } dragCol.current = c.key; }}
                   onDragOver={(e) => { e.preventDefault(); setDragOver(c.key); }}
                   onDragLeave={() => setDragOver((d) => (d === c.key ? null : d))}
                   onDrop={() => onColDrop(c.key)}
