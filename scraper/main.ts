@@ -965,10 +965,23 @@ async function analyzeBacklog() {
   const queue: { url: string; sid: number }[] = [];
   for (const [sid, urls] of bySrc) for (const url of urls) queue.push({ url, sid });
 
-  // Restbudget mit RE-SCANS füllen: die am LÄNGSTEN nicht geprüften jüngeren
-  // Artikel erneut rendern → stille Edits werden auch außerhalb der Top-Seiten
-  // erkannt (nicht nur auf denen, die der Crawl ohnehin neu rendert). Kostet
-  // keine Extra-Minuten — nutzt nur das ohnehin vorhandene analyze-Budget.
+  // Wasserstand-Auffüllung: ist nach der fairen 250/Quelle-Runde noch Budget frei
+  // (weil manche Quellen weniger Rückstand haben), mit weiteren NOCH NICHT
+  // gerenderten Artikeln auffüllen — neueste zuerst, quellenübergreifend. So
+  // leeren sich große Rückstände (Le Monde/Bild) schneller, statt Budget brachliegen
+  // zu lassen. Gleiche Minuten (Cap bleibt MAX_PAGES), nur sinnvoller genutzt.
+  if (queue.length < MAX_PAGES) {
+    const inQ = new Set(queue.map((q) => q.url));
+    for (const p of discovered) { // bereits id-desc (neueste zuerst)
+      if (queue.length >= MAX_PAGES) break;
+      if (done.has(p.url) || inQ.has(p.url)) continue;
+      queue.push({ url: p.url, sid: p.source_id }); inQ.add(p.url);
+    }
+  }
+
+  // Erst danach Restbudget mit RE-SCANS füllen (stille Edits): die am LÄNGSTEN
+  // nicht geprüften jüngeren Artikel erneut rendern. Greift nur, wenn KEIN
+  // offener Rückstand mehr da ist (Budget sonst schon mit neuen Artikeln voll).
   const newCount = queue.length;
   const remaining = MAX_PAGES - queue.length;
   if (remaining > 0) {
