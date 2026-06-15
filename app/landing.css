@@ -633,7 +633,7 @@ html.lenis, html.lenis body { height: auto; }
     var(--mg-bg);
 }
 .mg-foot-in {
-  max-width: var(--mg-max); margin: 0 auto; padding: clamp(36px, 5vw, 64px) var(--mg-pad);
+  max-width: var(--mg-max); margin: 0 auto; padding: clamp(26px, 3.4vw, 44px) var(--mg-pad);
   display: grid; grid-template-columns: 2fr 1fr 1fr; gap: clamp(24px, 4vw, 48px);
 }
 .mg-foot .mg-logo b { font-size: 26px; }
@@ -647,7 +647,7 @@ html.lenis, html.lenis body { height: auto; }
   font-family: var(--mg-mono); font-size: 10.5px; letter-spacing: 0.1em; color: var(--mg-faint);
 }
 .mg-foot-base > div {
-  max-width: var(--mg-max); margin: 0 auto; padding: 18px var(--mg-pad);
+  max-width: var(--mg-max); margin: 0 auto; padding: 13px var(--mg-pad);
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
 }
 @media (max-width: 860px) { .mg-foot-in { grid-template-columns: 1fr; } }
@@ -718,7 +718,7 @@ html.lenis, html.lenis body { height: auto; }
 .mg-foot-mark {
   font-family: var(--mg-display); font-weight: 600; line-height: 0.78;
   font-size: clamp(96px, 26vw, 380px); letter-spacing: -0.04em; text-align: center;
-  margin: clamp(20px, 4vw, 60px) 0 clamp(16px, 2.4vw, 36px); padding: 0 var(--mg-pad);
+  margin: clamp(6px, 1.6vw, 20px) 0 0; padding: 0 var(--mg-pad);
   color: transparent; -webkit-text-stroke: 1px rgba(159, 178, 255, 0.16);
   background: linear-gradient(180deg, rgba(159, 178, 255, 0.12), transparent 78%);
   -webkit-background-clip: text; background-clip: text;
