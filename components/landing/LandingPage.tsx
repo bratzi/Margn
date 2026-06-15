@@ -44,12 +44,12 @@ const TRUST = [
   {
     n: "§ 01",
     title: "Respektvolles Crawling",
-    text: "RSS bevorzugt, robots.txt respektiert, freundliche Rate. Kein Spiegeln von Inhalten — jeder Artikel verlinkt auf das Original.",
+    text: "RSS bevorzugt, robots.txt respektiert, freundliche Crawl-Rate — die Quellen werden schonend und automatisiert gelesen.",
   },
   {
     n: "§ 02",
-    title: "Öffentlich nur Metadaten",
-    text: "Veröffentlicht werden ausschließlich Metadaten und eigene Auswertungen: Zeitstempel, Themen, Quoten, Diffs von Überschriften.",
+    title: "Offen einsehbar",
+    text: "Das Dashboard ist ohne Anmeldung zugänglich. Jede Kennzahl lässt sich bis zum einzelnen Artikel und Scan zurückverfolgen.",
   },
   {
     n: "§ 03",
@@ -442,7 +442,7 @@ export default function LandingPage() {
         <div className="mg-head">
           <p className="mg-overline">Transparenz</p>
           <h2 className="mg-h2" data-split>
-            Nur Metadaten. Volltexte bleiben <em>bei den Verlagen.</em>
+            Nichts versteckt — alles <em>nachvollziehbar.</em>
           </h2>
         </div>
         <div className="mg-trust" data-reveal="0">
@@ -462,8 +462,8 @@ export default function LandingPage() {
           Sehen, was <del>geschrieben</del> <ins>umgeschrieben</ins> wurde.
         </h2>
         <p className="mg-lede" data-reveal="0">
-          Das Dashboard ist offen — keine Anmeldung, nur Metadaten und
-          nachvollziehbare Auswertungen.
+          Das Dashboard ist offen — keine Anmeldung, nachvollziehbare
+          Auswertungen bis zum einzelnen Artikel.
         </p>
         <div className="mg-hero-cta" data-reveal="0.1">
           <Link href="/articles" className="mg-btn xl">
@@ -517,7 +517,7 @@ export default function LandingPage() {
         <div className="mg-foot-base">
           <div>
             <span>© 2026 margn — offenes Medienobservatorium</span>
-            <span>Nur Metadaten · Volltexte bei den Verlagen</span>
+            <span>Offenes Dashboard · nachvollziehbare Methodik</span>
           </div>
         </div>
       </footer>
