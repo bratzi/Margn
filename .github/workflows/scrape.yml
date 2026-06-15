@@ -1,7 +1,7 @@
 name: scrape
 on:
   schedule:
-    - cron: "0 */4 * * *"  # alle 4 Stunden — tiefer, ganzheitlicher Crawl je Lauf (privat: 2000-Min-Budget)
+    - cron: "0 */2 * * *"  # alle 2 Stunden — reine HTTP-Entdeckung (kein Browser → günstig)
   workflow_dispatch:
 concurrency:
   group: scrape
@@ -9,7 +9,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,30 +19,17 @@ jobs:
           cache-dependency-path: scraper/package-lock.json
       - run: npm ci
         working-directory: scraper
-      - name: Cache Playwright-Browser
-        id: pw
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('scraper/package-lock.json') }}
-      - run: npx playwright install chromium
-        working-directory: scraper
-        if: steps.pw.outputs.cache-hit != 'true'
-      - run: npx playwright install-deps chromium
-        working-directory: scraper
+      # KEINE Playwright-Installation: Discovery läuft rein über HTTP
+      # (Sitemaps/Feeds/HTML-Links). Das Rendern macht der analyze-Job.
       - run: npm run scrape
         working-directory: scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          # Getrennte Budgets: MAX_PAGES = teure Browser-Renders je Quelle
-          # (frische Top-Artikel + Änderungs-Erkennung), MAX_FETCHES = billige
-          # HTTP-Entdeckung (mappt den ganzen Baum, Tiefe 4). Die dabei
-          # entdeckten Artikel-URLs rendert der analyze-Job nach. Werte
-          # budget-bewusst (privates Repo, 2000 Min/Monat) — bei Bedarf erhöhen.
-          CRAWL_MAX_PAGES: "100"
-          CRAWL_MAX_FETCHES: "2500"
+          CRAWL_RENDER: "0"            # Discovery-Only, kein Browser
+          CRAWL_MAX_FETCHES: "2500"    # HTTP-Entdeckung je Quelle (Baum, Tiefe 4)
+          CRAWL_MAX_SITEMAP_URLS: "3000"
           CRAWL_MAX_DEPTH: "4"
-          CRAWL_DELAY_MS: "80"
+          CRAWL_DELAY_MS: "60"
           CRAWL_CONCURRENCY: "10"
+          CRAWL_TIME_BUDGET_MS: "480000"  # 8 min gesamt (Discovery ist schnell)

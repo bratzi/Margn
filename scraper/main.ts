@@ -21,6 +21,10 @@ const CONCURRENCY = Number(process.env.CRAWL_CONCURRENCY ?? 4); // parallele Bro
 // Hartes Gesamt-Zeitbudget für den articles-Crawl (Schutz vor CI-Job-Timeout).
 // Wird gleichmäßig auf die Quellen verteilt; jede Quelle stoppt an ihrer Frist.
 const TIME_BUDGET_MS = Number(process.env.CRAWL_TIME_BUDGET_MS ?? 16 * 60 * 1000);
+// CRAWL_RENDER=0 → reiner Discovery-Modus OHNE Browser (Sitemaps/Feeds/HTML-Links
+// per HTTP, Artikel werden nur als Knoten markiert). Spart die teuren Render- und
+// Playwright-Minuten — das Rendern übernimmt der analyze-Job.
+const RENDER = process.env.CRAWL_RENDER !== "0";
 
 // Kuratierte Feeds für Quellen, deren Auto-Erkennung (robots.txt/Sitemap/<link>)
 // zu wenig hergibt. FAZ z.B. nennt keine Sitemap in robots.txt, hat aber ergiebige
@@ -783,7 +787,7 @@ async function addEdges(fromId: number, toUrls: string[]) {
 }
 
 // Rekursiver, begrenzter Chromium-Crawl einer Quelle.
-async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
+async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: number) {
   const visited = new Set<string>();
   const queued = new Set<string>();
   // Zwei FIFO-Queues: Artikel-Links werden zuerst abgearbeitet (Budget füllt sich mit echten
@@ -855,16 +859,16 @@ async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
     let html: string | null = null;
     let didRender = false;
     if (predicted === "article" || live) {
-      // Render-Budget erschöpft? Artikel bleibt als entdeckter Knoten — analyze rendert nach.
-      if (renders >= MAX_PAGES) return;
+      // Discovery-Modus (kein Browser) ODER Render-Budget weg → Artikel bleibt
+      // als Knoten (existiert bereits via ensureNodes/Sitemap/Feed); analyze rendert.
+      if (!RENDER || !ctx || renders >= MAX_PAGES) return;
       html = (await renderPage(ctx, s.url, live)).html;
       if (html) { renders++; didRender = true; }
     } else {
       html = await fetchHtml(s.url);
       if (html) fetches++;
-      // Notnagel: link-arme JS-Seite (kaum Links im Roh-HTML) → einmal rendern,
-      // damit die Entdeckung nicht abreißt; nur wenn Render-Budget übrig.
-      if ((!html || (s.depth < MAX_DEPTH && sameDomainLinks(html, src.base_url, s.url).length < 5)) && renders < MAX_PAGES) {
+      // Notnagel: link-arme JS-Seite → einmal rendern (nur wenn Browser + Budget da).
+      if (RENDER && ctx && (!html || (s.depth < MAX_DEPTH && sameDomainLinks(html, src.base_url, s.url).length < 5)) && renders < MAX_PAGES) {
         const r = (await renderPage(ctx, s.url)).html;
         if (r) { html = r; renders++; didRender = true; }
       }
@@ -1297,7 +1301,8 @@ async function run() {
   if (MODE === "retype")     { await retypeArticles(); return; }
   if (MODE === "rekeyword")  { await rekeywordArticles(data as Source[]); return; }
 
-  const browser = await chromium.launch();
+  // Browser nur im Render-Modus starten; Discovery-Only läuft komplett ohne Chromium.
+  const browser = RENDER ? await chromium.launch() : null;
   const sources = (data ?? []) as Source[];
   // Gesamt-Zeitbudget gleichmäßig auf die Quellen verteilen → der Lauf endet
   // garantiert vor dem CI-Job-Timeout, jede Quelle bekommt eine faire Frist.
@@ -1310,15 +1315,15 @@ async function run() {
       const remainingSrc = sources.length - i;
       const srcDeadline = Math.min(runDeadline, Date.now() + Math.floor((runDeadline - Date.now()) / remainingSrc));
       console.log(`\n=== ${src.base_url} (Frist: ${Math.round((srcDeadline - Date.now()) / 1000)}s) ===`);
-      const ctx = await browser.newContext({ userAgent: UA, locale: src.language === "fr" ? "fr-FR" : "de-DE" });
+      const ctx = browser ? await browser.newContext({ userAgent: UA, locale: src.language === "fr" ? "fr-FR" : "de-DE" }) : null;
       try {
         await crawlSource(ctx, src, srcDeadline);
       } finally {
-        await ctx.close();
+        if (ctx) await ctx.close();
       }
     }
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
   }
 }
 

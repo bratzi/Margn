@@ -1,19 +1,15 @@
 name: analyze
 on:
-  # Läuft AUTOMATISCH nach jedem erfolgreichen scrape (auch bei manuellem Start)
-  # und rendert die im Crawl neu entdeckten Artikel + Re-Scans. Kein eigener
-  # Cron mehr — sonst Doppelläufe. Manuell weiterhin per „Run workflow" möglich.
-  workflow_run:
-    workflows: ["scrape"]
-    types: [completed]
+  # Eigener Cron, entkoppelt von scrape: scrape entdeckt (billig, alle 2 h),
+  # analyze rendert (teuer, hier alle 4 h) — neueste Artikel zuerst + Re-Scans.
+  schedule:
+    - cron: "30 */4 * * *"
   workflow_dispatch:
 concurrency:
   group: analyze
   cancel-in-progress: false
 jobs:
   analyze:
-    # Nur nach ERFOLGREICHEM scrape (oder manuell) — nicht nach einem Fehllauf.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
