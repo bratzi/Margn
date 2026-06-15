@@ -26,7 +26,7 @@ const STEPS = [
   {
     n: "01",
     title: "Erfassen",
-    text: "Leitmedien aus mehreren Ländern werden stündlich gelesen — schonend, per RSS und freundlicher Crawl-Rate. Weitere Märkte kommen laufend hinzu.",
+    text: "Leitmedien aus mehreren Ländern werden stündlich erfasst — vollautomatisch und zurückhaltend. Weitere Märkte kommen laufend hinzu.",
   },
   {
     n: "02",
@@ -43,8 +43,8 @@ const STEPS = [
 const TRUST = [
   {
     n: "§ 01",
-    title: "Respektvolles Crawling",
-    text: "RSS bevorzugt, robots.txt respektiert, freundliche Crawl-Rate — die Quellen werden schonend und automatisiert gelesen.",
+    title: "Schonende Erfassung",
+    text: "Die Quellen werden vollautomatisch und zurückhaltend im Hintergrund erfasst — ohne sie zu belasten.",
   },
   {
     n: "§ 02",
