@@ -249,9 +249,14 @@ function extractMeta(html: string, url: string) {
   const iaff = ld.map((d) => d.isAccessibleForFree).filter((v) => v !== undefined && v !== null);
   const isFree = (v: any) => v === true || v === "True" || v === "true";
   const notFree = (v: any) => v === false || v === "False" || v === "false";
-  const paywalled = iaff.length > 0
-    ? iaff.some(notFree) && !iaff.some(isFree)
-    : PAYWALL_CSS.test(html);
+  // true/false NUR bei verlässlichem Signal; sonst null = „unbekannt" (NICHT frei!).
+  // Wichtig für Paywall-Seiten, die dem Crawler einen Stub/Teaser ohne Signal
+  // liefern (Le Monde 402) — die dürfen ein bestehendes paywalled=true NICHT
+  // überschreiben. Die Übernahme regelt die sticky-Logik in upsert/enrich.
+  const paywalled: boolean | null =
+    iaff.length > 0 ? (iaff.some(notFree) && !iaff.some(isFree))
+    : PAYWALL_CSS.test(html) ? true
+    : null;
 
   // Artikeltyp aus @type … ergänzt um URL/Titel-Erkennung für Liveblogs
   // (FAZ/Spiegel u.a. liefern KEIN LiveBlogPosting-@type, tragen es aber im Pfad/Titel).
@@ -458,14 +463,26 @@ function buildChanges(removed: string[], added: string[]): Change[] {
   return out.slice(0, 30);
 }
 
+// Paywall „sticky": einmal als Paywall erkannt → bleibt Paywall. Nur ein
+// VERLÄSSLICHES Frei-Signal (next === false aus JSON-LD) oder ein neuer
+// Paywall-Befund (true) ändert es. Kein Signal (next === null) → bestehenden
+// Wert behalten. Verhindert, dass Stub-/Teaser-Renders (z.B. Le Monde 402) eine
+// bestehende Paywall fälschlich auf „frei" setzen. Metadaten werden trotzdem geholt.
+function stickyPaywall(prev: boolean | null | undefined, next: boolean | null): boolean | null {
+  if (prev === true) return true;
+  if (next === null || next === undefined) return prev ?? null;
+  return next;
+}
+
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
 async function saveArticleFull(sourceId: number, url: string, html: string) {
   const meta = extractMeta(html, url);
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
-    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times")
+    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled")
     .eq("url", url).maybeSingle();
+  meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   if (art) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
@@ -1134,8 +1151,9 @@ async function enrichArticles(sources: Source[]) {
         try {
           // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
           const { data: prev } = await sb.from("articles")
-            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times")
+            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled")
             .eq("id", item.id).maybeSingle();
+          meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
           const { authors, keywords, categories, ...fields } = meta;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
