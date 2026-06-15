@@ -1,12 +1,12 @@
 name: scrape
 on:
   schedule:
-    - cron: "0 */2 * * *"  # alle 2 Stunden (mit Caching im 2000-Min-Budget; Setup ~50s statt ~2,5 Min)
+    - cron: "0 */3 * * *"  # alle 3 Stunden — tiefer, ganzheitlicher Crawl je Lauf
   workflow_dispatch:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +33,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          CRAWL_MAX_PAGES: "22"
-          CRAWL_MAX_DEPTH: "2"
-          CRAWL_DELAY_MS: "100"
-          CRAWL_CONCURRENCY: "8"
+          # Getrennte Budgets: MAX_PAGES = teure Browser-Renders je Quelle,
+          # MAX_FETCHES = billige HTTP-Entdeckung (mappt den ganzen Baum, Tiefe 4).
+          # Entdeckte, noch nicht gerenderte Artikel holt der analyze-Job nach.
+          CRAWL_MAX_PAGES: "300"
+          CRAWL_MAX_FETCHES: "4000"
+          CRAWL_MAX_DEPTH: "4"
+          CRAWL_DELAY_MS: "80"
+          CRAWL_CONCURRENCY: "10"

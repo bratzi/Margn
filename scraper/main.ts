@@ -6,7 +6,15 @@ import { sb } from "./lib";
 import { topicOf } from "./topics";
 
 // --- Crawl-Grenzen (per Env übersteuerbar; CI knapp, lokaler Tief-Crawl höher) ---
-const MAX_PAGES = Number(process.env.CRAWL_MAX_PAGES ?? 80);    // gerenderte Seiten pro Quelle
+// WICHTIG: Kostentreiber ist das BROWSER-Rendering (Playwright), nicht das
+// Entdecken von Links. Darum zwei getrennte Budgets je Quelle:
+//   MAX_PAGES   = teure Browser-Renders (Artikel; bestimmt CI-Minuten).
+//   MAX_FETCHES = billige HTTP-Entdeckung (Rubriken/Hubs; macht den Crawl tief
+//                 & ganzheitlich, ohne die Minuten zu sprengen).
+// So liest jeder Lauf den GANZEN Strukturbaum eines Publizisten aus; die dabei
+// entdeckten Artikel-URLs rendert der analyze-Job nach (Budget 2000/Lauf).
+const MAX_PAGES = Number(process.env.CRAWL_MAX_PAGES ?? 80);    // Browser-Renders pro Quelle (teuer)
+const MAX_FETCHES = Number(process.env.CRAWL_MAX_FETCHES ?? MAX_PAGES * 10); // HTTP-Discovery pro Quelle (billig)
 const MAX_DEPTH = Number(process.env.CRAWL_MAX_DEPTH ?? 2);     // Linktiefe ab Startseite
 const DELAY_MS = Number(process.env.CRAWL_DELAY_MS ?? 100);     // Höflichkeitspause (kein Embed mehr → kürzer)
 const CONCURRENCY = Number(process.env.CRAWL_CONCURRENCY ?? 4); // parallele Browser-Tabs
@@ -424,6 +432,28 @@ async function renderPage(ctx: BrowserContext, url: string, expand = false): Pro
   }
 }
 
+// Schnelle Link-Entdeckung OHNE Browser: rohes HTML per HTTP holen. Für
+// Rubriken/Hubs/Übersichten reicht das fast immer (Navigation steht
+// serverseitig im HTML). Spart das Gros der Browser-Zeit → erlaubt tiefe,
+// ganzheitliche Crawls. Artikel werden weiterhin mit Chromium gerendert
+// (Body/Paywall/JSON-LD/Liveblog-Expansion).
+async function fetchHtml(url: string): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const resp = await fetch(url, {
+      headers: { "user-agent": UA, "accept-language": "de,fr;q=0.8,en;q=0.6" },
+      redirect: "follow", signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    if (!/text\/html|xhtml/i.test(resp.headers.get("content-type") ?? "")) return null;
+    return await resp.text();
+  } catch {
+    return null;
+  }
+}
+
 // Interne Links derselben Domain aus dem gerenderten DOM (für die Rekursion).
 function sameDomainLinks(html: string, baseUrl: string, pageUrl: string): string[] {
   try {
@@ -625,17 +655,40 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
 
   enqueue({ url: src.base_url, depth: 0 }, false); // Startseite = Übersicht
 
-  let pages = 0;
+  let pages = 0;            // verarbeitete Seiten gesamt (gegen MAX_FETCHES)
+  let renders = 0;          // teure Browser-Renders (gegen MAX_PAGES)
+  let fetches = 0, saved = 0;
   const counts: Record<string, number> = {};
 
-  // Einen einzelnen Seed verarbeiten (renderPage + classify + DB-Write + neue Links einreihen).
+  // Einen einzelnen Seed verarbeiten (HTML holen + classify + DB-Write + neue Links einreihen).
   async function processOne(s: Seed) {
     if (visited.has(s.url)) return;
     visited.add(s.url);
-    pages++;
 
-    const { html } = await renderPage(ctx, s.url, isLiveContent(s.url, null));
+    const live = isLiveContent(s.url, null);
+    const predicted = classifyUrl(s.url);
+    const articleLike = predicted === "article" || predicted === "unknown" || live;
+
+    // HTML beschaffen — Artikel rendern (teuer, budgetiert), Rubriken billig per HTTP.
+    let html: string | null = null;
+    let didRender = false;
+    if (articleLike) {
+      // Render-Budget erschöpft? Artikel bleibt als entdeckter Knoten — der
+      // analyze-Job rendert ihn später. So bleibt der Lauf günstig & tief.
+      if (renders >= MAX_PAGES) return;
+      html = (await renderPage(ctx, s.url, live)).html;
+      if (html) { renders++; didRender = true; }
+    } else {
+      html = await fetchHtml(s.url);
+      if (html) fetches++;
+      // JS-lastiger Hub (kaum Links im rohen HTML) → einmal rendern, falls Budget übrig.
+      if ((!html || (s.depth < MAX_DEPTH && sameDomainLinks(html, src.base_url, s.url).length < 5)) && renders < MAX_PAGES) {
+        const r = (await renderPage(ctx, s.url)).html;
+        if (r) { html = r; renders++; didRender = true; }
+      }
+    }
     if (!html) return;
+    pages++;
 
     const links = s.depth < MAX_DEPTH ? sameDomainLinks(html, src.base_url, s.url) : [];
     const { kind, article } = classifyRendered(s.url, html);
@@ -645,8 +698,11 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
       try {
         const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
         if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
-        if (kind === "article" && article && MODE !== "structure") {
+        // Artikel nur speichern, wenn WIRKLICH gerendert (sonst rendert analyze
+        // ihn sauber nach — kein Speichern aus link-armem Roh-HTML).
+        if (kind === "article" && article && didRender && MODE !== "structure") {
           await saveArticleFull(src.id, s.url, html);
+          saved++;
         }
       } catch (e) { console.error("FEHLER:", s.url, (e as Error).message); }
     }
@@ -659,7 +715,8 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
     : (articleQ.shift() ?? sectionQ.shift());
 
   async function worker() {
-    while (pages < MAX_PAGES) {
+    // Läuft bis das Discovery-Budget erschöpft ist ODER nichts mehr in der Queue.
+    while (pages < MAX_FETCHES) {
       const s = next();
       if (!s) break;
       await processOne(s);
@@ -669,7 +726,7 @@ async function crawlSource(ctx: BrowserContext, src: Source) {
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
   const summary = Object.entries(counts).map(([k, n]) => `${k}=${n}`).join(", ");
-  console.log(`Quelle ${src.base_url}: ${pages} Seiten gerendert [${summary}]`);
+  console.log(`Quelle ${src.base_url}: ${pages} Seiten · ${renders} gerendert · ${fetches} per HTTP · ${saved} Artikel gespeichert [${summary}]`);
 }
 
 // Alle Zeilen einer Abfrage holen (PostgREST limitiert auf 1000/Request → paginieren).
