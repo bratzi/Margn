@@ -218,13 +218,24 @@ function extractMeta(html: string, url: string) {
       ?? /<time\b[^>]*\bdatetime=["']([^"']+)["'][^>]*\b(?:itemprop=["']datePublished["']|pubdate)/i.exec(html);
     return validDate(m?.[1]);
   };
+  // Letzter Notnagel: Datum aus dem URL-Pfad /YYYY/MM/DD/ (z.B. Le Monde —
+  // liefert dem Crawler 402/Paywall, das Datum steht aber zuverlässig im Pfad).
+  // Mittag UTC, damit die lokale Anzeige nicht auf den Vortag rutscht.
+  const urlPathDate = (): string | null => {
+    const m = /\/(\d{4})\/(\d{2})\/(\d{2})(?:\/|_|-)/.exec(url);
+    if (!m) return null;
+    const y = +m[1], mo = +m[2], d = +m[3];
+    if (y < 2000 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return validDate(`${m[1]}-${m[2]}-${m[3]}T12:00:00Z`);
+  };
 
   const published_at =
     validDate(metaContent(html, "article:published_time", "og:article:published_time")) ??
     validDate(article.datePublished) ??
     anyLdField("datePublished") ??
     rawJsonDate("datePublished") ??
-    timeTagDate() ?? null;
+    timeTagDate() ??
+    urlPathDate() ?? null;
 
   const modified_at =
     validDate(metaContent(html, "article:modified_time", "og:updated_time")) ??
