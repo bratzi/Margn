@@ -208,11 +208,15 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     let cancelled = false;
     fetchAllRows<CorpusRow>(
       () => supabase.from("page_overview").select("id", { count: "exact", head: true }).in("ptype", ALLOWED_PTYPES),
+      // WICHTIG: nach dem EINDEUTIGEN PK `id` paginieren, nicht nach
+      // discovered_at. Bei gleichen discovered_at-Werten (Batch-Inserts) ist die
+      // Sortierung über parallele Range-Requests sonst nicht stabil → Zeilen
+      // fallen zwischen Seiten raus → Corpus unvollständig → Charts zählen
+      // weniger als die Tabelle. id desc ≈ neueste zuerst und ist eindeutig.
       (a, b) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
-        .order("discovered_at", { ascending: false }).range(a, b) as any,
-      // Cap der clientseitigen Analytics-Menge (neueste zuerst). Angehoben, damit
-      // Charts/Optionen auch bei größerem/älterem Bestand vollständig sind.
-      // Langfristig gehört diese Aggregation server-seitig (RPC), dann cap-frei.
+        .order("id", { ascending: false }).range(a, b) as any,
+      // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
+      // Aggregation server-seitig (RPC), dann cap-frei.
       100000,
     ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); } });
     return () => { cancelled = true; };
