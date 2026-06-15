@@ -38,8 +38,8 @@ const stripHash = (u: string) => u.split("#")[0];
 const silentVC = new VirtualConsole();
 const makeDom = (html: string, url: string) => new JSDOM(html, { url, virtualConsole: silentVC });
 
-type Source = { id: number; base_url: string; language: string | null };
-type Seed = { url: string; depth: number };
+type Source = { id: number; base_url: string; language: string | null; feed_url?: string | null };
+type Seed = { url: string; depth: number; feed?: boolean };
 
 // embed() DEAKTIVIERT – reaktivieren wenn Cluster-Feature wieder aufgenommen wird.
 
@@ -457,6 +457,50 @@ async function fetchHtml(url: string): Promise<string | null> {
   }
 }
 
+// Feed-Auto-Erkennung aus dem HTML-Head: <link rel="alternate" type="…rss/atom…" href>.
+function extractFeedLinks(html: string, pageUrl: string): string[] {
+  const out = new Set<string>();
+  const rx = /<link\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(html)) !== null) {
+    const tag = m[0];
+    if (!/rel=["']?alternate/i.test(tag)) continue;
+    if (!/type=["']application\/(rss|atom)\+xml/i.test(tag)) continue;
+    const href = tag.match(/href=["']([^"']+)["']/i)?.[1];
+    if (!href) continue;
+    try { out.add(new URL(href, pageUrl).href); } catch {}
+  }
+  return [...out];
+}
+
+// XML/Feed holen — eigene Funktion, da fetchHtml nur text/html akzeptiert.
+async function fetchXml(url: string): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const resp = await fetch(url, { headers: { "user-agent": UA }, redirect: "follow", signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    return await resp.text();
+  } catch {
+    return null;
+  }
+}
+
+// Artikel-URLs aus RSS/Atom: <item><link>URL</link>, Atom <link href="URL"/>, <guid>URL</guid>.
+function extractFeedItemUrls(xml: string, baseUrl: string): string[] {
+  const out = new Set<string>();
+  let origin = ""; try { origin = new URL(baseUrl).origin; } catch {}
+  const add = (raw?: string) => {
+    if (!raw) return;
+    try { const abs = new URL(raw.trim(), baseUrl).href; if (!origin || abs.startsWith(origin)) out.add(stripHash(abs)); } catch {}
+  };
+  for (const m of xml.matchAll(/<link>\s*([^<]+?)\s*<\/link>/gi)) add(m[1]);
+  for (const m of xml.matchAll(/<link\b[^>]*\bhref=["']([^"']+)["'][^>]*\/?>/gi)) add(m[1]);
+  for (const m of xml.matchAll(/<guid[^>]*>\s*(https?:\/\/[^<]+?)\s*<\/guid>/gi)) add(m[1]);
+  return [...out];
+}
+
 // Interne Links derselben Domain aus dem gerenderten DOM (für die Rekursion).
 function sameDomainLinks(html: string, baseUrl: string, pageUrl: string): string[] {
   try {
@@ -650,13 +694,18 @@ async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
   // also kein Abtauchen in einen einzelnen Strang (z.B. eine Podcast-Liste).
   const articleQ: Seed[] = [];
   const sectionQ: Seed[] = [];
+  const feedQ: Seed[] = []; // RSS/Atom-Feeds — billige, ergiebige Artikel-Entdeckung
   const enqueue = (s: Seed, isArticle: boolean) => {
     if (queued.has(s.url)) return;
     queued.add(s.url);
-    (isArticle ? articleQ : sectionQ).push(s);
+    if (s.feed) feedQ.push(s);
+    else (isArticle ? articleQ : sectionQ).push(s);
   };
 
   enqueue({ url: src.base_url, depth: 0 }, false); // Startseite = Übersicht
+  // Gespeicherten Feed (sources.feed_url) sofort einreihen — weitere Feeds werden
+  // aus der Startseite auto-erkannt (<link rel="alternate">).
+  if (src.feed_url) enqueue({ url: src.feed_url, depth: 0, feed: true }, false);
 
   let pages = 0;            // verarbeitete Seiten gesamt (gegen MAX_FETCHES)
   let renders = 0;          // teure Browser-Renders (gegen MAX_PAGES)
@@ -667,6 +716,29 @@ async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
   async function processOne(s: Seed) {
     if (visited.has(s.url)) return;
     visited.add(s.url);
+
+    // Feed-Seed: XML holen, Artikel-URLs extrahieren und DIREKT als 'article'-
+    // Knoten markieren → analyze rendert sie nach. Ultrabillig (1 Fetch →
+    // dutzende/hunderte Artikel), hebt v.a. JS-/Paywall-lastige Quellen.
+    if (s.feed) {
+      const xml = await fetchXml(s.url);
+      if (!xml) return;
+      fetches++; pages++;
+      counts["feed"] = (counts["feed"] ?? 0) + 1;
+      const arts = extractFeedItemUrls(xml, src.base_url).filter(looksLikeArticle);
+      if (arts.length && !DRY_RUN) {
+        const depth = Math.min(s.depth + 1, MAX_DEPTH);
+        try {
+          for (let i = 0; i < arts.length; i += 200) {
+            await sb.from("pages").upsert(
+              arts.slice(i, i + 200).map((url) => ({ source_id: src.id, url, kind: "article", depth })),
+              { onConflict: "url", ignoreDuplicates: true },
+            );
+          }
+        } catch (e) { console.error("FEED-FEHLER:", s.url, (e as Error).message); }
+      }
+      return;
+    }
 
     const live = isLiveContent(s.url, null);
     const predicted = classifyUrl(s.url);
@@ -713,12 +785,15 @@ async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
       } catch (e) { console.error("FEHLER:", s.url, (e as Error).message); }
     }
     for (const link of links) enqueue({ url: link, depth: s.depth + 1 }, classifyUrl(link) === "article");
+    // Feeds aus dem Seiten-Head auto-erkennen (v.a. Startseite/Rubriken) → einreihen.
+    if (s.depth < MAX_DEPTH) for (const f of extractFeedLinks(html, s.url)) enqueue({ url: f, depth: s.depth, feed: true }, false);
   }
 
   // Parallele Worker: CONCURRENCY Tabs laufen gleichzeitig.
+  // Feeds zuerst (billig, hohe Ausbeute), dann Artikel, dann Rubriken.
   const next = (): Seed | undefined => MODE === "structure"
-    ? (sectionQ.shift() ?? articleQ.shift())
-    : (articleQ.shift() ?? sectionQ.shift());
+    ? (sectionQ.shift() ?? articleQ.shift() ?? feedQ.shift())
+    : (feedQ.shift() ?? articleQ.shift() ?? sectionQ.shift());
 
   async function worker() {
     // Läuft bis Discovery-Budget erschöpft, Queue leer ODER Zeitfrist erreicht.
@@ -1104,7 +1179,7 @@ async function rekeywordArticles(sources: Source[]) {
 }
 
 async function run() {
-  const { data, error } = await sb.from("sources").select("id,base_url,language").eq("active", true);
+  const { data, error } = await sb.from("sources").select("id,base_url,language,feed_url").eq("active", true);
   if (error) throw new Error(`Quellen-Abfrage fehlgeschlagen: ${error.message}`);
   console.log(`${data?.length ?? 0} aktive Quellen geladen.`);
   if (!data?.length) throw new Error("Keine aktiven Quellen gefunden – Abbruch.");
