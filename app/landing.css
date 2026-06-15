@@ -718,7 +718,7 @@ html.lenis, html.lenis body { height: auto; }
 .mg-foot-mark {
   font-family: var(--mg-display); font-weight: 600; line-height: 0.78;
   font-size: clamp(96px, 26vw, 380px); letter-spacing: -0.04em; text-align: center;
-  margin: clamp(20px, 4vw, 60px) 0 -0.12em; padding: 0 var(--mg-pad);
+  margin: clamp(20px, 4vw, 60px) 0 clamp(16px, 2.4vw, 36px); padding: 0 var(--mg-pad);
   color: transparent; -webkit-text-stroke: 1px rgba(159, 178, 255, 0.16);
   background: linear-gradient(180deg, rgba(159, 178, 255, 0.12), transparent 78%);
   -webkit-background-clip: text; background-clip: text;
