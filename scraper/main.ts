@@ -21,6 +21,40 @@ const CONCURRENCY = Number(process.env.CRAWL_CONCURRENCY ?? 4); // parallele Bro
 // Hartes Gesamt-Zeitbudget für den articles-Crawl (Schutz vor CI-Job-Timeout).
 // Wird gleichmäßig auf die Quellen verteilt; jede Quelle stoppt an ihrer Frist.
 const TIME_BUDGET_MS = Number(process.env.CRAWL_TIME_BUDGET_MS ?? 16 * 60 * 1000);
+
+// Kuratierte Feeds für Quellen, deren Auto-Erkennung (robots.txt/Sitemap/<link>)
+// zu wenig hergibt. FAZ z.B. nennt keine Sitemap in robots.txt, hat aber ergiebige
+// RSS-Ressort-Feeds. Schlüssel = Host. Wird beim Crawl der Quelle mit eingereiht.
+const KNOWN_FEEDS: Record<string, string[]> = {
+  "www.faz.net": [
+    "https://www.faz.net/rss/aktuell/",
+    "https://www.faz.net/rss/aktuell/politik/",
+    "https://www.faz.net/rss/aktuell/wirtschaft/",
+    "https://www.faz.net/rss/aktuell/finanzen/",
+    "https://www.faz.net/rss/aktuell/feuilleton/",
+    "https://www.faz.net/rss/aktuell/gesellschaft/",
+    "https://www.faz.net/rss/aktuell/sport/",
+    "https://www.faz.net/rss/aktuell/wissen/",
+    "https://www.faz.net/rss/aktuell/technik-motor/",
+    "https://www.faz.net/rss/aktuell/karriere-hochschule/",
+    "https://www.faz.net/rss/aktuell/reise/",
+    "https://www.faz.net/rss/aktuell/rhein-main/",
+  ],
+  "www.n-tv.de": [
+    "https://www.n-tv.de/rss",
+    "https://www.n-tv.de/politik/rss",
+    "https://www.n-tv.de/wirtschaft/rss",
+    "https://www.n-tv.de/sport/rss",
+    "https://www.n-tv.de/panorama/rss",
+    "https://www.n-tv.de/technik/rss",
+    "https://www.n-tv.de/wissen/rss",
+    "https://www.n-tv.de/auto/rss",
+    "https://www.n-tv.de/reise/rss",
+    "https://www.n-tv.de/unterhaltung/rss",
+    "https://www.n-tv.de/ratgeber/rss",
+    "https://www.n-tv.de/der_tag/rss",
+  ],
+};
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
 // "articles":   crawlen + Artikel speichern (Metadaten).
@@ -769,6 +803,9 @@ async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
   // Gespeicherten Feed (sources.feed_url) sofort einreihen — weitere Feeds werden
   // aus der Startseite auto-erkannt (<link rel="alternate">).
   if (src.feed_url) enqueue({ url: src.feed_url, depth: 0, feed: true }, false);
+  // Kuratierte Zusatz-Feeds (z.B. FAZ/n-tv-Ressorts), wo Auto-Erkennung wenig findet.
+  let srcHost = ""; try { srcHost = new URL(src.base_url).host; } catch {}
+  for (const f of (KNOWN_FEEDS[srcHost] ?? [])) enqueue({ url: f, depth: 0, feed: true }, false);
 
   // Sitemaps zuerst abgrasen (billig, riesige Ausbeute) — markiert Artikel-Knoten
   // für analyze. Nutzt ~1/3 der Quellen-Frist, der Rest bleibt für HTML/Feeds.
