@@ -3,6 +3,8 @@ on:
   schedule:
     - cron: "0 */4 * * *"  # alle 4 Stunden — tiefer, ganzheitlicher Crawl je Lauf (privat: 2000-Min-Budget)
   workflow_dispatch:
+  push:
+    branches: [main]   # TEMPORÄR: einmaliger Trigger; wird gleich wieder entfernt
 concurrency:
   group: scrape
   cancel-in-progress: false
