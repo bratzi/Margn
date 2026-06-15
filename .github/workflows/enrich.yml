@@ -6,8 +6,6 @@ on:
   # gewünscht ist ODER ein neues Feature Daten braucht, die der Altbestand
   # noch nicht hat (gezieltes Nach-Enrichen). Hier KEINEN schedule-Block ergänzen.
   workflow_dispatch:
-  push:
-    branches: [main]   # TEMPORÄR: Backfill mit neuem Datums-Extraktor
 # Überlappende Läufe verhindern (vorige Läufe wurden teils abgebrochen)
 concurrency:
   group: enrich
