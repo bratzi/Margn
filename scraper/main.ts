@@ -501,6 +501,69 @@ function extractFeedItemUrls(xml: string, baseUrl: string): string[] {
   return [...out];
 }
 
+// Sitemap-Harvesting: robots.txt → Sitemap-Einträge (+ /sitemap.xml als Fallback),
+// Sitemap-Index eine Ebene auflösen (neueste/News-Sitemaps bevorzugt), Artikel-URLs
+// extrahieren und als 'article'-Knoten markieren → analyze rendert sie nach.
+// Der größte, billigste Hebel: News-Sitemaps listen praktisch alle aktuellen Artikel.
+const MAX_SITEMAP_URLS = Number(process.env.CRAWL_MAX_SITEMAP_URLS ?? 3000);
+async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
+  let origin = ""; try { origin = new URL(src.base_url).origin; } catch { return 0; }
+  const seen = new Set<string>();
+  const recentFirst = (urls: string[]) =>
+    urls.sort((a, b) => (/(news|aktuell|recent|article|\d{4})/i.test(b) ? 1 : 0) - (/(news|aktuell|recent|article|\d{4})/i.test(a) ? 1 : 0));
+
+  // 1) Sitemap-URLs aus robots.txt (+ Fallback)
+  let sitemaps: string[] = [];
+  const robots = await fetchXml(`${origin}/robots.txt`);
+  if (robots) for (const m of robots.matchAll(/^\s*sitemap:\s*(\S+)/gim)) { try { sitemaps.push(new URL(m[1], origin).href); } catch {} }
+  if (!sitemaps.length) sitemaps = [`${origin}/sitemap.xml`, `${origin}/news-sitemap.xml`, `${origin}/sitemap-news.xml`];
+  sitemaps = recentFirst([...new Set(sitemaps)]);
+
+  const arts = new Set<string>();
+  let files = 0;
+  const MAX_FILES = 10;
+  const grabLocs = (xml: string) => {
+    for (const m of xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)) {
+      const u = stripHash(m[1].trim());
+      if (u.startsWith(origin) && looksLikeArticle(u)) arts.add(u);
+    }
+  };
+
+  for (const sm of sitemaps) {
+    if (files >= MAX_FILES || arts.size >= MAX_SITEMAP_URLS || Date.now() > deadline) break;
+    if (seen.has(sm)) continue; seen.add(sm);
+    const xml = await fetchXml(sm);
+    if (!xml) continue;
+    files++;
+    if (/<sitemapindex/i.test(xml)) {
+      // Index → Kind-Sitemaps (neueste/News zuerst), nur ein paar laden
+      const childs = recentFirst([...xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)].map((m) => m[1].trim()));
+      for (const c of childs.slice(0, 6)) {
+        if (files >= MAX_FILES || arts.size >= MAX_SITEMAP_URLS || Date.now() > deadline) break;
+        if (seen.has(c)) continue; seen.add(c);
+        const cx = await fetchXml(c);
+        if (cx) { files++; grabLocs(cx); }
+      }
+    } else {
+      grabLocs(xml);
+    }
+  }
+
+  const list = [...arts].slice(0, MAX_SITEMAP_URLS);
+  if (list.length && !DRY_RUN) {
+    try {
+      for (let i = 0; i < list.length; i += 200) {
+        await sb.from("pages").upsert(
+          list.slice(i, i + 200).map((url) => ({ source_id: src.id, url, kind: "article", depth: 1 })),
+          { onConflict: "url", ignoreDuplicates: true },
+        );
+      }
+    } catch (e) { console.error("SITEMAP-FEHLER:", src.base_url, (e as Error).message); }
+  }
+  console.log(`Sitemaps ${src.base_url}: ${files} Dateien gelesen, ${list.length} Artikel-URLs markiert`);
+  return list.length;
+}
+
 // Interne Links derselben Domain aus dem gerenderten DOM (für die Rekursion).
 function sameDomainLinks(html: string, baseUrl: string, pageUrl: string): string[] {
   try {
@@ -707,6 +770,10 @@ async function crawlSource(ctx: BrowserContext, src: Source, deadline: number) {
   // aus der Startseite auto-erkannt (<link rel="alternate">).
   if (src.feed_url) enqueue({ url: src.feed_url, depth: 0, feed: true }, false);
 
+  // Sitemaps zuerst abgrasen (billig, riesige Ausbeute) — markiert Artikel-Knoten
+  // für analyze. Nutzt ~1/3 der Quellen-Frist, der Rest bleibt für HTML/Feeds.
+  await harvestSitemaps(src, Date.now() + Math.floor((deadline - Date.now()) / 3));
+
   let pages = 0;            // verarbeitete Seiten gesamt (gegen MAX_FETCHES)
   let renders = 0;          // teure Browser-Renders (gegen MAX_PAGES)
   let fetches = 0, saved = 0;
@@ -829,9 +896,11 @@ async function analyzeBacklog() {
   const srcById = new Map((srcs ?? []).map((s: any) => [s.id, s]));
   const activeIds = [...srcById.keys()];
 
-  // 1) entdeckte Artikel-Knoten + bereits analysierte URLs laden
+  // 1) entdeckte Artikel-Knoten + bereits analysierte URLs laden.
+  // NEUESTE zuerst (id desc): die jüngsten Funde (Feeds/Sitemaps/Crawl) werden
+  // priorisiert gerendert → relevante, aktuelle Artikel zuerst statt altem Backlog.
   const discovered = await fetchAll<{ url: string; source_id: number }>((from) =>
-    sb.from("pages").select("url,source_id").eq("kind", "article").in("source_id", activeIds).order("id", { ascending: true })
+    sb.from("pages").select("url,source_id").eq("kind", "article").in("source_id", activeIds).order("id", { ascending: false })
   );
   const doneRows = await fetchAll<{ url: string }>((from) => sb.from("articles").select("url"));
   const done = new Set(doneRows.map((r) => r.url));
