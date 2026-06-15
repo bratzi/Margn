@@ -17,6 +17,20 @@ export type Col<T> = {
   aggFormat?: (n: number) => React.ReactNode;
 };
 
+// Typ-bewusster Vergleich (aufsteigend): Zahl → numerisch, numerischer String →
+// numerisch, ISO-Datum → chronologisch, sonst natürliche de-Sortierung. Leerwerte
+// werden separat (immer ans Ende) behandelt.
+const isEmptyVal = (v: unknown) => v === null || v === undefined || v === "";
+const NUM_RE = /^-?\d+(?:[.,]\d+)?$/;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}/;
+function cmpTyped(a: unknown, b: unknown): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  const as = String(a), bs = String(b);
+  if (NUM_RE.test(as.trim()) && NUM_RE.test(bs.trim())) return parseFloat(as.replace(",", ".")) - parseFloat(bs.replace(",", "."));
+  if (ISO_RE.test(as) && ISO_RE.test(bs)) { const d = Date.parse(as) - Date.parse(bs); if (!Number.isNaN(d)) return d; }
+  return as.localeCompare(bs, "de", { numeric: true, sensitivity: "base" });
+}
+
 export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass, tableId }: {
   columns: Col<T>[]; rows: T[]; rowKey: (r: T) => string | number; minWidth?: number; rowClass?: (r: T) => string; tableId?: string;
 }) {
@@ -87,8 +101,10 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
       const col = colBy(sort.key);
       v = [...v].sort((a, b) => {
         const av = val(a, col), bv = val(b, col);
-        const cmp = (typeof av === "number" && typeof bv === "number") ? av - bv : String(av ?? "").localeCompare(String(bv ?? ""), "de", { numeric: true });
-        return sort.dir === "asc" ? cmp : -cmp;
+        const aE = isEmptyVal(av), bE = isEmptyVal(bv);
+        if (aE || bE) return aE && bE ? 0 : aE ? 1 : -1; // Leerwerte immer ans Ende (beide Richtungen)
+        const c = cmpTyped(av, bv);
+        return sort.dir === "asc" ? c : -c;
       });
     }
     return v;
