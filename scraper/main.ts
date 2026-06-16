@@ -84,7 +84,8 @@ type Seed = { url: string; depth: number; feed?: boolean };
 async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<typeof extractMeta>, extra?: Record<string, unknown>): Promise<number> {
   const row: Record<string, unknown> = { source_id: sourceId, url, last_seen: new Date().toISOString() };
   if (meta) {
-    const { authors, keywords, categories, ...rest } = meta;
+    const { authors, keywords, categories, published_precise, ...rest } = meta;
+    void published_precise; // nur Steuerflag, keine DB-Spalte
     Object.assign(row, rest);
     void authors; void keywords; void categories; // handled separately
   }
@@ -229,13 +230,17 @@ function extractMeta(html: string, url: string) {
     return validDate(`${m[1]}-${m[2]}-${m[3]}T12:00:00Z`);
   };
 
-  const published_at =
+  // Präzise Quellen (mit Uhrzeit) zuerst; der URL-Pfad ist nur ein DATUM ohne
+  // echte Uhrzeit (Mittag UTC) → als „unpräzise" markiert, damit er einen
+  // bereits vorhandenen präzisen Wert (z.B. aus der News-Sitemap) NICHT überschreibt.
+  const precisePub =
     validDate(metaContent(html, "article:published_time", "og:article:published_time")) ??
     validDate(article.datePublished) ??
     anyLdField("datePublished") ??
     rawJsonDate("datePublished") ??
-    timeTagDate() ??
-    urlPathDate() ?? null;
+    timeTagDate();
+  const published_at = precisePub ?? urlPathDate() ?? null;
+  const published_precise = precisePub != null;
 
   const modified_at =
     validDate(metaContent(html, "article:modified_time", "og:updated_time")) ??
@@ -289,7 +294,7 @@ function extractMeta(html: string, url: string) {
   const author_status = classifyAuthorStatus(authorList);
   const topic = topicOf(categories, url);
 
-  return { title, description, og_image, published_at, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, authors: authorList, keywords, categories };
+  return { title, description, og_image, published_at, published_precise, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, authors: authorList, keywords, categories };
 }
 
 // Autoren-Status: 'named' (echte Person), 'anonymous' (Redaktion/Agentur/Eigenname), 'none' (keiner).
@@ -480,9 +485,11 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
-    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled")
+    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at")
     .eq("url", url).maybeSingle();
   meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
+  // Präzises Datum (z.B. aus News-Sitemap) NICHT durch den URL-Mittags-Notnagel überschreiben.
+  if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   if (art) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
@@ -1151,10 +1158,12 @@ async function enrichArticles(sources: Source[]) {
         try {
           // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
           const { data: prev } = await sb.from("articles")
-            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled")
+            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at")
             .eq("id", item.id).maybeSingle();
           meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
-          const { authors, keywords, categories, ...fields } = meta;
+          if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
+          const { authors, keywords, categories, published_precise, ...fields } = meta;
+          void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
           if (art) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
