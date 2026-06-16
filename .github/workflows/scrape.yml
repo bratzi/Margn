@@ -1,7 +1,8 @@
 name: scrape
 on:
-  schedule:
-    - cron: "0 */2 * * *"  # alle 2 Stunden — reine HTTP-Entdeckung (kein Browser → günstig)
+  # ENTDECKUNG LÄUFT JETZT IN pipeline.yml (analyze.yml) MIT — kein eigener Cron mehr.
+  # Früher alle 2 h separat: bezahlte checkout + npm ci 12×/Tag nur für ~3 min HTTP-Arbeit,
+  # obwohl erst alle paar Stunden gerendert wird → reiner Setup-Overhead. Nur noch manuell.
   workflow_dispatch:
 concurrency:
   group: scrape
