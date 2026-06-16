@@ -606,6 +606,14 @@ function extractFeedItemUrls(xml: string, baseUrl: string): string[] {
 // extrahieren und als 'article'-Knoten markieren → analyze rendert sie nach.
 // Der größte, billigste Hebel: News-Sitemaps listen praktisch alle aktuellen Artikel.
 const MAX_SITEMAP_URLS = Number(process.env.CRAWL_MAX_SITEMAP_URLS ?? 3000);
+
+// News-Sitemap-Datum normalisieren: gültiger Zeitstempel → ISO (UTC), sonst null.
+function sitemapDate(s: string | undefined | null): string | null {
+  if (!s) return null;
+  const t = Date.parse(s.trim());
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
+
 async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   let origin = ""; try { origin = new URL(src.base_url).origin; } catch { return 0; }
   const seen = new Set<string>();
@@ -620,12 +628,29 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   sitemaps = recentFirst([...new Set(sitemaps)]);
 
   const arts = new Set<string>();
+  // Exakte Veröffentlichungszeit je URL aus der News-Sitemap. precise=true nur bei
+  // <news:publication_date> (autoritativ) — false beim <lastmod>-Fallback (= Änderungs-,
+  // nicht Erscheinungszeit → darf einen vorhandenen Wert nur füllen, nie überschreiben).
+  const pubDates = new Map<string, { at: string; precise: boolean }>();
   let files = 0;
   const MAX_FILES = 10;
   const grabLocs = (xml: string) => {
+    // URLs einsammeln (tolerant ggü. Sitemap-Struktur, wie bisher).
     for (const m of xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)) {
       const u = stripHash(m[1].trim());
       if (u.startsWith(origin) && looksLikeArticle(u)) arts.add(u);
+    }
+    // Pro <url>-Block die Veröffentlichungszeit ziehen (publication_date > lastmod).
+    for (const block of xml.matchAll(/<url\b[^>]*>([\s\S]*?)<\/url>/gi)) {
+      const inner = block[1];
+      const loc = /<loc>\s*([^<]+?)\s*<\/loc>/i.exec(inner)?.[1];
+      if (!loc) continue;
+      const u = stripHash(loc.trim());
+      if (!(u.startsWith(origin) && looksLikeArticle(u))) continue;
+      const pd = sitemapDate(/<(?:\w+:)?publication_date>\s*([^<]+?)\s*<\/(?:\w+:)?publication_date>/i.exec(inner)?.[1]);
+      const lm = sitemapDate(/<lastmod>\s*([^<]+?)\s*<\/lastmod>/i.exec(inner)?.[1]);
+      if (pd) pubDates.set(u, { at: pd, precise: true });
+      else if (lm && !pubDates.has(u)) pubDates.set(u, { at: lm, precise: false });
     }
   };
 
@@ -660,7 +685,27 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
       }
     } catch (e) { console.error("SITEMAP-FEHLER:", src.base_url, (e as Error).message); }
   }
-  console.log(`Sitemaps ${src.base_url}: ${files} Dateien gelesen, ${list.length} Artikel-URLs markiert`);
+  // Präzise Veröffentlichungszeiten aus der Sitemap vorab in `articles` einpflegen
+  // ({source_id,url,published_at} — Rest nullable). So hat z.B. Le Monde (Render → 402)
+  // die EXAKTE Zeit statt nur den URL-Mittags-Notnagel. publication_date ist autoritativ
+  // → überschreibt (auch den Notnagel); lastmod (= Änderungszeit) nur füllen, nie
+  // überschreiben. precise-sticky in saveArticleFull/enrich schützt den Wert beim Render.
+  const dated = list.filter((u) => pubDates.has(u));
+  if (dated.length && !DRY_RUN) {
+    const writeDates = async (urls: string[], ignoreDuplicates: boolean) => {
+      for (let i = 0; i < urls.length; i += 200) {
+        await sb.from("articles").upsert(
+          urls.slice(i, i + 200).map((url) => ({ source_id: src.id, url, published_at: pubDates.get(url)!.at })),
+          { onConflict: "url", ignoreDuplicates },
+        );
+      }
+    };
+    try {
+      await writeDates(dated.filter((u) => pubDates.get(u)!.precise), false);  // publication_date → überschreibt
+      await writeDates(dated.filter((u) => !pubDates.get(u)!.precise), true);  // nur lastmod → nur neue Zeilen
+    } catch (e) { console.error("SITEMAP-DATUM-FEHLER:", src.base_url, (e as Error).message); }
+  }
+  console.log(`Sitemaps ${src.base_url}: ${files} Dateien gelesen, ${list.length} Artikel-URLs markiert (${dated.length} mit Datum)`);
   return list.length;
 }
 
@@ -1005,7 +1050,10 @@ async function analyzeBacklog() {
   const discovered = await fetchAll<{ url: string; source_id: number }>((from) =>
     sb.from("pages").select("url,source_id").eq("kind", "article").in("source_id", activeIds).order("id", { ascending: false })
   );
-  const doneRows = await fetchAll<{ url: string }>((from) => sb.from("articles").select("url"));
+  // „Erledigt" = bereits GERENDERT (title gesetzt). Reine Sitemap-Vorab-Zeilen
+  // (title=null, nur published_at aus harvestSitemaps) zählen NICHT als erledigt →
+  // werden weiterhin gerendert, statt vom Renderer übersprungen zu werden.
+  const doneRows = await fetchAll<{ url: string }>((from) => sb.from("articles").select("url").not("title", "is", null));
   const done = new Set(doneRows.map((r) => r.url));
 
   // Budget gleichmäßig über die Quellen verteilen (sonst frisst die größte Quelle alles).
