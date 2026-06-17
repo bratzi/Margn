@@ -133,7 +133,7 @@ export default function ArticleDashboard() {
       render: (r) => r.published_at
         ? <span className="mono faint">{fmtDT(r.published_at)}</span>
         : <span className="mono faint" style={{ opacity: 0.55 }} title="Kein Datum vom Verlag – Erster Scan als Zeitstempel">{fmtDT(r.discovered_at)} <sup>⊛</sup></span> },
-    { key: "discovered_at", label: "Erster Scan", width: 125, value: (r) => r.discovered_at ?? "", render: (r) => <span className="mono faint">{fmtDT(r.discovered_at)}</span> },
+    { key: "discovered_at", label: "Entdeckt", width: 125, value: (r) => r.discovered_at ?? "", render: (r) => <span className="mono faint">{fmtDT(r.discovered_at)}</span> },
     { key: "last_seen", label: "Letzter Scan", width: 125, value: (r) => r.last_seen ?? "", render: (r) => <span className="mono faint">{fmtDT(r.last_seen)}</span> },
     { key: "word_count", label: "Wörter", width: 90, align: "right", value: (r) => r.word_count ?? 0, render: (r) => <span className="faint">{r.word_count ? r.word_count.toLocaleString("de-DE") : "—"}</span>,
       agg: "avg", aggFormat: (n) => <span title="Ø Wörter">ø {n.toLocaleString("de-DE")}</span> },
