@@ -728,8 +728,37 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------------------------------------------------------------- Reveals */
 [data-reveal] { will-change: transform, opacity; }
 
+/* ----------------------------------------------- Scroll-Spine (mitlaufende Linie) */
+/* Anker: .mg muss positioniert sein, damit die absolute Spine an der Seite klebt. */
+.mg { position: relative; }
+.mg-spine {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 4;                 /* über den Sektionen, unter Nav (60)/Progress (70)/Grain (80) */
+  pointer-events: none; overflow: visible;
+  mix-blend-mode: screen;     /* leuchtet auf dem dunklen Design, statt Inhalte zu verdecken */
+}
+/* Vorschau des noch nicht gezeichneten Wegs — nur ein Hauch */
+.mg-spine-ghost {
+  stroke: rgba(159, 178, 255, 0.09); stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+/* gezeichneter, leuchtender Teil (Farbverlauf je Sektion via #mgSpineGrad) */
+.mg-spine-draw {
+  stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round;
+  vector-effect: non-scaling-stroke; opacity: 0.95;
+  will-change: stroke-dashoffset;
+}
+/* glühender Kopf, der dem Scroll vorauseilt */
+.mg-spine-head {
+  fill: #f4f6ff; opacity: 0;
+  filter: drop-shadow(0 0 5px #9fb2ff) drop-shadow(0 0 13px rgba(110, 138, 255, 0.85));
+  transition: opacity 0.3s ease;
+}
+@media (max-width: 640px) { .mg-spine { opacity: 0.5; } }
+
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   .mg-grain, .mg-marquee-track, .mg-scrollhint i::after, .mg-pair-link .line, .mg-method-note .pulse::after { animation: none !important; }
   .mg *, .mg *::before, .mg *::after { transition-duration: 0.01ms !important; }
+  .mg-spine-draw { opacity: 0.6; }
 }

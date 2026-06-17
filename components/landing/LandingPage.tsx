@@ -10,6 +10,7 @@ import HeroCanvas from "@/components/landing/HeroCanvas";
 import DiffCycler from "@/components/landing/DiffCycler";
 import Anatomy from "@/components/landing/Anatomy";
 import FeatureReveal from "@/components/landing/FeatureReveal";
+import ScrollSpine from "@/components/landing/ScrollSpine";
 
 gsap.registerPlugin(ScrollTrigger, SplitText);
 
@@ -268,6 +269,7 @@ export default function LandingPage() {
       <div className="mg-grain" aria-hidden />
       <div className="mg-progress" aria-hidden><i /></div>
       <div className="mg-cursor" ref={cursorRef} aria-hidden />
+      <ScrollSpine />
 
       {/* ---------------- Nav ---------------- */}
       <header className="mg-nav" ref={navRef}>
