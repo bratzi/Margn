@@ -3,8 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFilters, WINDOW_OPTS } from "@/components/FilterProvider";
 import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
+import { topicLabel } from "@/lib/topics";
 
 export const PUB_COLORS = ["#3D63DD", "#1A7F55", "#CF4035", "#B0790C", "#0C8F86", "#8B5CF6", "#D6457A", "#0E7490"];
+const TOPIC_COLORS: Record<string, string> = {
+  politik: "#CF4035", wirtschaft: "#B0790C", sport: "#3D63DD",
+  kultur: "#8B5CF6", wissen: "#0C8F86", digital: "#0E7490",
+  panorama: "#1A7F55", gesundheit: "#D6457A", reise: "#E07020",
+  auto: "#666666", meinung: "#999999", sonstiges: "#CCCCCC",
+};
+type ChartMode = "publishers" | "topics";
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000, VH = 100;
 
@@ -15,6 +23,7 @@ export default function TimeRangeFilter() {
   const { sources, activeArr, days, rangeIdx, setRangeIdx, trfOpen, setTrfOpen, windowDays, setWindowDays } = f;
   const N = days.length;
   const [h, setH] = useState(168);
+  const [chartMode, setChartMode] = useState<ChartMode>("publishers");
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<null | "from" | "to" | "band" | "resize">(null);
   const dragRef = useRef<{ start: number; f: number; t: number } | null>(null);
@@ -27,13 +36,16 @@ export default function TimeRangeFilter() {
   const [hoverDay, setHoverDay] = useState<HoverDay | null>(null);
 
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
-  const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
   // Säulen direkt aus dem gemeinsamen Corpus — GLEICHES Prädikat wie die Tabelle,
   // nur ohne Zeitfilter (die Zeitachse ist ja der Chart selbst). Damit stimmen die
   // Balken exakt mit den Tabellen-Treffern des jeweiligen Tages überein.
-  const { series } = useMemo(() => {
+  const corpusDeps = [f.corpus, f.corpusReady, days,
+    f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
+    f.subPats.join("|"), f.kwIdSet] as const;
+
+  const series = useMemo(() => {
     const snap = snapshotOf(f as any);
     const match = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
     const dayIdx = new Map(days.map((d, i) => [d, i]));
@@ -49,13 +61,38 @@ export default function TimeRangeFilter() {
       if (!vals) { vals = new Array(days.length).fill(0); map.set(r.source_id, vals); }
       vals[i]++;
     }
-    const ser = sources.filter((s) => act.has(s.id)).map((s) => ({
-      id: s.id, color: colorById.get(s.id)!, vals: map.get(s.id) ?? new Array(days.length).fill(0),
+    return sources.filter((s) => act.has(s.id)).map((s) => ({
+      id: String(s.id), color: colorById.get(s.id)!, label: short(s.name),
+      vals: map.get(s.id) ?? new Array(days.length).fill(0),
     }));
-    return { series: ser };
-  }, [f.corpus, f.corpusReady, sources, act, days, colorById,
-      f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
-      f.subPats.join("|"), f.kwIdSet]);
+  }, [sources, act, colorById, ...corpusDeps]);
+
+  const topicSeries = useMemo(() => {
+    const snap = snapshotOf(f as any);
+    const match = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
+    const dayIdx = new Map(days.map((d, i) => [d, i]));
+    const map = new Map<string, number[]>();
+    for (const r of f.corpus) {
+      if (!act.has(r.source_id)) continue;
+      if (!match(r)) continue;
+      const t = effTime(r);
+      if (!t) continue;
+      const i = dayIdx.get(t.slice(0, 10));
+      if (i === undefined) continue;
+      const topic = r.topic ?? "sonstiges";
+      let vals = map.get(topic);
+      if (!vals) { vals = new Array(days.length).fill(0); map.set(topic, vals); }
+      vals[i]++;
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1].reduce((s, v) => s + v, 0) - a[1].reduce((s, v) => s + v, 0))
+      .slice(0, 10)
+      .map(([topic, vals]) => ({
+        id: topic, color: TOPIC_COLORS[topic] ?? "#AAAAAA", label: topicLabel(topic), vals,
+      }));
+  }, [act, ...corpusDeps]);
+
+  const activeSeries = chartMode === "topics" ? topicSeries : series;
 
   const maxTotal = useMemo(() => {
     const tot = days.map((_, i) => series.reduce((sum, s) => sum + s.vals[i], 0));
@@ -132,7 +169,11 @@ export default function TimeRangeFilter() {
             <button key={n} className={windowDays === n ? "on" : ""} onClick={() => setWindowDays(n)} title={`Letzte ${n} Tage`}>{n}T</button>
           ))}
         </div>
-        <div className="trf-legend">{series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}</div>
+        <div className="seg seg-xs trf-mode">
+          <button className={chartMode === "publishers" ? "on" : ""} onClick={() => setChartMode("publishers")}>Verleger</button>
+          <button className={chartMode === "topics" ? "on" : ""} onClick={() => setChartMode("topics")}>Themen</button>
+        </div>
+        <div className="trf-legend">{activeSeries.map((s) => <span key={s.id}><i style={{ background: s.color }} />{s.label}</span>)}</div>
         {(live.from > 0 || live.to < N - 1) && <button className="trf-reset" onClick={() => { setLive({ from: 0, to: N - 1 }); setRangeIdx({ from: 0, to: N - 1 }); }}>Zurücksetzen</button>}
         <button className="rail-toggle" onClick={() => setTrfOpen(false)} title="Einklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg></button>
       </div>
@@ -146,7 +187,7 @@ export default function TimeRangeFilter() {
         <svg className="trf-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
           {days.map((_, i) => {
             let yb = VH;
-            return <g key={i}>{series.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
+            return <g key={i}>{activeSeries.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
           })}
         </svg>
 
@@ -164,8 +205,7 @@ export default function TimeRangeFilter() {
 
         {/* Tooltip */}
         {hoverDay && (() => {
-          // Tooltip zeigt immer Per-Tag-Werte (series), unabhängig vom abs/rel-Modus
-          const dayData = series.filter((s) => s.vals[hoverDay.idx] > 0);
+          const dayData = activeSeries.filter((s) => s.vals[hoverDay.idx] > 0);
           if (!dayData.length) return null;
           const total = dayData.reduce((sum, s) => sum + s.vals[hoverDay.idx], 0);
           const rect = trackRef.current?.getBoundingClientRect();
@@ -177,7 +217,7 @@ export default function TimeRangeFilter() {
               {dayData.map((s) => (
                 <div key={s.id} className="trf-tt-row">
                   <i style={{ background: s.color }} />
-                  <span>{nameById.get(s.id)}</span>
+                  <span>{s.label}</span>
                   <b>{s.vals[hoverDay.idx]}</b>
                 </div>
               ))}
