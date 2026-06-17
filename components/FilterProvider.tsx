@@ -224,15 +224,23 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   useEffect(() => {
     if (!sources.length) return;
     let cancelled = false;
+    // Corpus auf max. 95 Tage (= größtes Preset + 5 Puffer) begrenzen.
+    // Ohne Filter würden Archiv-Artikel (z.B. Le Monde bis 1945) die Zeilen­zahl
+    // massiv aufblähen → zu viele parallele Supabase-Requests → Rate-Limit-Fehler
+    // → Corpus unvollständig → Charts zählen weniger als die Tabelle.
+    const floor = new Date(); floor.setUTCDate(floor.getUTCDate() - 95);
+    const cf = floor.toISOString();
+    const corpusFilter = `published_at.gte.${cf},and(published_at.is.null,discovered_at.gte.${cf})`;
     fetchAllRows<CorpusRow>(
-      () => supabase.from("page_overview").select("id", { count: "exact", head: true }).in("ptype", ALLOWED_PTYPES),
+      () => supabase.from("page_overview").select("id", { count: "exact", head: true })
+        .in("ptype", ALLOWED_PTYPES).or(corpusFilter),
       // WICHTIG: nach dem EINDEUTIGEN PK `id` paginieren, nicht nach
       // discovered_at. Bei gleichen discovered_at-Werten (Batch-Inserts) ist die
       // Sortierung über parallele Range-Requests sonst nicht stabil → Zeilen
       // fallen zwischen Seiten raus → Corpus unvollständig → Charts zählen
       // weniger als die Tabelle. id desc ≈ neueste zuerst und ist eindeutig.
       (a, b) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
-        .order("id", { ascending: false }).range(a, b) as any,
+        .or(corpusFilter).order("id", { ascending: false }).range(a, b) as any,
       // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
       // Aggregation server-seitig (RPC), dann cap-frei.
       100000,

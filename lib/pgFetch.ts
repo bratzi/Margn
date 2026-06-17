@@ -2,17 +2,39 @@
 // .limit() mehr verlangt. Für clientseitige Aggregationen über größere Mengen müssen
 // die Daten daher seitenweise geholt werden.
 
-// Parallel: erst Count holen, dann alle Seiten gleichzeitig laden (für große Tabellen).
+// Parallel (gebündelt): Count holen, dann in Batches von max. BATCH_SIZE Seiten laden.
+// Retry (bis zu 3 Versuche) pro Seite: Bei Supabase-Ratelimiting oder kurzem Netz-Fehler
+// würden sonst einzelne Seiten still ausfallen → Corpus unvollständig → Charts falsch.
+const BATCH_SIZE = 5; // max. parallele Supabase-Requests gleichzeitig
+const RETRY = 3;      // max. Versuche pro Seite
+
 export async function fetchAllRows<T>(
   countQ: () => PromiseLike<{ count: number | null }>,
   pageQ: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
   maxRows = 30000,
 ): Promise<T[]> {
   const { count } = await countQ();
-  const pages = Math.min(Math.ceil(maxRows / 1000), Math.max(1, Math.ceil((count ?? 0) / 1000)));
-  const results = await Promise.all(Array.from({ length: pages }, (_, i) => pageQ(i * 1000, i * 1000 + 999)));
+  const nPages = Math.min(Math.ceil(maxRows / 1000), Math.max(1, Math.ceil((count ?? 0) / 1000)));
+
+  const fetchPage = async (from: number, to: number): Promise<T[]> => {
+    for (let attempt = 0; attempt < RETRY; attempt++) {
+      const r = await pageQ(from, to);
+      if (!r.error && r.data) return r.data as T[];
+      if (attempt < RETRY - 1) await new Promise((res) => setTimeout(res, 350 * (attempt + 1)));
+    }
+    console.error(`fetchAllRows: Seite ${from}–${to} nach ${RETRY} Versuchen fehlgeschlagen`);
+    return [];
+  };
+
   const out: T[] = [];
-  for (const r of results) if (!r.error && r.data) out.push(...r.data);
+  for (let i = 0; i < nPages; i += BATCH_SIZE) {
+    const batch = Array.from(
+      { length: Math.min(BATCH_SIZE, nPages - i) },
+      (_, j) => fetchPage((i + j) * 1000, (i + j) * 1000 + 999),
+    );
+    const results = await Promise.all(batch);
+    for (const rows of results) out.push(...rows);
+  }
   return out;
 }
 
