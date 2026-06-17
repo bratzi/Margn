@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+// Bei jeder Änderung der Default-Spaltenreihenfolge im Code erhöhen — invalidiert die
+// in localStorage gespeicherte (alte) Reihenfolge, sodass alle Clients den neuen
+// Default sehen. v2: „Änderungen" direkt hinter „Erfassung".
+const LAYOUT_VERSION = 2;
+
 export type Col<T> = {
   key: string;
   label: string;
@@ -58,7 +63,10 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
     if (!lsKey) return;
     try {
       const s = JSON.parse(localStorage.getItem(lsKey) || "{}");
-      if (Array.isArray(s.order)) setOrder(s.order);
+      // Bei Versionssprung (Default-Spaltenreihenfolge im Code geändert) die GESPEICHERTE
+      // Reihenfolge verwerfen → neue Default-Anordnung greift. Breiten/versteckt/gepinnt
+      // bleiben erhalten, sie hängen nicht an der Reihenfolge.
+      if (s.v === LAYOUT_VERSION && Array.isArray(s.order)) setOrder(s.order);
       if (Array.isArray(s.hidden)) setHidden(new Set(s.hidden));
       if (Array.isArray(s.pinned)) setPinned(new Set(s.pinned));
       if (s.widths) setWidths(s.widths);
@@ -66,7 +74,7 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
   }, [lsKey]);
   useEffect(() => {
     if (!lsKey) return;
-    try { localStorage.setItem(lsKey, JSON.stringify({ order, hidden: [...hidden], pinned: [...pinned], widths })); } catch {}
+    try { localStorage.setItem(lsKey, JSON.stringify({ v: LAYOUT_VERSION, order, hidden: [...hidden], pinned: [...pinned], widths })); } catch {}
   }, [lsKey, order, hidden, pinned, widths]);
 
   // Sichtbare Spalten in aktueller Reihenfolge, gepinnte zuerst.
