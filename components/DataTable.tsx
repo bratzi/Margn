@@ -31,8 +31,10 @@ function cmpTyped(a: unknown, b: unknown): number {
   return as.localeCompare(bs, "de", { numeric: true, sensitivity: "base" });
 }
 
-export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass, tableId }: {
+export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass, tableId, onSortChange }: {
   columns: Col<T>[]; rows: T[]; rowKey: (r: T) => string | number; minWidth?: number; rowClass?: (r: T) => string; tableId?: string;
+  // Wenn gesetzt: Sort-State wird nach oben delegiert (Server-Sort) — kein client-seitiges Umsortieren.
+  onSortChange?: (s: { key: string; dir: "asc" | "desc" } | null) => void;
 }) {
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
@@ -97,7 +99,9 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
       if (!q) continue; const col = colBy(k);
       v = v.filter((r) => String(val(r, col) ?? "").toLowerCase().includes(q.toLowerCase()));
     }
-    if (sort) {
+    // Nur client-seitig sortieren, wenn kein externer Sort-Handler (sonst kommt die
+    // Sortierung bereits vom Server — doppeltes Sortieren würde die Reihenfolge brechen).
+    if (sort && !onSortChange) {
       const col = colBy(sort.key);
       v = [...v].sort((a, b) => {
         const av = val(a, col), bv = val(b, col);
@@ -108,9 +112,13 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
       });
     }
     return v;
-  }, [rows, filters, sort, columns]);
+  }, [rows, filters, sort, columns, !!onSortChange]);
 
-  const toggleSort = (k: string) => setSort((s) => s?.key === k ? (s.dir === "asc" ? { key: k, dir: "desc" } : null) : { key: k, dir: "asc" });
+  const toggleSort = (k: string) => {
+    const next = sort?.key === k ? (sort.dir === "asc" ? { key: k, dir: "desc" as const } : null) : { key: k, dir: "asc" as const };
+    setSort(next);
+    onSortChange?.(next);
+  };
   // Menü relativ zum Wrapper positionieren — robust gegen transform-Vorfahren
   // (z.B. .data-fade-in mit translateY), die sonst ein position:fixed-Kind verschieben.
   const onHeaderCtx = (e: React.MouseEvent, k: string) => {

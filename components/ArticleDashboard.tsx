@@ -36,6 +36,15 @@ const AUTHOR: Record<string, { l: string; c: string }> = {
   named: { l: "Autor", c: "ok" }, anonymous: { l: "Redaktion", c: "wait" },
 };
 const PAGE = 100;
+// Spalten-Key → DB-Spaltenname für Server-seitiges Sortieren über alle Seiten.
+// Spalten ohne Eintrag (seite, keywords) werden nicht server-sortiert.
+const SERVER_SORT: Record<string, string> = {
+  title: "title", outlet: "outlet", ptype: "ptype", topic: "topic",
+  author_status: "author_status", scan: "scan_count",
+  published_at: "published_at", discovered_at: "discovered_at", last_seen: "last_seen",
+  word_count: "word_count", reading_min: "reading_min",
+  revision_count: "revision_count", lang: "lang_detected",
+};
 const shortUrl = (u: string) => { try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; } catch { return { host: "", path: u }; } };
 const fmtDT = (iso: string | null) => iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 const fmtD = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
@@ -46,6 +55,7 @@ export default function ArticleDashboard() {
   const [rowKw, setRowKw] = useState<Record<number, string[]>>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
+  const [tableSort, setTableSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   useEffect(() => { setUpdatedAt(new Date()); }, [f.ready]);
 
@@ -59,14 +69,16 @@ export default function ArticleDashboard() {
     let q = supabase.from("page_overview").select("id,article_id,url,title,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", srcFilter);
     q = applyServerFilters(q, snapshotOf(f as any), f.subPats, f.kwIds);
     const pinLimit = f.pinpoint?.limit;
+    const sortCol = tableSort ? (SERVER_SORT[tableSort.key] ?? "discovered_at") : "discovered_at";
+    const sortAsc = tableSort ? tableSort.dir === "asc" : false;
     const { data, count } = pinLimit
       ? await q.order("published_at", { ascending: true }).limit(pinLimit)
-      : await q.order("discovered_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
+      : await q.order(sortCol, { ascending: sortAsc }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.pinpoint?.limit, f.kwIds, f.keyword, f.subPats.join("|"), page]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.pinpoint?.limit, f.kwIds, f.keyword, f.subPats.join("|"), page, tableSort?.key, tableSort?.dir]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId]);
+  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, tableSort?.key, tableSort?.dir]);
 
   useEffect(() => {
     const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];
@@ -83,7 +95,7 @@ export default function ArticleDashboard() {
   const ctxLabel = `${total.toLocaleString("de-DE")} Treffer${topicLbl ? ` · ${topicLbl}` : ""}${f.keyword !== "all" ? ` · #${f.keyword}` : ""}`;
 
   const cols: Col<Row>[] = useMemo(() => [
-    { key: "seite", label: "Seite", width: 300, sortable: false, groupable: false, value: (r) => r.url,
+    { key: "seite", label: "Seite", width: 300, sortable: false, filterable: false, groupable: false, value: (r) => r.url,
       render: (r) => { const { host, path } = shortUrl(r.url); return (
         <div className="art-row">
           {r.article_id
@@ -105,12 +117,15 @@ export default function ArticleDashboard() {
       agg: (rs) => <span title="verschiedene Themen auf dieser Seite">{new Set(rs.map((r) => r.topic ?? "sonstiges")).size} Themen</span> },
     { key: "author_status", label: "Autor", width: 110, value: (r) => r.author_status ?? "—", render: (r) => r.author_status && AUTHOR[r.author_status] ? <span className={`badge ${AUTHOR[r.author_status].c}`}>{AUTHOR[r.author_status].l}</span> : <span className="faint">—</span>,
       agg: (rs) => { const n = rs.filter((r) => r.author_status === "named").length; const base = rs.filter((r) => r.author_status).length; return <span title="namentlich gekennzeichnet">{base ? Math.round((n / base) * 100) : 0}% nam.</span>; } },
-    { key: "keywords", label: "Schlagwörter", width: 220, sortable: false, groupable: false, value: (r) => (r.article_id ? rowKw[r.article_id]?.join(" ") : "") ?? "",
+    { key: "keywords", label: "Schlagwörter", width: 220, sortable: false, filterable: false, groupable: false, value: (r) => (r.article_id ? rowKw[r.article_id]?.join(" ") : "") ?? "",
       render: (r) => { const kws = r.article_id ? rowKw[r.article_id] : undefined; return kws && kws.length ? <div className="kw-row">{kws.slice(0, 6).map((k) => <span key={k} className="kw-chip">{k}</span>)}</div> : <span className="faint">—</span>; } },
     { key: "scan", label: "Erfassung", width: 120, value: (r) => ((r.scan_count ?? 1) <= 1 ? "Neu" : "Wiederholt"), render: (r) => (r.scan_count ?? 1) <= 1
       ? <span className="new-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></svg>Neu</span>
       : <span className="badge neutral">{r.scan_count}× gescannt</span>,
       agg: (rs) => { const n = rs.filter((r) => (r.scan_count ?? 1) <= 1).length; return <span title="Anteil neu erfasster Artikel">{Math.round((n / rs.length) * 100)}% neu</span>; } },
+    { key: "revision_count", label: "Änderungen", width: 120, align: "right", value: (r) => r.revision_count ?? 0,
+      render: (r) => { const rev = r.revision_count ?? 0; return rev > 0 ? <span className="rev-badge">{rev}× {(r.edit_count ?? 0) > 0 && <i className="rev-e">{r.edit_count}E</i>}{(r.extension_count ?? 0) > 0 && <i className="rev-x">{r.extension_count}+</i>}</span> : <span className="faint">—</span>; },
+      agg: (rs) => { const tot = rs.reduce((s, r) => s + (r.revision_count ?? 0), 0); const ch = rs.filter((r) => (r.revision_count ?? 0) > 0).length; return <span title={`${ch} Artikel geändert`}>{tot}× ({Math.round((ch / rs.length) * 100)}%)</span>; } },
     { key: "published_at", label: "Veröffentlicht", width: 140, value: (r) => r.published_at ?? r.discovered_at ?? "",
       render: (r) => r.published_at
         ? <span className="mono faint">{fmtDT(r.published_at)}</span>
@@ -121,9 +136,6 @@ export default function ArticleDashboard() {
       agg: "avg", aggFormat: (n) => <span title="Ø Wörter">ø {n.toLocaleString("de-DE")}</span> },
     { key: "reading_min", label: "Lesezeit", width: 90, align: "right", value: (r) => r.reading_min ?? 0, render: (r) => <span className="faint">{r.reading_min ? `${r.reading_min} min` : "—"}</span>,
       agg: "avg", aggFormat: (n) => <span title="Ø Lesezeit">ø {n} min</span> },
-    { key: "revision_count", label: "Änderungen", width: 120, align: "right", value: (r) => r.revision_count ?? 0,
-      render: (r) => { const rev = r.revision_count ?? 0; return rev > 0 ? <span className="rev-badge">{rev}× {(r.edit_count ?? 0) > 0 && <i className="rev-e">{r.edit_count}E</i>}{(r.extension_count ?? 0) > 0 && <i className="rev-x">{r.extension_count}+</i>}</span> : <span className="faint">—</span>; },
-      agg: (rs) => { const tot = rs.reduce((s, r) => s + (r.revision_count ?? 0), 0); const ch = rs.filter((r) => (r.revision_count ?? 0) > 0).length; return <span title={`${ch} Artikel geändert`}>{tot}× ({Math.round((ch / rs.length) * 100)}%)</span>; } },
     { key: "lang", label: "Sprache", width: 80, value: (r) => r.lang_detected || r.country?.toLowerCase() || "—", render: (r) => <span className="faint" style={{ textTransform: "uppercase", fontSize: 11 }}>{r.lang_detected || r.country?.toLowerCase() || "—"}</span> },
   ], [rowKw]);
 
@@ -178,7 +190,7 @@ export default function ArticleDashboard() {
 
         <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
         <div className="data-fade-in" key={`${page}-${rows.length}-${f.topics.join(",")}-${f.subcats.join(",")}`}>
-          <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={2000} tableId="articles" rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} />
+          <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={2000} tableId="articles" rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} onSortChange={setTableSort} />
         </div>
 
         <div className="pager">
