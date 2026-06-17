@@ -1084,7 +1084,7 @@ async function analyzeBacklog() {
   {
     const rescanBudget = Math.min(RESCAN_CAP, MAX_PAGES - queue.length);
     if (rescanBudget > 0) {
-      const rdays = Number(process.env.RESCAN_DAYS ?? 4);
+      const rdays = Number(process.env.RESCAN_DAYS ?? 1);
       const since = new Date(Date.now() - rdays * 86400000).toISOString();
       const inQueue = new Set(queue.map((q) => q.url));
       const { data: recent } = await sb.from("articles")
