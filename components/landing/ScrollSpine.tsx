@@ -3,79 +3,49 @@
 import { useEffect, useRef } from "react";
 
 /* ----------------------------------------------------------------------------
-   ScrollSpine — eine mitlaufende Linie, die sich von Sektion zu Sektion thematisch
-   verändert (gerade, wellig, zackig …), entlang des Scrolls gezeichnet wird und einen
-   glühenden Kopf voranschickt. Selbstständig: misst die echten Sektionspositionen,
-   reagiert auf Resize/Höhenänderung (z. B. Anatomy-Pin), respektiert reduced-motion.
+   ScrollSpine — eine mitlaufende Linie, die quer über die Seite WANDERT (links ↔
+   Mitte ↔ rechts), pro Sektion ihren Charakter wechselt (gerade, wellig, zackig,
+   Treppe, Feder …) und sich entlang des Scrolls zeichnet. Bewusst nicht zu brav:
+   driftende Mittellinie + Charakter-Textur mit Hüllkurve und etwas Jitter, weich
+   geglättet. Misst echte Sektionspositionen, reagiert auf Layout-Änderungen,
+   respektiert prefers-reduced-motion.
 ---------------------------------------------------------------------------- */
 
 type Mood = "straight" | "wave" | "zig" | "step" | "spring" | "ease";
 
-// Reihenfolge = Reihenfolge der Sektionen im DOM. Farbe passend zur Sektions-Stimmung.
-const SECTIONS: { sel: string; mood: Mood; color: string; amp: number }[] = [
-  { sel: ".mg-hero",   mood: "ease",     color: "#9fb2ff", amp: 0.55 }, // ruhiger Einstieg
-  { sel: "#funktionen", mood: "wave",    color: "#6e8aff", amp: 1.0 },  // fließend, erkundend
-  { sel: "#anatomie",  mood: "zig",      color: "#ff6f61", amp: 1.05 }, // Edit/Diff — scharf, rot
-  { sel: ".mg-stats",  mood: "step",     color: "#9fb2ff", amp: 0.9 },  // Kennzahlen — Stufen
-  { sel: "#methodik",  mood: "spring",   color: "#43d9a3", amp: 0.7 },  // Prozess — Feder, grün
-  { sel: "#abdeckung", mood: "wave",     color: "#6e8aff", amp: 1.0 },  // sprachübergreifend
-  { sel: "#transparenz", mood: "straight", color: "#9fb2ff", amp: 0 }, // nichts versteckt
-  { sel: ".mg-final",  mood: "ease",     color: "#43d9a3", amp: 0.5 },  // Auflösung
+// Reihenfolge = DOM-Reihenfolge. lane = horizontale Spur (0 = links … 1 = rechts) im
+// Content-Band; amp = Stärke der Charakter-Textur; color = Stimmung der Sektion.
+const SECTIONS: { sel: string; mood: Mood; color: string; lane: number; amp: number }[] = [
+  { sel: ".mg-hero",     mood: "ease",   color: "#9fb2ff", lane: 0.16, amp: 0.55 }, // ruhiger Einstieg, links
+  { sel: "#funktionen",  mood: "wave",   color: "#6e8aff", lane: 0.52, amp: 1.0 },  // fließend, mittig
+  { sel: "#anatomie",    mood: "zig",    color: "#ff6f61", lane: 0.78, amp: 1.15 }, // Diff/Herzschlag, rechts, rot
+  { sel: ".mg-stats",    mood: "step",   color: "#9fb2ff", lane: 0.40, amp: 0.9 },  // Kennzahlen — Stufen
+  { sel: "#methodik",    mood: "spring", color: "#43d9a3", lane: 0.22, amp: 0.85 }, // Prozess — Feder, links, grün
+  { sel: "#abdeckung",   mood: "wave",   color: "#6e8aff", lane: 0.66, amp: 1.0 },  // sprachübergreifend, rechts der Mitte
+  { sel: "#transparenz", mood: "straight", color: "#9fb2ff", lane: 0.48, amp: 0.25 }, // nichts versteckt — fast gerade
+  { sel: ".mg-final",    mood: "ease",   color: "#43d9a3", lane: 0.5,  amp: 0.55 }, // Auflösung, mittig
 ];
 
 type Pt = { x: number; y: number };
 
-// Wellenform eines Segments von yStart→yEnd. Beginnt und endet IMMER bei x=baseX
-// (Offset 0 an den Rändern) → saubere, nahtlose Übergänge zwischen den Sektionen.
-function segment(mood: Mood, yStart: number, yEnd: number, baseX: number, amp: number): { pts: Pt[]; sharp: boolean } {
-  const h = yEnd - yStart;
-  if (h <= 1 || mood === "straight" || amp === 0) return { pts: [{ x: baseX, y: yStart }, { x: baseX, y: yEnd }], sharp: false };
-
-  const pts: Pt[] = [];
-  const push = (t: number, off: number) => pts.push({ x: baseX + off, y: yStart + h * t });
-
-  if (mood === "zig") {
-    // scharfes Dreieck/Zickzack (Diff-Look): Spitzen abwechselnd, eckig
-    const teeth = Math.max(3, Math.round(h / 90));
-    push(0, 0);
-    for (let i = 1; i <= teeth; i++) {
-      const t = i / (teeth + 1);
-      push(t, (i % 2 === 0 ? -1 : 1) * amp);
-    }
-    push(1, 0);
-    return { pts, sharp: true };
+// Dreieck (scharf) und weiches Rechteck — für Zickzack bzw. Treppe.
+const tri = (t: number) => (2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * t));
+function shape(mood: Mood, t: number): number {
+  switch (mood) {
+    case "wave": return Math.sin(2 * Math.PI * 1.5 * t);
+    case "spring": return Math.sin(2 * Math.PI * 3.5 * t);
+    case "zig": return tri(2 * t);
+    case "step": return Math.tanh(3.2 * Math.sin(2 * Math.PI * 2.5 * t)); // gerundete Stufen
+    case "ease": return Math.sin(Math.PI * t);
+    default: return 0; // straight
   }
-
-  if (mood === "step") {
-    // Treppe (Balken-Anmutung): horizontale + vertikale Kanten, eckig
-    const steps = Math.max(3, Math.round(h / 120));
-    push(0, 0);
-    for (let i = 0; i < steps; i++) {
-      const t0 = i / steps, t1 = (i + 1) / steps;
-      const off = (i % 2 === 0 ? 1 : -1) * amp;
-      pts.push({ x: baseX + off, y: yStart + h * t0 }); // horizontaler Sprung
-      pts.push({ x: baseX + off, y: yStart + h * t1 }); // vertikal mit
-    }
-    push(1, 0);
-    return { pts, sharp: true };
-  }
-
-  // glatte Formen: viele Stützpunkte, später als Bézier geglättet
-  const n = Math.max(10, Math.round(h / 12));
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    let off = 0;
-    if (mood === "wave") off = amp * Math.sin(t * Math.PI * 2 * 1.5);      // ~1,5 Zyklen
-    else if (mood === "spring") off = amp * Math.sin(t * Math.PI * 2 * 4); // enge Feder
-    else if (mood === "ease") off = amp * Math.sin(t * Math.PI);           // ein sanfter Bogen
-    push(t, off);
-  }
-  return { pts, sharp: false };
 }
 
-// Catmull-Rom → kubische Bézier (für die glatten Segmente)
+// Catmull-Rom → kubische Bézier: macht den ganzen Linienzug fließend (auch die
+// Zacken werden minimal gerundet → der gewünschte „nicht 100 %"-Touch).
 function smooth(pts: Pt[]): string {
-  let d = "";
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)} `;
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[i - 1] ?? pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] ?? p2;
     const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
@@ -84,6 +54,8 @@ function smooth(pts: Pt[]): string {
   }
   return d;
 }
+
+const smoothstep = (t: number) => t * t * (3 - 2 * t);
 
 export default function ScrollSpine() {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -99,46 +71,81 @@ export default function ScrollSpine() {
     if (!root) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    let len = 0;
-    let progress = 0;
-    let raf = 0;
+    let len = 0, raf = 0;
 
     const build = () => {
-      const W = root.clientWidth;
-      const H = root.scrollHeight;
+      const W = root.clientWidth, H = root.scrollHeight;
       if (!W || !H) return;
-      // Linke Bahn; Amplitude/Position skalieren mit der Breite (mobil schmal am Rand).
       const narrow = W < 720;
-      const baseX = narrow ? 22 : Math.min(132, Math.max(48, W * 0.07));
-      const ampBase = narrow ? 12 : Math.min(46, Math.max(20, W * 0.032));
 
-      // Sektionen vertikal vermessen (Mittelpunkte als Ankerpunkte).
+      // Content-Band (max 1280, zentriert) → die Linie webt sich durch den Inhalt,
+      // darf aber leicht in die Ränder ausschwingen.
+      const padX = narrow ? 16 : Math.min(64, Math.max(22, W * 0.045));
+      const cx0 = Math.max(padX, (W - 1280) / 2 + padX);
+      const cx1 = W - cx0;
+      const laneToX = (lane: number) => cx0 + lane * (cx1 - cx0);
+      const ampPx = narrow ? 13 : Math.min(58, Math.max(24, W * 0.038));
+      const driftPx = narrow ? 7 : Math.min(28, W * 0.016);
+
       const found = SECTIONS
         .map((s) => ({ ...s, el: root.querySelector<HTMLElement>(s.sel) }))
         .filter((s): s is typeof s & { el: HTMLElement } => !!s.el)
         .map((s) => {
           const r = s.el.getBoundingClientRect();
           const top = r.top + window.scrollY;
-          return { ...s, top, mid: top + r.height / 2 };
+          return { ...s, top, h: r.height, mid: top + r.height / 2 };
         });
       if (found.length < 2) return;
 
-      // Pfad zusammensetzen: von Seitenanfang über alle Sektions-Mitten bis zum Ende.
-      const anchors = [0, ...found.map((f) => f.mid), H];
-      let d = `M ${baseX.toFixed(1)} 0 `;
-      for (let i = 0; i < anchors.length - 1; i++) {
-        const mood = found[Math.min(i, found.length - 1)].mood;
-        const amp = ampBase * found[Math.min(i, found.length - 1)].amp;
-        const seg = segment(mood, anchors[i], anchors[i + 1], baseX, amp);
-        d += seg.sharp
-          ? seg.pts.slice(1).map((p) => `L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") + " "
-          : smooth(seg.pts);
-      }
+      // Mittellinie: weich interpolierte Spur (lane) über die Sektions-Mitten.
+      const anchors = [
+        { y: 0, lane: found[0].lane },
+        ...found.map((f) => ({ y: f.mid, lane: f.lane })),
+        { y: H, lane: found[found.length - 1].lane },
+      ];
+      const laneAt = (y: number) => {
+        for (let i = 0; i < anchors.length - 1; i++) {
+          if (y <= anchors[i + 1].y) {
+            const a = anchors[i], b = anchors[i + 1];
+            const t = (y - a.y) / Math.max(1, b.y - a.y);
+            return a.lane + (b.lane - a.lane) * smoothstep(Math.min(1, Math.max(0, t)));
+          }
+        }
+        return anchors[anchors.length - 1].lane;
+      };
 
-      // Farbverlauf entlang Y (userSpaceOnUse), Stops an den Sektions-Mitten.
+      // Jede Sektion „besitzt" ein vertikales Band (bis zur Mitte zur Nachbarsektion).
+      const bands = found.map((f, i) => ({
+        start: i === 0 ? 0 : (found[i - 1].mid + f.mid) / 2,
+        end: i === found.length - 1 ? H : (f.mid + found[i + 1].mid) / 2,
+        mood: f.mood, amp: f.amp, seed: i * 1.73,
+      }));
+      const bandAt = (y: number) => {
+        for (const b of bands) if (y <= b.end) return b;
+        return bands[bands.length - 1];
+      };
+
+      // Punkte abtasten: Mittellinie + globaler Drift + Charakter-Textur mit Hüllkurve.
+      const S = narrow ? 15 : 11;
+      const pts: Pt[] = [];
+      for (let y = 0; y <= H; y += S) {
+        let cx = laneToX(laneAt(y)) + driftPx * Math.sin(y * 0.0016 + 0.7);
+        const b = bandAt(y);
+        const lp = Math.min(1, Math.max(0, (y - b.start) / Math.max(1, b.end - b.start)));
+        const env = Math.sin(Math.PI * lp);                  // 0 an den Bandgrenzen → nahtlos
+        const jit = 0.82 + 0.32 * Math.sin(lp * 6.3 + b.seed); // leichte Unregelmäßigkeit
+        const off = ampPx * b.amp * env * jit * shape(b.mood, lp);
+        const x = Math.min(W - 6, Math.max(6, cx + off));
+        pts.push({ x, y });
+      }
+      if (pts.length && pts[pts.length - 1].y < H) pts.push({ x: pts[pts.length - 1].x, y: H });
+
+      const d = smooth(pts);
+
+      // Farbverlauf entlang Y, Stops an den Sektions-Mitten.
+      grad.setAttribute("gradientUnits", "userSpaceOnUse");
       grad.setAttribute("x1", "0"); grad.setAttribute("y1", "0");
       grad.setAttribute("x2", "0"); grad.setAttribute("y2", String(H));
-      grad.setAttribute("gradientUnits", "userSpaceOnUse");
       grad.replaceChildren();
       found.forEach((f) => {
         const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
@@ -155,19 +162,14 @@ export default function ScrollSpine() {
 
       len = draw.getTotalLength();
       draw.style.strokeDasharray = String(len);
-
-      if (reduced) {
-        draw.style.strokeDashoffset = "0"; // statisch komplett sichtbar
-        head.style.display = "none";
-      } else {
-        apply();
-      }
+      if (reduced) { draw.style.strokeDashoffset = "0"; head.style.display = "none"; }
+      else apply();
     };
 
     const apply = () => {
       raf = 0;
       const max = document.documentElement.scrollHeight - window.innerHeight;
-      progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      const progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
       const drawn = len * progress;
       draw.style.strokeDashoffset = String(len - drawn);
       try {
@@ -180,7 +182,6 @@ export default function ScrollSpine() {
 
     const onScroll = () => { if (!reduced && !raf) raf = requestAnimationFrame(apply); };
 
-    // Höhenänderungen (Pin-Sektion, Reveals, Fonts) → Pfad neu vermessen, debounced.
     let rebuildT = 0;
     const scheduleBuild = () => { clearTimeout(rebuildT); rebuildT = window.setTimeout(build, 120); };
     const ro = new ResizeObserver(scheduleBuild);
