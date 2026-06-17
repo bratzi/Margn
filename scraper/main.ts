@@ -1075,11 +1075,38 @@ async function analyzeBacklog() {
   const queue: { url: string; sid: number }[] = [];
   for (const [sid, urls] of bySrc) for (const url of urls) queue.push({ url, sid });
 
-  // Wasserstand-Auffüllung: ist nach der fairen 250/Quelle-Runde noch Budget frei
-  // (weil manche Quellen weniger Rückstand haben), mit weiteren NOCH NICHT
-  // gerenderten Artikeln auffüllen — neueste zuerst, quellenübergreifend. So
-  // leeren sich große Rückstände (Le Monde/Bild) schneller, statt Budget brachliegen
-  // zu lassen. Gleiche Minuten (Cap bleibt MAX_PAGES), nur sinnvoller genutzt.
+  // RE-SCANS ZUERST reservieren (stille Edits — das Kernfeature): bevor der
+  // Wasserstand-Topf aufgefüllt wird, bekommt der Re-Scan-Pool garantiert sein
+  // Minimum. Sonst würde ein großer Rückstand (z.B. Le Monde-Archiv) den gesamten
+  // Topf schlucken und stille Edits wären nie sichtbar.
+  const RESCAN_CAP = Math.max(50, Math.ceil(MAX_PAGES * 0.1)); // mind. 10 %
+  const newCount0 = queue.length;
+  {
+    const rescanBudget = Math.min(RESCAN_CAP, MAX_PAGES - queue.length);
+    if (rescanBudget > 0) {
+      const rdays = Number(process.env.RESCAN_DAYS ?? 4);
+      const since = new Date(Date.now() - rdays * 86400000).toISOString();
+      const inQueue = new Set(queue.map((q) => q.url));
+      const { data: recent } = await sb.from("articles")
+        .select("url,source_id,last_seen")
+        .in("source_id", activeIds)
+        .not("title", "is", null)
+        .or(`published_at.gte.${since},discovered_at.gte.${since}`)
+        .order("last_seen", { ascending: true })
+        .limit(rescanBudget + 200);
+      for (const r of (recent ?? []) as any[]) {
+        if (queue.length - newCount0 >= rescanBudget) break;
+        if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); }
+      }
+    }
+    console.log(`Re-Scan reserviert: ${queue.length - newCount0} jüngere Artikel (< ${Number(process.env.RESCAN_DAYS ?? 4)} Tage, ältester Scan zuerst, cap ${RESCAN_CAP})`);
+  }
+
+  // Wasserstand-Auffüllung: nach Re-Scan-Reserve verbleibendes Budget mit NOCH NICHT
+  // gerenderten Artikeln füllen — neueste zuerst, quellenübergreifend. So leeren sich
+  // große Rückstände (Le Monde/Bild) schneller, statt Budget brachliegen zu lassen.
+  // Gleiche Minuten (Cap bleibt MAX_PAGES), nur sinnvoller genutzt.
+  const newCount = queue.length;
   if (queue.length < MAX_PAGES) {
     const inQ = new Set(queue.map((q) => q.url));
     for (const p of discovered) { // bereits id-desc (neueste zuerst)
@@ -1087,29 +1114,7 @@ async function analyzeBacklog() {
       if (done.has(p.url) || inQ.has(p.url)) continue;
       queue.push({ url: p.url, sid: p.source_id }); inQ.add(p.url);
     }
-  }
-
-  // Erst danach Restbudget mit RE-SCANS füllen (stille Edits): die am LÄNGSTEN
-  // nicht geprüften jüngeren Artikel erneut rendern. Greift nur, wenn KEIN
-  // offener Rückstand mehr da ist (Budget sonst schon mit neuen Artikeln voll).
-  const newCount = queue.length;
-  const remaining = MAX_PAGES - queue.length;
-  if (remaining > 0) {
-    const days = Number(process.env.RESCAN_DAYS ?? 4);
-    const since = new Date(Date.now() - days * 86400000).toISOString();
-    const inQueue = new Set(queue.map((q) => q.url));
-    const { data: recent } = await sb.from("articles")
-      .select("url,source_id,last_seen")
-      .in("source_id", activeIds)
-      .not("title", "is", null)
-      .or(`published_at.gte.${since},discovered_at.gte.${since}`)
-      .order("last_seen", { ascending: true })
-      .limit(remaining + 200);
-    for (const r of (recent ?? []) as any[]) {
-      if (queue.length >= MAX_PAGES) break;
-      if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); }
-    }
-    console.log(`Re-Scan aufgefüllt: ${queue.length - newCount} jüngere Artikel (< ${days} Tage, ältester Scan zuerst)`);
+    console.log(`Wasserstand aufgefüllt: ${queue.length - newCount} weitere neue Artikel`);
   }
 
   const browser = await chromium.launch();

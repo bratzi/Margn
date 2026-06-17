@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFilters } from "@/components/FilterProvider";
+import { useFilters, WINDOW_OPTS } from "@/components/FilterProvider";
 import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
 export const PUB_COLORS = ["#3D63DD", "#1A7F55", "#CF4035", "#B0790C", "#0C8F86", "#8B5CF6", "#D6457A", "#0E7490"];
@@ -12,7 +12,7 @@ type HoverDay = { idx: number; clientX: number; clientY: number };
 
 export default function TimeRangeFilter() {
   const f = useFilters();
-  const { sources, activeArr, days, rangeIdx, setRangeIdx, trfOpen, setTrfOpen } = f;
+  const { sources, activeArr, days, rangeIdx, setRangeIdx, trfOpen, setTrfOpen, windowDays, setWindowDays } = f;
   const N = days.length;
   const [h, setH] = useState(168);
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -127,6 +127,11 @@ export default function TimeRangeFilter() {
       <div className="trf-resize" onPointerDown={(e) => start("resize", e)} title="Höhe ziehen"><span /></div>
       <div className="trf-head">
         <div className="trf-title">Veröffentlichungs-Zeitraum <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
+        <div className="seg seg-xs trf-presets">
+          {WINDOW_OPTS.map((n) => (
+            <button key={n} className={windowDays === n ? "on" : ""} onClick={() => setWindowDays(n)} title={`Letzte ${n} Tage`}>{n}T</button>
+          ))}
+        </div>
         <div className="trf-legend">{series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}</div>
         {(live.from > 0 || live.to < N - 1) && <button className="trf-reset" onClick={() => { setLive({ from: 0, to: N - 1 }); setRangeIdx({ from: 0, to: N - 1 }); }}>Zurücksetzen</button>}
         <button className="rail-toggle" onClick={() => setTrfOpen(false)} title="Einklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg></button>
@@ -189,7 +194,7 @@ export default function TimeRangeFilter() {
         <div className="trf-h" style={{ left: `${edgeLeft(live.from)}%` }} onPointerDown={(e) => start("from", e)}><span /></div>
         <div className="trf-h" style={{ left: `${edgeRight(live.to)}%` }} onPointerDown={(e) => start("to", e)}><span /></div>
       </div>
-      <div className="trf-axis">{[0, 15, 30, 45, 59].map((i) => <span key={i} style={{ left: `${pctOf(i)}%`, transform: i === 0 ? "none" : i === 59 ? "translateX(-100%)" : "translateX(-50%)" }}>{fmtDay(days[i])}</span>)}</div>
+      <div className="trf-axis">{[0, Math.round(N / 4), Math.round(N / 2), Math.round(3 * N / 4), N - 1].map((i, pos) => <span key={i} style={{ left: `${pctOf(i)}%`, transform: pos === 0 ? "none" : pos === 4 ? "translateX(-100%)" : "translateX(-50%)" }}>{fmtDay(days[i])}</span>)}</div>
     </div>
   );
 }

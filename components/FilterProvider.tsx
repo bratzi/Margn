@@ -67,11 +67,13 @@ function urlRubric(url: string): { raw: string; label: string } | null {
   return { raw: last2.join("/"), label: last2.map(pretty).join(" · ") };
 }
 
-function makeDays(): string[] {
+const WINDOW_OPTS = [7, 14, 30, 60, 90] as const;
+function makeDays(n: number): string[] {
   const out: string[] = []; const d = new Date(); d.setUTCHours(0, 0, 0, 0);
-  for (let i = 59; i >= 0; i--) { const x = new Date(d); x.setUTCDate(x.getUTCDate() - i); out.push(x.toISOString().slice(0, 10)); }
+  for (let i = n - 1; i >= 0; i--) { const x = new Date(d); x.setUTCDate(x.getUTCDate() - i); out.push(x.toISOString().slice(0, 10)); }
   return out;
 }
+export { WINDOW_OPTS };
 
 type Ctx = {
   sources: Src[]; active: Set<number>; activeArr: number[];
@@ -88,6 +90,8 @@ type Ctx = {
   changed: string; setChanged: (v: string) => void;
   // Artikel-Tiefe nach Wortzahl (kurz < 300, mittel 300–900, lang > 900)
   depth: string; setDepth: (v: string) => void;
+  // Zeitfenster-Breite (Tage) — per Preset wählbar (7/14/30/60/90)
+  windowDays: number; setWindowDays: (n: number) => void;
   // Alle Filter auf Ausgangszustand
   resetAll: () => void;
   topicOpts: Opt[]; keywordOpts: Opt[]; subOpts: SubOpt[];
@@ -131,18 +135,25 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [lang, setLang] = useState("all");
   const [changed, setChanged] = useState("all");
   const [depth, setDepth] = useState("all");
+  const [windowDays, _setWindowDays] = useState(60);
+  // setWindowDays: Fensterbreite wechseln und Slider + Pinpoint sofort zurücksetzen.
+  const setWindowDays = (n: number) => { _setWindowDays(n); setRangeIdx({ from: 0, to: n - 1 }); setPinpoint(null); };
   const [topicOpts, setTopicOpts] = useState<Opt[]>([]);
   const [keywordOpts, setKeywordOpts] = useState<Opt[]>([]);
   const [ready, setReady] = useState(false);
 
-  const days = useMemo(makeDays, []);
+  const days = useMemo(() => makeDays(windowDays), [windowDays]);
   const [trfOpen, setTrfOpen] = useState(true);
   const [rangeIdx, setRangeIdx] = useState<{ from: number; to: number }>({ from: 0, to: 59 });
   const [pinpoint, setPinpoint] = useState<Pin | null>(null);
-  const full = rangeIdx.from === 0 && rangeIdx.to === days.length - 1;
+  // Slider-Indizes an die tatsächliche days-Länge klemmen (Sicherheitsnetz bei
+  // localStorage-Mismatch zwischen verschiedenen Fensterbreiten).
+  const safeFrom = Math.min(rangeIdx.from, days.length - 1);
+  const safeTo = Math.min(rangeIdx.to, days.length - 1);
   // Pinpoint (Chart-Klick) hat Vorrang über den Tages-Range für die Tabellen-Abfrage.
-  const rangeFrom = pinpoint ? pinpoint.from : (full ? null : days[rangeIdx.from] + "T00:00:00Z");
-  const rangeTo = pinpoint ? pinpoint.to : (full ? null : days[rangeIdx.to] + "T23:59:59Z");
+  // Rechtes Ende am Fensterrand → kein rangeTo (keine künstliche Zukunfts-Abschneidung).
+  const rangeFrom = pinpoint ? pinpoint.from : days[safeFrom] + "T00:00:00Z";
+  const rangeTo = pinpoint ? pinpoint.to : (safeTo === days.length - 1 ? null : days[safeTo] + "T23:59:59Z");
 
   const savedActiveRef = useRef<number[] | null>(null);
 
@@ -168,7 +179,14 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (f.changed) setChanged(f.changed);
       if (f.depth) setDepth(f.depth);
       if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
-      if (f.rangeIdx && typeof f.rangeIdx.from === "number") setRangeIdx(f.rangeIdx);
+      // windowDays zuerst setzen (nicht setWindowDays, um rangeIdx nicht automatisch zu resetten),
+      // dann rangeIdx manuell klemmen — so bleibt ein gespeicherter Teilbereich erhalten.
+      const savedW = (WINDOW_OPTS as readonly number[]).includes(f.windowDays) ? f.windowDays as number : 60;
+      _setWindowDays(savedW);
+      if (f.rangeIdx && typeof f.rangeIdx.from === "number") {
+        const maxIdx = savedW - 1;
+        setRangeIdx({ from: Math.min(f.rangeIdx.from, maxIdx), to: Math.min(f.rangeIdx.to ?? maxIdx, maxIdx) });
+      }
       if (Array.isArray(f.activeIds)) savedActiveRef.current = f.activeIds;
     } catch {}
   }, []);
@@ -189,10 +207,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!sources.length) return;
     try {
       localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx,
+        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays,
       }));
     } catch {}
-  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, sources.length]);
+  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, sources.length]);
 
   const nn = (v: string) => (v === "all" ? null : v);
 
@@ -340,7 +358,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     setStatus("all"); setPaywall("all"); setAtype("all"); setAuthor("all");
     setTopics([]); setSubcats([]); setKeyword("all"); setLang("all");
     setChanged("all"); setDepth("all"); setPinpoint(null);
-    setRangeIdx({ from: 0, to: days.length - 1 });
+    _setWindowDays(60); setRangeIdx({ from: 0, to: 59 });
     setActive(new Set(sources.map((s) => s.id)));
   };
 
@@ -351,7 +369,8 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     changed, setChanged, depth, setDepth, resetAll,
     topicOpts, keywordOpts, subOpts, catTree,
     corpus, corpusReady, kwIds, kwIdSet, subPats,
-    days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen, ready,
+    days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen,
+    windowDays, setWindowDays, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
 }
