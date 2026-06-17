@@ -1087,19 +1087,26 @@ async function analyzeBacklog() {
       const rdays = Number(process.env.RESCAN_DAYS ?? 4);
       const since = new Date(Date.now() - rdays * 86400000).toISOString();
       const inQueue = new Set(queue.map((q) => q.url));
-      const { data: recent } = await sb.from("articles")
+      // WICHTIG: Spalte heißt in der Basistabelle `first_seen` (nicht `discovered_at` —
+      // das ist nur ein View-Alias in page_overview). Mit `discovered_at` warf diese
+      // Query JEDEN Lauf einen 400 → recent=undefined → 0 Re-Scans, stiller Totalausfall.
+      // `ältester last_seen zuerst` (ASC): re-scannt das Überfälligste zuerst → die
+      // Morgens-Artikel sind abends die ältesten Scans und werden so re-gescannt; nach
+      // dem Scan rückt ihr last_seen nach hinten → die Menge zykelt sauber durch.
+      const { data: recent, error: rescanErr } = await sb.from("articles")
         .select("url,source_id,last_seen")
         .in("source_id", activeIds)
         .not("title", "is", null)
-        .or(`published_at.gte.${since},discovered_at.gte.${since}`)
-        .order("last_seen", { ascending: false })
+        .or(`published_at.gte.${since},first_seen.gte.${since}`)
+        .order("last_seen", { ascending: true })
         .limit(rescanBudget + 200);
+      if (rescanErr) console.error("RE-SCAN-QUERY-FEHLER:", rescanErr.message);
       for (const r of (recent ?? []) as any[]) {
         if (queue.length - newCount0 >= rescanBudget) break;
         if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); }
       }
     }
-    console.log(`Re-Scan reserviert: ${queue.length - newCount0} jüngere Artikel (< ${Number(process.env.RESCAN_DAYS ?? 4)} Tage, neuester Scan zuerst, cap ${RESCAN_CAP})`);
+    console.log(`Re-Scan reserviert: ${queue.length - newCount0} jüngere Artikel (< ${Number(process.env.RESCAN_DAYS ?? 4)} Tage, ältester Scan zuerst, cap ${RESCAN_CAP})`);
   }
 
   // Wasserstand-Auffüllung: nach Re-Scan-Reserve verbleibendes Budget mit NOCH NICHT
