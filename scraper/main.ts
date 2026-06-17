@@ -1084,7 +1084,7 @@ async function analyzeBacklog() {
   {
     const rescanBudget = Math.min(RESCAN_CAP, MAX_PAGES - queue.length);
     if (rescanBudget > 0) {
-      const rdays = Number(process.env.RESCAN_DAYS ?? 1);
+      const rdays = Number(process.env.RESCAN_DAYS ?? 4);
       const since = new Date(Date.now() - rdays * 86400000).toISOString();
       const inQueue = new Set(queue.map((q) => q.url));
       const { data: recent } = await sb.from("articles")
@@ -1092,14 +1092,14 @@ async function analyzeBacklog() {
         .in("source_id", activeIds)
         .not("title", "is", null)
         .or(`published_at.gte.${since},discovered_at.gte.${since}`)
-        .order("last_seen", { ascending: true })
+        .order("last_seen", { ascending: false })
         .limit(rescanBudget + 200);
       for (const r of (recent ?? []) as any[]) {
         if (queue.length - newCount0 >= rescanBudget) break;
         if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); }
       }
     }
-    console.log(`Re-Scan reserviert: ${queue.length - newCount0} jüngere Artikel (< ${Number(process.env.RESCAN_DAYS ?? 4)} Tage, ältester Scan zuerst, cap ${RESCAN_CAP})`);
+    console.log(`Re-Scan reserviert: ${queue.length - newCount0} jüngere Artikel (< ${Number(process.env.RESCAN_DAYS ?? 4)} Tage, neuester Scan zuerst, cap ${RESCAN_CAP})`);
   }
 
   // Wasserstand-Auffüllung: nach Re-Scan-Reserve verbleibendes Budget mit NOCH NICHT
