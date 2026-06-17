@@ -68,6 +68,9 @@ export default function ArticleDashboard() {
     // das exakte Spiegelbild des Prädikats, mit dem die Charts zählen.
     let q = supabase.from("page_overview").select("id,article_id,url,title,outlet,country,analyzed,paywalled,ptype,topic,author_status,discovered_at,last_seen,published_at,word_count,reading_min,revision_count,edit_count,extension_count,lang_detected,scan_count", { count: "exact" }).in("source_id", srcFilter);
     q = applyServerFilters(q, snapshotOf(f as any), f.subPats, f.kwIds);
+    // Pinpoint aus dem Themen-Chart: zusätzlich auf genau dieses Thema einschränken
+    // (analog zu sourceId — wirkt nur auf die Tabelle, nicht auf die Charts).
+    if (f.pinpoint?.topic != null) q = q.eq("topic", f.pinpoint.topic);
     const pinLimit = f.pinpoint?.limit;
     const sortCol = tableSort ? (SERVER_SORT[tableSort.key] ?? "discovered_at") : "discovered_at";
     const sortAsc = tableSort ? tableSort.dir === "asc" : false;
@@ -75,10 +78,10 @@ export default function ArticleDashboard() {
       ? await q.order("published_at", { ascending: true }).limit(pinLimit)
       : await q.order(sortCol, { ascending: sortAsc }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.pinpoint?.limit, f.kwIds, f.keyword, f.subPats.join("|"), page, tableSort?.key, tableSort?.dir]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.pinpoint?.topic, f.pinpoint?.limit, f.kwIds, f.keyword, f.subPats.join("|"), page, tableSort?.key, tableSort?.dir]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, tableSort?.key, tableSort?.dir]);
+  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.pinpoint?.sourceId, f.pinpoint?.topic, tableSort?.key, tableSort?.dir]);
 
   useEffect(() => {
     const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];

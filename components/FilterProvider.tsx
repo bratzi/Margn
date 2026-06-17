@@ -111,7 +111,7 @@ type Ctx = {
   ready: boolean;
 };
 
-export type Pin = { from: string; to: string; sourceId?: number; label: string; limit?: number };
+export type Pin = { from: string; to: string; sourceId?: number; topic?: string; label: string; limit?: number };
 
 const FilterContext = createContext<Ctx | null>(null);
 export const useFilters = () => useContext(FilterContext)!;

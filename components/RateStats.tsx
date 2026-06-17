@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFilters } from "@/components/FilterProvider";
-import { PUB_COLORS } from "@/components/TimeRangeFilter";
+import { PUB_COLORS, TOPIC_COLORS } from "@/components/TimeRangeFilter";
 import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
+import { topicLabel } from "@/lib/topics";
 
 type Unit = "minute" | "hour" | "day" | "week";
+type ChartMode = "publishers" | "topics";
+// Eine Reihe = ein Verleger ODER ein Thema. sid/topic sagt, worauf ein Dot-Klick pinnt.
+type Series = { key: string; color: string; label: string; vals: number[]; sid?: number; topic?: string };
 const short = (n: string) => n.replace(" Online", "");
 const VW = 1000;
 const PAD_L = 44, PAD_B = 24, PAD_T = 18, PAD_R = 12;
@@ -22,13 +26,14 @@ export default function RateStats() {
   const f = useFilters();
   const { sources, activeArr } = f;
   const [manual, setManual] = useState<"auto" | Unit>("auto");
+  const [chartMode, setChartMode] = useState<ChartMode>("publishers");
   const [timeFormat, setTimeFormat] = useState<"abs" | "rel">("rel");
   const [chartH, setChartH] = useState(220);
   const [resizing, setResizing] = useState(false);
   const VH = chartH;
   const CH = VH - PAD_T - PAD_B;
   // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
-  const [hoverDot, setHoverDot] = useState<{ sid: number; idx: number; x: number; y: number } | null>(null);
+  const [hoverDot, setHoverDot] = useState<{ key: string; idx: number; x: number; y: number } | null>(null);
   const [containerW, setContainerW] = useState(0);
   // dens = Pixel pro Bucket (Stauchen ↔ Strecken). null = automatisch an Containerbreite anpassen.
   const [dens, setDens] = useState<number | null>(null);
@@ -87,7 +92,6 @@ export default function RateStats() {
   useEffect(() => { setDens(null); setAutoUnitOverride(null); setHoverDot(null); }, [manual, fromIso, toIso]);
 
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
-  const nameById = useMemo(() => new Map(sources.map((s) => [s.id, short(s.name)])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
   // Bucketing in LOKALER Zeit des Endnutzers (nicht UTC) — sonst erscheint ein um 06:00
@@ -122,11 +126,37 @@ export default function RateStats() {
   // Zählung direkt aus dem gemeinsamen Corpus — gleiches Prädikat wie die Tabelle,
   // Zeitfenster ist der gewählte Zeitstrahl-Bereich, Bucketing über die EFFEKTIVE Zeit
   // (published_at, sonst discovered_at — vorher fielen undatierte Artikel ganz raus).
-  const { series, maxVal, total } = useMemo(() => {
+  const { series, total } = useMemo(() => {
     const snap = { ...snapshotOf(f as any), rangeFrom: fromIso, rangeTo: toIso };
     const match = makeMatcher(snap, f.subPats, f.kwIdSet);
-    const map = new Map<number, Map<string, number>>();
     let tot = 0;
+
+    if (chartMode === "topics") {
+      // Nach Thema gruppieren statt nach Quelle; Top-10-Themen farbkodiert.
+      const map = new Map<string, Map<string, number>>();
+      for (const r of f.corpus) {
+        if (!act.has(r.source_id)) continue;
+        if (!match(r)) continue;
+        const t = effTime(r);
+        if (!t) continue;
+        const k = truncTo(t, unit).toISOString();
+        const topic = r.topic ?? "sonstiges";
+        if (!map.has(topic)) map.set(topic, new Map());
+        const m = map.get(topic)!;
+        m.set(k, (m.get(k) ?? 0) + 1);
+        tot++;
+      }
+      const ser: Series[] = [...map.entries()]
+        .map(([topic, m]) => ({
+          key: topic, topic, color: TOPIC_COLORS[topic] ?? "#AAAAAA", label: topicLabel(topic),
+          vals: buckets.map((b) => m.get(b) ?? 0),
+        }))
+        .sort((a, b) => b.vals.reduce((s, v) => s + v, 0) - a.vals.reduce((s, v) => s + v, 0))
+        .slice(0, 10);
+      return { series: ser, total: tot };
+    }
+
+    const map = new Map<number, Map<string, number>>();
     for (const r of f.corpus) {
       if (!act.has(r.source_id)) continue;
       if (!match(r)) continue;
@@ -138,13 +168,12 @@ export default function RateStats() {
       m.set(k, (m.get(k) ?? 0) + 1);
       tot++;
     }
-    const ser = sources.filter((s) => act.has(s.id)).map((s) => ({
-      id: s.id, color: colorById.get(s.id)!,
+    const ser: Series[] = sources.filter((s) => act.has(s.id)).map((s) => ({
+      key: String(s.id), sid: s.id, color: colorById.get(s.id)!, label: short(s.name),
       vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0),
     }));
-    const mx = Math.max(1, ...ser.flatMap((s) => s.vals));
-    return { series: ser, maxVal: mx, total: tot };
-  }, [f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso,
+    return { series: ser, total: tot };
+  }, [chartMode, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso,
       f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
       f.subPats.join("|"), f.kwIdSet]);
 
@@ -233,8 +262,9 @@ export default function RateStats() {
 
   const unitLabel = unit === "minute" ? "Minuten" : unit === "hour" ? "Stunden" : unit === "day" ? "Tage" : "Kalenderwochen";
 
-  // Klick auf einen Dot → Tabelle exakt auf dieses Bucket-Zeitfenster + diese Quelle filtern.
-  const pinDot = (sid: number, idx: number) => {
+  // Klick auf einen Dot → Tabelle exakt auf dieses Bucket-Zeitfenster + diese Reihe
+  // (Verleger ODER Thema, je nach Chart-Modus) filtern.
+  const pinDot = (s: Series, idx: number) => {
     const start = new Date(buckets[idx]);
     const end = new Date(start);
     if (unit === "minute") end.setUTCMinutes(end.getUTCMinutes() + 1);
@@ -243,8 +273,10 @@ export default function RateStats() {
     else end.setUTCDate(end.getUTCDate() + 7);
     end.setUTCSeconds(end.getUTCSeconds() - 1); // inklusives Ende
     f.setPinpoint({
-      from: start.toISOString(), to: end.toISOString(), sourceId: sid,
-      label: `${nameById.get(sid)} · ${fmtFull(buckets[idx])}`,
+      from: start.toISOString(), to: end.toISOString(),
+      ...(s.sid != null ? { sourceId: s.sid } : {}),
+      ...(s.topic != null ? { topic: s.topic } : {}),
+      label: `${s.label} · ${fmtFull(buckets[idx])}`,
       ...(timeFormat === "abs" ? { limit: 1 } : {}),
     });
     // sanft zur Tabelle scrollen, damit die Wirkung sichtbar ist
@@ -291,14 +323,14 @@ export default function RateStats() {
     return ticks;
   }, [displayMaxVal]);
 
-  // Originale (nicht-kumulative) Werte pro Quelle — für Dot-Sichtbarkeit im abs-Modus.
-  const origById = useMemo(() => new Map(series.map((s) => [s.id, s.vals])), [series]);
+  // Originale (nicht-kumulative) Werte pro Reihe — für Dot-Sichtbarkeit im abs-Modus.
+  const origById = useMemo(() => new Map(series.map((s) => [s.key, s.vals])), [series]);
 
   const hoverInfo = useMemo(() => {
     if (!hoverDot) return null;
-    const s = displaySeries.find((x) => x.id === hoverDot.sid);
+    const s = displaySeries.find((x) => x.key === hoverDot.key);
     if (!s) return null;
-    return { name: nameById.get(s.id)!, color: s.color, val: s.vals[hoverDot.idx], when: fmtFull(buckets[hoverDot.idx]) };
+    return { name: s.label, color: s.color, val: s.vals[hoverDot.idx], when: fmtFull(buckets[hoverDot.idx]) };
   }, [hoverDot, displaySeries, buckets, timeFormat]);
 
   // Mausrad: kontrolliert in beide Richtungen stauchen/strecken.
@@ -392,7 +424,11 @@ export default function RateStats() {
       <h2 className="section-h" style={{ alignItems: "center", flexWrap: "wrap" }}>
         Publikationen über Zeit
         <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span>
-        <div className="seg" style={{ marginLeft: "auto" }}>
+        <div className="seg seg-xs" style={{ marginLeft: "auto" }}>
+          <button className={chartMode === "publishers" ? "on" : ""} onClick={() => setChartMode("publishers")} title="Linien je Verleger">Verleger</button>
+          <button className={chartMode === "topics" ? "on" : ""} onClick={() => setChartMode("topics")} title="Linien je Thema (Top 10)">Themen</button>
+        </div>
+        <div className="seg" style={{ marginLeft: 6 }}>
           <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")} title="Pro Zeiteinheit (relative Häufigkeit)">Rel.</button>
           <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")} title="Kumuliert (absolut aufsteigend)">Abs.</button>
           <div style={{ width: 1, background: "var(--line)", margin: "0 4px" }} />
@@ -411,7 +447,7 @@ export default function RateStats() {
         ) : (
           <>
             <div className="rate-legend">
-              {series.map((s) => <span key={s.id}><i style={{ background: s.color }} />{nameById.get(s.id)}</span>)}
+              {series.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}
               <span className="rate-hint">Mausrad: stauchen / strecken{stretched ? " · ziehen verschiebt" : ""}</span>
               {zoomMod && <button className="rate-zoomreset" onClick={resetZoom} title="Ansicht zurücksetzen">⤢ zurücksetzen</button>}
               <span style={{ marginLeft: zoomMod ? 0 : "auto", color: "var(--faint)" }}>
@@ -473,28 +509,28 @@ export default function RateStats() {
                   stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
 
                 {displaySeries.map((s) => (
-                  <path key={`a${s.id}`} d={areaPath(s.vals)} fill={s.color} opacity={0.12} />
+                  <path key={`a${s.key}`} d={areaPath(s.vals)} fill={s.color} opacity={0.12} />
                 ))}
                 {displaySeries.map((s) => (
-                  <path key={`l${s.id}`} d={smoothPath(s.vals)} fill="none"
+                  <path key={`l${s.key}`} d={smoothPath(s.vals)} fill="none"
                     stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                     vectorEffect="non-scaling-stroke" />
                 ))}
 
                 {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot */}
                 {showDots && displaySeries.map((s) => s.vals.map((v, i) => {
-                  if ((origById.get(s.id)?.[i] ?? 0) <= 0) return null;
-                  const isHover = hoverDot?.sid === s.id && hoverDot?.idx === i;
+                  if ((origById.get(s.key)?.[i] ?? 0) <= 0) return null;
+                  const isHover = hoverDot?.key === s.key && hoverDot?.idx === i;
                   return (
-                    <g key={`${s.id}-${i}`}>
+                    <g key={`${s.key}-${i}`}>
                       <circle cx={X(i)} cy={Y(v)} r="4" fill={s.color} className="rate-pulse" style={{ ["--c" as any]: s.color }} />
                       <circle cx={X(i)} cy={Y(v)} r={isHover ? 5.5 : 3.4} fill={s.color}
                         stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
                         className="rate-dot" />
                       <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: "pointer" }}
-                        onMouseEnter={() => !panRef.current && setHoverDot({ sid: s.id, idx: i, x: X(i), y: Y(v) })}
-                        onMouseLeave={() => setHoverDot((h) => (h?.sid === s.id && h?.idx === i ? null : h))}
-                        onClick={() => { if (!didPanRef.current) pinDot(s.id, i); }} />
+                        onMouseEnter={() => !panRef.current && setHoverDot({ key: s.key, idx: i, x: X(i), y: Y(v) })}
+                        onMouseLeave={() => setHoverDot((h) => (h?.key === s.key && h?.idx === i ? null : h))}
+                        onClick={() => { if (!didPanRef.current) pinDot(s, i); }} />
                     </g>
                   );
                 }))}
