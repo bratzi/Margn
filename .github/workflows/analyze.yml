@@ -10,9 +10,12 @@ on:
   # Zweiter Cron = structure (wöchentlich): Rubriken/Hubs kartieren, Link-Klassifizierung
   # auffrischen — gleicher Playwright-Job, aber nur 1×/Woche statt bei jedem 4h-Zyklus.
   # Welcher Cron lief, steuert die `if:`-Bedingungen der Schritte (github.event.schedule).
+  # Krumme Minute (:23) statt :00 — die volle Stunde ist GitHubs meistgebuchter
+  # Cron-Slot (Millionen Repos auf "0 * * * *"), dort wartet man am längsten und
+  # Runs werden bei Last am ehesten still verworfen. :23 ist deutlich ruhiger.
   schedule:
-    - cron: "0 */4 * * *"   # Pipeline: Entdeckung + Rendern, alle 4 h
-    - cron: "0 5 * * 0"     # structure: wöchentlich, So 05:00 UTC
+    - cron: "23 */4 * * *"  # Pipeline: Entdeckung + Rendern, alle 4 h
+    - cron: "23 5 * * 0"    # structure: wöchentlich, So 05:23 UTC
   workflow_dispatch:
     inputs:
       mode:
@@ -51,7 +54,7 @@ jobs:
       # 1) ENTDECKUNG — rein HTTP, kein Browser (~3 min). Findet neue Artikel-URLs
       #    via News-Sitemaps/Feeds/flachem HTML-Crawl und markiert sie als pages.
       - name: discover (HTTP, kein Browser)
-        if: ${{ github.event.schedule == '0 */4 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event.schedule == '23 */4 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
@@ -67,7 +70,7 @@ jobs:
 
       # 2) RENDERN — Playwright, neueste Artikel zuerst + Re-Scans (stille Edits).
       - name: render (Playwright)
-        if: ${{ github.event.schedule == '0 */4 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event.schedule == '23 */4 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
@@ -81,7 +84,7 @@ jobs:
       # 3) STRUKTUR — nur beim wöchentlichen Cron (So) bzw. manuell mit mode=structure.
       #    Kartiert Rubriken/Hubs (kein Embedding) → frische Crawl-Seeds für die Entdeckung.
       - name: structure (wöchentlich, Rubriken kartieren)
-        if: ${{ github.event.schedule == '0 5 * * 0' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'structure') }}
+        if: ${{ github.event.schedule == '23 5 * * 0' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'structure') }}
         run: npm run scrape
         working-directory: scraper
         env:
