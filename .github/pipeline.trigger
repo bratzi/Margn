@@ -7,3 +7,5 @@
 #              Fällig-Pool (809, u.a. Artikel 74876) in einem Lauf abräumen.
 # 2026-06-18 — cleanBody: Bild-/n-tv-Kopf-Chrome aus dem Body-Tracking entfernen (saubere Re-Baseline).
 # 2026-06-18 — Re-Baseline-Zyklus anstoßen (vor dem Chrome-Snapshot-Cleanup).
+# 2026-06-19 — Re-Baseline-Schutz in trackChanges: alte Baseline (Bild/n-tv) vor Vergleich
+#              identisch via cleanBody normalisieren → keine Chrome-Übergangs-Pseudo-Edits mehr.

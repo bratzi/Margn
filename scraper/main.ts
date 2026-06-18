@@ -465,7 +465,7 @@ function buildMetaEdits(prev: NonNullable<PrevState>, m: MetaNow | null): MetaEd
 // Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
 // Unterscheidet "extension" (nur hinzugefügt = valide Erweiterung, z.B. Timeline-Artikel) von
 // "edit" (entfernt/ersetzt = stille Änderung) und "mixed".
-async function trackChanges(articleId: number, prev: PrevState, newTitle: string | null, body: string, isLiveblog: boolean, prevPub: string | null = null, newPub: string | null = null, metaNow: MetaNow | null = null) {
+async function trackChanges(articleId: number, prev: PrevState, newTitle: string | null, body: string, url: string, isLiveblog: boolean, prevPub: string | null = null, newPub: string | null = null, metaNow: MetaNow | null = null) {
   const paras = normalizeParas(body);
   if (!paras.length) return;
   const fps = paras.map(fp);
@@ -481,6 +481,24 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
   }
+  // Re-Baseline-Schutz: Eine ALTE Baseline (Bild/n-tv) kann noch Verlags-Kopf-Chrome enthalten,
+  // das cleanBody inzwischen entfernt. Ein reiner Extraktions-Unterschied darf KEINEN Edit erzeugen
+  // und keinen Chrome-Text in den Diff schreiben → alte Absätze identisch normalisieren und damit
+  // vergleichen. Nur für betroffene Hosts und nur wenn sich der Inhalt überhaupt geändert hat.
+  let prevFps = (prev.para_fps ?? "").split(",").filter(Boolean);
+  let prevHash = prev.content_hash;
+  let oldParasClean: string[] | null = null;
+  let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
+  if (prevHash !== contentHash && (/(^|\.)bild\.de$/.test(host) || /(^|\.)n-tv\.de$/.test(host))) {
+    const { data: pr } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
+    const raw: string[] = Array.isArray(pr?.paras) ? (pr!.paras as string[]) : [];
+    if (raw.length) {
+      oldParasClean = normalizeParas(cleanBody(raw.join("\n\n"), url, newTitle));
+      prevFps = oldParasClean.map(fp);
+      prevHash = fp(prevFps.join("|"));
+    }
+  }
+
   const titleChanged = !!prev.title && !!newTitle && decodeEntities(prev.title) !== decodeEntities(newTitle);
   // Verlage ändern beim Bearbeiten oft (nicht immer) STILL das Veröffentlichungsdatum mit.
   // Als unsichtbare Änderung mit-tracken. ≥60 s Differenz, damit Format-/Sekundenjitter nicht zählt.
@@ -489,10 +507,18 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   // Unsichtbare Metadaten-Edits (Teaser/Bild/Ressort/Paywall/Autor) — das „zwischen den Zeilen".
   const metaEdits = buildMetaEdits(prev, metaNow);
   const metaChanged = metaEdits.length > 0;
-  if (prev.content_hash === contentHash && !titleChanged && !pubChanged && !metaChanged) return; // nichts geändert
+  if (prevHash === contentHash && !titleChanged && !pubChanged && !metaChanged) {
+    // Kein echter Unterschied (oder nur weggefallenes Chrome) → Baseline still auf die saubere
+    // Fassung nachziehen, KEINEN Snapshot schreiben.
+    if (prevHash !== prev.content_hash) {
+      await sb.from("articles").update({ content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords }).eq("id", articleId);
+      await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
+    }
+    return;
+  }
 
   // Absatz-Diff
-  const oldSet = new Set((prev.para_fps ?? "").split(",").filter(Boolean));
+  const oldSet = new Set(prevFps);
   const newSet = new Set(fps);
   const fpToText = new Map(paras.map((p, i) => [fps[i], p]));
   const addedFps = fps.filter((f) => !oldSet.has(f));
@@ -508,8 +534,15 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   }
 
   // Strukturierter Wort-Diff: geänderte Absätze (entfernt↔hinzugefügt) per Ähnlichkeit paaren.
-  const { data: paraRow } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
-  const oldParas: string[] = Array.isArray(paraRow?.paras) ? (paraRow!.paras as string[]) : [];
+  // Falls der Re-Baseline-Schutz die alte Baseline schon bereinigt geladen hat, die nutzen —
+  // sonst landet sonst entferntes Chrome in changes.old.
+  let oldParas: string[];
+  if (oldParasClean) {
+    oldParas = oldParasClean;
+  } else {
+    const { data: paraRow } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
+    oldParas = Array.isArray(paraRow?.paras) ? (paraRow!.paras as string[]) : [];
+  }
   const removedTexts = oldParas.filter((p) => !newSet.has(fp(p)));
   const changes = buildChanges(removedTexts, addedTexts);
 
@@ -614,7 +647,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   const tb = trackBody(html, url, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
-  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
+  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
   return id;
 }
 
@@ -1467,7 +1500,7 @@ async function enrichArticles(sources: Source[]) {
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
           const tb = trackBody(html, item.url, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
-          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
+          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, item.url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
