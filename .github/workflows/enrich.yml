@@ -1,11 +1,16 @@
 name: enrich
 on:
-  # BEWUSST NUR MANUELL. Kein schedule/workflow_run — enrich läuft NICHT im
-  # Gesamtprozess. Neue Artikel werden bereits im scrape-/analyze-Job inline
-  # voll angereichert. Enrich nur per Hand starten, wenn es ausdrücklich
-  # gewünscht ist ODER ein neues Feature Daten braucht, die der Altbestand
-  # noch nicht hat (gezieltes Nach-Enrichen). Hier KEINEN schedule-Block ergänzen.
+  # BEWUSST NUR AUF ZURUF (kein schedule — Altbestand-Backfill, kein Dauerlauf).
+  # Zwei Wege, einen Lauf zu starten:
+  #   1) UI: Actions → enrich → „Run workflow".
+  #   2) Commit: eine Änderung an .github/enrich.trigger anstoßen (Datum/Zeile bumpen).
+  #      So lässt sich enrich auch rein per Push auslösen (z.B. mit read-only-Token).
+  # Neue Artikel werden bereits im pipeline-Job inline voll angereichert; enrich ist
+  # nur fürs gezielte Nach-Anreichern des Altbestands. KEINEN schedule-Block ergänzen.
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/enrich.trigger"
 # Überlappende Läufe verhindern (vorige Läufe wurden teils abgebrochen)
 concurrency:
   group: enrich
