@@ -81,7 +81,25 @@ type Seed = { url: string; depth: number; feed?: boolean };
 
 // embed() DEAKTIVIERT – reaktivieren wenn Cluster-Feature wieder aufgenommen wird.
 
+// n-tv gibt JEDER Liveblog-Ticker-Meldung eine eigene URL (…/HH-MM-Schlagzeile-idNNNN.html,
+// alle mit derselben idNNNN; alte URLs 308→aktuelle Meldung). Das zersplitterte EINEN
+// Liveblog sonst in dutzende Artikel-Zeilen → verfälschter Änderungsverlauf. `…/idNNNN.html`
+// löst stabil (308) auf die aktuelle Meldung auf (verifiziert) → als Kanonik nutzen, damit
+// alle Varianten via Unique-Constraint auf EINE Zeile fallen. NUR Ticker-Einträge (Slug
+// beginnt mit HH-MM-); normale n-tv-Artikel & andere Verlage bleiben unangetastet.
+function canonUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (/(^|\.)n-tv\.de$/i.test(u.hostname)) {
+      const m = u.pathname.match(/\/\d{2}-\d{2}-.*-id(\d+)\.html$/i);
+      if (m) return `https://www.n-tv.de/id${m[1]}.html`;
+    }
+  } catch { /* ungültige URL → unverändert */ }
+  return raw;
+}
+
 async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<typeof extractMeta>, extra?: Record<string, unknown>): Promise<number> {
+  url = canonUrl(url);
   const row: Record<string, unknown> = { source_id: sourceId, url, last_seen: new Date().toISOString() };
   if (meta) {
     const { authors, keywords, categories, published_precise, ...rest } = meta;
@@ -397,10 +415,12 @@ function extractLiveBlog(html: string): { body: string; count: number } | null {
 
 // Body + Liveblog-Flag fürs Change-Tracking bestimmen (verlagsübergreifend). Für echte
 // Liveblogs den vollständigen JSON-LD-Ticker bevorzugen; sonst den Readability-Body.
-function trackBody(html: string, art: { body: string } | null, metaIsLive: boolean): { body: string; isLive: boolean } | null {
+function trackBody(html: string, url: string, art: { body: string } | null, metaIsLive: boolean): { body: string; isLive: boolean } | null {
   const live = extractLiveBlog(html);
   if (live) return { body: live.body, isLive: true };
-  return art ? { body: art.body, isLive: metaIsLive } : null;
+  if (art) return { body: art.body, isLive: metaIsLive };
+  const fb = extractBodyFallback(html, url); // z.B. Spiegel: Readability scheiterte
+  return fb ? { body: fb.body, isLive: metaIsLive } : null;
 }
 
 type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null } | null;
@@ -525,6 +545,7 @@ function stickyPaywall(prev: boolean | null | undefined, next: boolean | null): 
 
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
 async function saveArticleFull(sourceId: number, url: string, html: string) {
+  url = canonUrl(url); // n-tv-Ticker-Varianten → Kanonik, damit prev/upsert/Tracking konsistent EINE Zeile treffen
   const meta = extractMeta(html, url);
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
@@ -536,7 +557,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
-  const tb = trackBody(html, art, meta.article_type === "liveblog");
+  const tb = trackBody(html, url, art, meta.article_type === "liveblog");
   if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive);
   return id;
 }
@@ -754,7 +775,7 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
     try {
       for (let i = 0; i < list.length; i += 200) {
         await sb.from("pages").upsert(
-          list.slice(i, i + 200).map((url) => ({ source_id: src.id, url, kind: "article", depth: 1 })),
+          list.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), kind: "article", depth: 1 })),
           { onConflict: "url", ignoreDuplicates: true },
         );
       }
@@ -770,7 +791,7 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
     const writeDates = async (urls: string[], ignoreDuplicates: boolean) => {
       for (let i = 0; i < urls.length; i += 200) {
         await sb.from("articles").upsert(
-          urls.slice(i, i + 200).map((url) => ({ source_id: src.id, url, published_at: pubDates.get(url)!.at })),
+          urls.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), published_at: pubDates.get(url)!.at })),
           { onConflict: "url", ignoreDuplicates },
         );
       }
@@ -847,6 +868,33 @@ function asArticle(html: string, url: string): { title: string; teaser: string; 
     const dens = linkCount / Math.max(1, (a.textContent?.length ?? 1) / 100);
     if (dens > 2.5) return null; // viele Links, wenig Text → Linkliste/Hub, kein Artikel
     return { title: a.title.trim(), teaser: (a.excerpt ?? "").trim(), body: a.textContent ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+// Fallback-Body, wenn Readability scheitert (z.B. Spiegel-Newsblogs: reines Client-Render,
+// KEIN JSON-LD → asArticle liefert null → body_words blieb leer). Greift den größten
+// Artikel-Container im GERENDERTEN DOM und zieht dessen Absätze als Text. Läuft nur als
+// letzte Stufe in trackBody (nach JSON-LD & Readability), daher kein Risiko für saubere
+// Artikel; die Aufrufer rendern ohnehin nur als „article" klassifizierte Seiten.
+function extractBodyFallback(html: string, url: string): { body: string } | null {
+  try {
+    const doc = makeDom(html, url).window.document;
+    let best: any = null, bestLen = 0;
+    for (const sel of ['[data-area="body"]', '[itemprop="articleBody"]', "article", "main"]) {
+      for (const el of Array.from(doc.querySelectorAll(sel))) {
+        const len = ((el as any).textContent ?? "").length;
+        if (len > bestLen) { bestLen = len; best = el; }
+      }
+      if (best && bestLen >= MIN_BODY) break;
+    }
+    if (!best || bestLen < MIN_BODY) return null;
+    const blocks = Array.from(best.querySelectorAll("p, li, h2, h3, h4"))
+      .map((e: any) => (e.textContent ?? "").replace(/\s+/g, " ").trim())
+      .filter((t: string) => t.length >= 30);
+    const body = (blocks.length ? blocks.join("\n\n") : (best.textContent ?? "")).trim();
+    return body.length >= MIN_BODY ? { body } : null;
   } catch {
     return null;
   }
@@ -938,7 +986,7 @@ const pageId = new Map<string, number>(); // url -> pages.id (laufzeitweiter Cac
 
 // Entdeckte Links als Knoten anlegen (nur neu; bestehende Klassifikation NICHT überschreiben).
 async function ensureNodes(sourceId: number, urls: string[], depth: number) {
-  const fresh = urls.filter((u) => !pageId.has(u));
+  const fresh = [...new Set(urls.map(canonUrl))].filter((u) => !pageId.has(u));
   if (!fresh.length) return;
   const rows = fresh.map((url) => ({ source_id: sourceId, url, kind: classifyUrl(url), depth }));
   await sb.from("pages").upsert(rows, { onConflict: "url", ignoreDuplicates: true });
@@ -950,6 +998,7 @@ async function ensureNodes(sourceId: number, urls: string[], depth: number) {
 
 // Gerenderten Knoten mit sicherer Klassifikation schreiben (überschreibt kind).
 async function upsertRenderedNode(sourceId: number, url: string, kind: Kind, depth: number): Promise<number> {
+  url = canonUrl(url);
   const { data, error } = await sb.from("pages")
     .upsert({ source_id: sourceId, url, kind, depth, last_seen: new Date().toISOString() }, { onConflict: "url" })
     .select("id").single();
@@ -1021,7 +1070,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
         try {
           for (let i = 0; i < arts.length; i += 200) {
             await sb.from("pages").upsert(
-              arts.slice(i, i + 200).map((url) => ({ source_id: src.id, url, kind: "article", depth })),
+              arts.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), kind: "article", depth })),
               { onConflict: "url", ignoreDuplicates: true },
             );
           }
@@ -1353,7 +1402,7 @@ async function enrichArticles(sources: Source[]) {
           void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
-          const tb = trackBody(html, art, meta.article_type === "liveblog");
+          const tb = trackBody(html, item.url, art, meta.article_type === "liveblog");
           if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive);
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
