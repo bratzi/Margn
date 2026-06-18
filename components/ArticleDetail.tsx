@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder } from "@/components/icons";
 import { topicLabel } from "@/lib/topics";
+import { ALLOWED_PTYPES } from "@/lib/filterCorpus";
 import ScanTimeline from "@/components/ScanTimeline";
 import ExtLink from "@/components/ExtLink";
 
 type Detail = {
-  id: number; url: string; title: string | null; description: string | null; og_image: string | null;
+  id: number; source_id: number; url: string; title: string | null; description: string | null; og_image: string | null;
   published_at: string | null; modified_at: string | null; paywalled: boolean | null;
   word_count: number | null; reading_min: number | null; article_type: string | null;
   lang_detected: string | null; first_seen: string | null; last_seen: string | null; author_status: string | null; topic: string | null;
@@ -18,6 +19,8 @@ type Detail = {
   scan_count: number | null; scan_times: string[] | null;
 };
 type Change = { old?: string; new?: string };
+type Pctl = { label: string; verb: string; pct: number; n: number };
+type Neighbor = { articleId: number; title: string | null; outlet: string; country: string | null; shared: string[]; cross: boolean };
 type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; pubdate_old: string | null; pubdate_new: string | null; changes: Change[] | null };
 
 const LANG: Record<string, string> = { de: "Deutsch", fr: "Français", en: "English" };
@@ -34,15 +37,19 @@ function fmtShort(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", year: "numeric" });
 }
-function timeDelta(isoA: string, isoB: string): string {
-  const diff = Math.abs(new Date(isoB).getTime() - new Date(isoA).getTime());
-  const mins = Math.round(diff / 60000);
+// Eine Zeitspanne (ms) menschenlesbar: Min → h → d. Quelle der Wahrheit für alle
+// abgeleiteten Dauer-Angaben auf der Detailseite.
+function durStr(ms: number): string {
+  const mins = Math.round(ms / 60000);
   if (mins < 1) return "unter 1 Min";
   if (mins < 60) return `${mins} Min`;
   const hours = Math.floor(mins / 60), remMins = mins % 60;
-  if (hours < 24) return remMins > 0 ? `${hours}h ${remMins}min` : `${hours}h`;
+  if (hours < 48) return remMins > 0 ? `${hours}h ${remMins}min` : `${hours}h`;
   const days = Math.floor(hours / 24), remH = hours % 24;
   return remH > 0 ? `${days}d ${remH}h` : `${days}d`;
+}
+function timeDelta(isoA: string, isoB: string): string {
+  return durStr(Math.abs(new Date(isoB).getTime() - new Date(isoA).getTime()));
 }
 
 export default function ArticleDetail({ id }: { id: number }) {
@@ -51,6 +58,8 @@ export default function ArticleDetail({ id }: { id: number }) {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
+  const [pctls, setPctls] = useState<Pctl[] | null>(null);
+  const [neighbors, setNeighbors] = useState<Neighbor[] | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -71,6 +80,120 @@ export default function ArticleDetail({ id }: { id: number }) {
       setLoading(false);
     })();
   }, [id]);
+
+  // Einordnung: wie dieser Artikel im Vergleich zu seinen Peers liegt (gleiche Quelle,
+  // gleiches Thema). Reine COUNT-Queries (head:true) gegen page_overview — günstig, kein
+  // Datentransfer. Perzentil = Anteil der Peers, die unter dem eigenen Wert liegen.
+  useEffect(() => {
+    if (!a) return;
+    let cancelled = false;
+    (async () => {
+      const wc = a.word_count, rc = a.revision_count ?? 0, sid = a.source_id, topic = a.topic;
+      // Vergleichsbasis: nur echte journalistische Seiten, die schon analysiert sind (word_count gesetzt).
+      const base = (q: any) => q.in("ptype", ALLOWED_PTYPES).not("word_count", "is", null);
+      const cnt = async (mut: (q: any) => any) => {
+        const { count } = await mut(supabase.from("page_overview").select("id", { count: "exact", head: true }));
+        return count ?? 0;
+      };
+      const jobs: Promise<Pctl | null>[] = [];
+      const mk = async (label: string, verb: string, minN: number, total: () => Promise<number>, below: () => Promise<number>): Promise<Pctl | null> => {
+        const [tot, blw] = await Promise.all([total(), below()]);
+        return tot >= minN ? { label, verb, pct: Math.round((blw / tot) * 100), n: tot } : null;
+      };
+      if (wc != null) {
+        jobs.push(mk(`Länge · ${a.outlet}`, "länger als", 5,
+          () => cnt((q) => base(q).eq("source_id", sid)),
+          () => cnt((q) => base(q).eq("source_id", sid).lt("word_count", wc))));
+        if (topic) jobs.push(mk(`Länge · Thema ${topicLabel(topic)}`, "länger als", 8,
+          () => cnt((q) => base(q).eq("topic", topic)),
+          () => cnt((q) => base(q).eq("topic", topic).lt("word_count", wc))));
+      }
+      if (rc > 0) {
+        // revision_count ist bei unveränderten Artikeln NULL → als 0 (= unter rc) werten.
+        jobs.push(mk(`Bearbeitung · ${a.outlet}`, "öfter geändert als", 5,
+          () => cnt((q) => base(q).eq("source_id", sid)),
+          () => cnt((q) => base(q).eq("source_id", sid).or(`revision_count.lt.${rc},revision_count.is.null`))));
+      }
+      const res = (await Promise.all(jobs)).filter(Boolean) as Pctl[];
+      if (!cancelled) setPctls(res);
+    })();
+    return () => { cancelled = true; };
+  }, [a?.id]);
+
+  // Thematische Nachbarn: andere Artikel, die viele Schlagwörter teilen → Hinweis auf
+  // dieselbe Story / gemeinsames Framing (Kernkonzept). Geteilte Keywords werden per
+  // inverser Dokumentfrequenz gewichtet (IDF, 1/√df) — seltene, spezifische Begriffe
+  // (z.B. „eu-haushalt") wiegen schwer, allgegenwärtige („ukraine") kaum; ultragenerische
+  // (df > 1200) fallen ganz raus. So dominieren echte Story-Nachbarn statt Themen-Rauschen.
+  useEffect(() => {
+    if (!a) return;
+    let cancelled = false;
+    (async () => {
+      const self = a.id;
+      const { data: kwRows } = await supabase.from("article_keywords").select("keyword_id, keywords(term)").eq("article_id", self);
+      const myKw = ((kwRows ?? []) as any[]).map((r) => ({ id: r.keyword_id as number, term: r.keywords?.term as string })).filter((r) => r.id && r.term);
+      if (myKw.length < 2) { if (!cancelled) setNeighbors([]); return; }
+      // Dokumentfrequenz je Keyword (parallele COUNT-HEADs) → IDF-Gewicht.
+      const withDf = await Promise.all(myKw.slice(0, 24).map(async (kw) => {
+        const { count } = await supabase.from("article_keywords").select("article_id", { count: "exact", head: true }).eq("keyword_id", kw.id);
+        return { ...kw, df: count ?? 0 };
+      }));
+      const useful = withDf.filter((k) => k.df >= 1 && k.df <= 1200);
+      if (useful.length < 2) { if (!cancelled) setNeighbors([]); return; }
+      const wById = new Map(useful.map((k) => [k.id, 1 / Math.sqrt(k.df)]));
+      const termById = new Map(useful.map((k) => [k.id, k.term]));
+      const { data: coRows } = await supabase.from("article_keywords").select("article_id, keyword_id").in("keyword_id", useful.map((k) => k.id)).neq("article_id", self).limit(4000);
+      const agg = new Map<number, { score: number; terms: Set<string> }>();
+      for (const r of (coRows ?? []) as any[]) {
+        const w = wById.get(r.keyword_id); if (w == null) continue;
+        const e = agg.get(r.article_id) ?? { score: 0, terms: new Set<string>() };
+        e.score += w; e.terms.add(termById.get(r.keyword_id)!);
+        agg.set(r.article_id, e);
+      }
+      const ranked = [...agg.entries()].filter(([, e]) => e.terms.size >= 2).sort((x, y) => y[1].score - x[1].score).slice(0, 8);
+      if (!ranked.length) { if (!cancelled) setNeighbors([]); return; }
+      const { data: meta } = await supabase.from("page_overview").select("article_id,title,outlet,country").in("article_id", ranked.map(([id]) => id)).in("ptype", ALLOWED_PTYPES);
+      const metaById = new Map(((meta ?? []) as any[]).map((m) => [m.article_id, m]));
+      const out: Neighbor[] = [];
+      for (const [id, e] of ranked) {
+        const m = metaById.get(id); if (!m) continue;
+        out.push({ articleId: id, title: m.title, outlet: m.outlet, country: m.country, shared: [...e.terms].slice(0, 5), cross: m.outlet !== a.outlet });
+      }
+      if (!cancelled) setNeighbors(out);
+    })();
+    return () => { cancelled = true; };
+  }, [a?.id]);
+
+  // Verhaltensprofil: aus bereits geladenen Daten abgeleitete, „auf den ersten Blick
+  // unsichtbare" Kennzahlen (Latenz, stilles Bearbeitungsfenster, Wort-Bilanz, Scan-Takt).
+  const profile = useMemo(() => {
+    if (!a) return null;
+    const pub = a.published_at ? Date.parse(a.published_at) : NaN;
+    const fs = a.first_seen ? Date.parse(a.first_seen) : NaN;
+    const sc = a.scan_count ?? 0;
+    const st = (a.scan_times ?? []).map((s) => Date.parse(s)).filter((n) => !Number.isNaN(n)).sort((x, y) => x - y);
+    const sn = snaps.map((s) => Date.parse(s.captured_at)).filter((n) => !Number.isNaN(n)).sort((x, y) => x - y);
+    const tiles: { k: string; v: string; s?: string }[] = [];
+    if (pub && fs && fs - pub > 60000) tiles.push({ k: "Erfasst nach Erscheinen", v: durStr(fs - pub), s: "Verzug, bis margn den Artikel sah" });
+    if (sn.length && pub && sn[0] - pub > 0) tiles.push({ k: "Erste Änderung", v: durStr(sn[0] - pub), s: "nach Veröffentlichung" });
+    if (sn.length && pub && sn[sn.length - 1] - pub > 0) tiles.push({ k: "Zuletzt verändert", v: durStr(sn[sn.length - 1] - pub), s: "nach Veröffentlichung" });
+    if (sc > 1) { const rc = a.revision_count ?? 0; tiles.push({ k: "Änderungsquote", v: `${Math.round((rc / sc) * 100)}%`, s: `${rc} Änderung${rc !== 1 ? "en" : ""} in ${sc} Scans` }); }
+    const net = snaps.reduce((s, x) => s + (x.word_delta || 0), 0);
+    if (net !== 0) tiles.push({ k: "Wort-Bilanz", v: `${net > 0 ? "+" : ""}${net.toLocaleString("de-DE")}`, s: "Wörter seit Erstfassung" });
+    if (st.length >= 3) {
+      const gaps: number[] = []; for (let i = 1; i < st.length; i++) gaps.push(st[i] - st[i - 1]);
+      gaps.sort((x, y) => x - y);
+      tiles.push({ k: "Scan-Takt", v: `alle ${durStr(gaps[Math.floor(gaps.length / 2)])}`, s: "Median zwischen Besuchen" });
+    }
+    const edit = a.edit_count ?? 0, ext = a.extension_count ?? 0, rev = a.revision_count ?? 0;
+    let insight: string | null = null;
+    if (snaps.some((s) => s.pubdate_old && s.pubdate_new)) insight = "Das Veröffentlichungsdatum wurde nachträglich verschoben — eine Änderung, die Leser nie zu sehen bekommen.";
+    else if (edit > 0 && ext === 0) insight = "Alle erfassten Änderungen waren stille Korrekturen am bestehenden Text — ergänzt wurde nichts.";
+    else if (ext >= 2) insight = "Der Beitrag wuchs über mehrere Besuche hinweg — fortlaufende, mitlaufende Berichterstattung.";
+    else if (rev > 0 && sn.length && pub && sn[sn.length - 1] - pub > 86400000) insight = `Noch ${durStr(sn[sn.length - 1] - pub)} nach Veröffentlichung redaktionell angefasst.`;
+    else if (rev === 0 && sc >= 4) insight = `Über ${sc} Besuche unverändert — ein stabiler, abgeschlossener Text.`;
+    return { tiles, edit, ext, rev, insight };
+  }, [a, snaps]);
 
   if (loading) return <div className="page"><p className="faint">Lade…</p></div>;
   if (!a) return <div className="page"><p className="faint">Artikel nicht gefunden.</p></div>;
@@ -119,11 +242,59 @@ export default function ArticleDetail({ id }: { id: number }) {
         <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
       </div>
 
+      {/* Einordnung: Perzentil-Vergleich gegen Peers (gleiche Quelle / gleiches Thema) */}
+      {pctls && pctls.length > 0 && (
+        <DL h="Einordnung">
+          <div className="pctls">
+            {pctls.map((p) => (
+              <div className="pctl" key={p.label}>
+                <div className="pctl-top">
+                  <span className="pctl-lbl">{p.label}</span>
+                  <span className="pctl-val">{p.verb} <b>{p.pct}%</b></span>
+                </div>
+                <div className="pctl-bar"><i style={{ width: `${p.pct}%` }} /></div>
+                <div className="pctl-sub">verglichen mit {p.n.toLocaleString("de-DE")} Artikeln</div>
+              </div>
+            ))}
+          </div>
+        </DL>
+      )}
+
       {/* Scan-Timeline */}
       <DL h="Scan-Verlauf">
         <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
           changeTimes={snaps.map((s) => s.captured_at)} />
       </DL>
+
+      {/* Verhaltensprofil: abgeleitete, „auf den ersten Blick unsichtbare" Kennzahlen */}
+      {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
+        <DL h="Was die Daten verraten">
+          {profile.tiles.length > 0 && (
+            <div className="dprofile">
+              {profile.tiles.map((t) => (
+                <div className="dmetric" key={t.k}>
+                  <div className="k">{t.k}</div>
+                  <div className="v">{t.v}</div>
+                  {t.s && <div className="s">{t.s}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {profile.rev > 0 && profile.edit + profile.ext > 0 && (
+            <div className="dsplit">
+              <div className="dsplit-bar">
+                {profile.edit > 0 && <span className="seg-edit" style={{ flex: profile.edit }} />}
+                {profile.ext > 0 && <span className="seg-ext" style={{ flex: profile.ext }} />}
+              </div>
+              <div className="dsplit-legend">
+                <span className="le edit">{profile.edit} stille Änderung{profile.edit !== 1 ? "en" : ""}</span>
+                <span className="le ext">{profile.ext} Erweiterung{profile.ext !== 1 ? "en" : ""}</span>
+              </div>
+            </div>
+          )}
+          {profile.insight && <p className="dinsight">{profile.insight}</p>}
+        </DL>
+      )}
 
       <DL h="Autoren">
         {a.author_status === "named" && authors.length > 0
@@ -137,6 +308,31 @@ export default function ArticleDetail({ id }: { id: number }) {
           ? <div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div>
           : <span className="faint" style={{ fontSize: 13 }}>Keine Schlagwörter im Quelltext gefunden (oder noch nicht erfasst).</span>}
       </DL>
+
+      {/* Thematische Nachbarn: blattübergreifendes Echo über geteilte Schlagwörter */}
+      {neighbors && neighbors.length > 0 && (
+        <DL h="Thematische Nachbarn">
+          <p className="neigh-intro">
+            Andere Artikel, die auffällig viele — und besonders seltene — Schlagwörter mit diesem teilen.
+            Ein Hinweis auf dieselbe Story oder ein gemeinsames Framing.
+            {neighbors.some((n) => n.cross) && <> <b>{neighbors.filter((n) => n.cross).length}</b> davon aus anderen Blättern.</>}
+          </p>
+          <div className="neigh">
+            {neighbors.map((n) => (
+              <Link key={n.articleId} href={`/articles/${n.articleId}`} className="neigh-card">
+                <div className="neigh-main">
+                  <div className="neigh-title">{n.title ?? "(ohne Titel)"}</div>
+                  <div className="neigh-kws">{n.shared.map((t) => <span key={t} className="neigh-chip">{t}</span>)}</div>
+                </div>
+                <div className="neigh-meta">
+                  <span className="neigh-outlet">{n.outlet} <span className="cc">{n.country}</span></span>
+                  {n.cross && <span className="neigh-echo">↔ blattübergreifend</span>}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </DL>
+      )}
 
       {/* Seitenbaum */}
       {segs.length > 0 && (
