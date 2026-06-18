@@ -502,8 +502,18 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   const titleChanged = !!prev.title && !!newTitle && decodeEntities(prev.title) !== decodeEntities(newTitle);
   // Verlage ändern beim Bearbeiten oft (nicht immer) STILL das Veröffentlichungsdatum mit.
   // Als unsichtbare Änderung mit-tracken. ≥60 s Differenz, damit Format-/Sekundenjitter nicht zählt.
-  // (Sticky-Logik in saveArticleFull/enrich liefert hier eh nur PRÄZISE Datumswerte → kein Rauschen.)
-  const pubChanged = !!prevPub && !!newPub && Math.abs(Date.parse(newPub) - Date.parse(prevPub)) >= 60000;
+  // WICHTIG (alle Verlage): gegen den ZULETZT von der SEITE gemeldeten Wert prüfen (letztes
+  // Snapshot-`pubdate_new`), NICHT gegen die kanonische `published_at`. Sonst feuert eine STABILE
+  // Quellen-Uneinigkeit (Sitemap-Zeit ≠ Seiten-Zeit; Discovery setzt published_at je Lauf zurück)
+  // bei JEDEM Scan erneut → identisch aussehende Pseudo-„Datums-Edits".
+  let pubBaseline = prevPub;
+  if (!!prevPub && !!newPub && Math.abs(Date.parse(newPub) - Date.parse(prevPub)) >= 60000) {
+    const { data: lastPd } = await sb.from("article_snapshots")
+      .select("pubdate_new").eq("article_id", articleId).not("pubdate_new", "is", null)
+      .order("captured_at", { ascending: false }).limit(1).maybeSingle();
+    if ((lastPd as any)?.pubdate_new) pubBaseline = (lastPd as any).pubdate_new as string;
+  }
+  const pubChanged = !!pubBaseline && !!newPub && Math.abs(Date.parse(newPub) - Date.parse(pubBaseline)) >= 60000;
   // Unsichtbare Metadaten-Edits (Teaser/Bild/Ressort/Paywall/Autor) — das „zwischen den Zeilen".
   const metaEdits = buildMetaEdits(prev, metaNow);
   const metaChanged = metaEdits.length > 0;
@@ -524,6 +534,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   const addedFps = fps.filter((f) => !oldSet.has(f));
   const addedTexts = [...new Set(addedFps)].map((f) => fpToText.get(f)!).filter(Boolean);
   const removedCount = [...oldSet].filter((f) => !newSet.has(f)).length;
+  const contentChanged = addedFps.length > 0 || removedCount > 0;
 
   // Nur reine Umsortierung (gleiche Absätze, andere Reihenfolge) → kein Snapshot.
   // Absätze sind durch normalizeParas bereits ≥60 Zeichen, daher zählt jeder echte Zugang.
@@ -533,18 +544,20 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     return;
   }
 
-  // Strukturierter Wort-Diff: geänderte Absätze (entfernt↔hinzugefügt) per Ähnlichkeit paaren.
-  // Falls der Re-Baseline-Schutz die alte Baseline schon bereinigt geladen hat, die nutzen —
-  // sonst landet sonst entferntes Chrome in changes.old.
-  let oldParas: string[];
-  if (oldParasClean) {
-    oldParas = oldParasClean;
-  } else {
-    const { data: paraRow } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
-    oldParas = Array.isArray(paraRow?.paras) ? (paraRow!.paras as string[]) : [];
+  // Strukturierter Wort-Diff NUR bei echter Inhaltsänderung. Reine Datums-/Meta-Edits
+  // (contentChanged=false) bekommen KEINEN Body-Diff — sonst erzeugt eine para_fps↔article_paras-
+  // Diskrepanz einen Geister-„entfernten" Absatz (zweite Ursache der V3/V4-Pseudo-Edits).
+  // Falls der Re-Baseline-Schutz die alte Baseline schon bereinigt geladen hat, die nutzen.
+  let oldParas: string[] = [];
+  if (contentChanged) {
+    if (oldParasClean) oldParas = oldParasClean;
+    else {
+      const { data: paraRow } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
+      oldParas = Array.isArray(paraRow?.paras) ? (paraRow!.paras as string[]) : [];
+    }
   }
-  const removedTexts = oldParas.filter((p) => !newSet.has(fp(p)));
-  const changes = buildChanges(removedTexts, addedTexts);
+  const removedTexts = contentChanged ? oldParas.filter((p) => !newSet.has(fp(p))) : [];
+  const changes = contentChanged ? buildChanges(removedTexts, addedTexts) : [];
 
   // Eindeutige Klassifikation (sich gegenseitig ausschließend):
   //  - Liveblog/Timeline: laufendes Wachstum → IMMER Erweiterung (kein "stiller Edit").
@@ -552,7 +565,6 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   //  - Sonst Netto-Zuwachs (mehr hinzu als entfernt) → Erweiterung.
   //  - Sonst (Umschreiben/Kürzen) → Edit.
   const isTimeline = isLiveblog || prev.article_type === "timeline" || (prev.extension_count ?? 0) >= 2;
-  const contentChanged = addedFps.length > 0 || removedCount > 0;
   let kind: "extension" | "edit";
   if (!contentChanged && !titleChanged && (pubChanged || metaChanged)) kind = "edit"; // reines Um-Datieren / Metadaten-Edit = stille Änderung
   else if (isTimeline) kind = "extension";
@@ -564,12 +576,12 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     article_id: articleId, change_kind: kind,
     title_old: titleChanged ? decodeEntities(prev.title!) : null,
     title_new: titleChanged ? decodeEntities(newTitle!) : null,
-    added: addedTexts.join("\n\n").slice(0, 8000),
+    added: contentChanged ? addedTexts.join("\n\n").slice(0, 8000) : "",
     added_count: addedFps.length, removed_count: removedCount,
     word_delta: bodyWords - (prev.body_words ?? bodyWords),
     changes,
   };
-  if (pubChanged) { snapRow.pubdate_old = prevPub; snapRow.pubdate_new = newPub; }
+  if (pubChanged) { snapRow.pubdate_old = pubBaseline; snapRow.pubdate_new = newPub; }
   if (metaChanged) snapRow.meta_edits = metaEdits;
   let { error: snapErr } = await sb.from("article_snapshots").insert(snapRow);
   // Optionale Spalten (pubdate_old/new, meta_edits) evtl. noch nicht via ALTER angelegt →
@@ -630,6 +642,32 @@ function stickyPaywall(prev: boolean | null | undefined, next: boolean | null): 
   if (prev === true) return true;
   if (next === null || next === undefined) return prev ?? null;
   return next;
+}
+
+// TEMP-Diagnose: echte Paywall-Signale je GERENDERTEM Artikel protokollieren, um verlags-
+// übergreifend treffsichere Erkennung abzuleiten (das statische HTML trägt das Signal nicht).
+// Gedeckelt je Host, nur Paywall-relevante Verlage → kein Log-Überlauf. Nach Auswertung entfernen.
+const PAYDIAG_CAP = 60;
+const payDiagSeen: Record<string, number> = {};
+function payDiag(html: string, url: string, decided: boolean | null) {
+  let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch { return; }
+  if (!/(^|\.)(faz\.net|bild\.de|spiegel\.de)$/.test(host)) return;
+  if ((payDiagSeen[host] ?? 0) >= PAYDIAG_CAP) return;
+  payDiagSeen[host] = (payDiagSeen[host] ?? 0) + 1;
+  const probes: [string, RegExp][] = [
+    ["iaff-false", /"isAccessibleForFree"\s*:\s*"?false"?/i],
+    ["iaff-true", /"isAccessibleForFree"\s*:\s*"?true"?/i],
+    ["haspart", /"hasPart"/i],
+    ["jetzt-kostenlos", /Jetzt kostenlos/i],
+    ["f-plus", /\bF\+\b/],
+    ["bildplus", /BILDplus/i],
+    ["spiegelplus", /SPIEGEL\s?\+|\bS\+\b/],
+    ["weiterlesen-mit", /weiterlesen mit/i],
+    ["piano", /tp-modal|tp-container|class="[^"]*piano|id="piano"/i],
+    ["abo-schranke", /nur mit Abo|Abonnement erforderlich|Zugang erforderlich|Diese Funktion ist .{0,20}Abonnenten/i],
+  ];
+  const markers = probes.filter(([, re]) => re.test(html)).map(([n]) => n);
+  console.log(`PAYDIAG host=${host} decided=${decided} markers=[${markers.join(",")}]`);
 }
 
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.

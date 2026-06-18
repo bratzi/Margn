@@ -9,3 +9,6 @@
 # 2026-06-18 — Re-Baseline-Zyklus anstoßen (vor dem Chrome-Snapshot-Cleanup).
 # 2026-06-19 — Re-Baseline-Schutz in trackChanges: alte Baseline (Bild/n-tv) vor Vergleich
 #              identisch via cleanBody normalisieren → keine Chrome-Übergangs-Pseudo-Edits mehr.
+# 2026-06-19 — pubdate-Vergleich gegen zuletzt gemeldeten Seitenwert (statt kanonische
+#              published_at) → keine Geister-„Datums-Edits" mehr bei stabiler Quellen-Uneinigkeit
+#              (alle Verlage); kein Body-Diff bei reinen Datums-/Meta-Edits. + Paywall-Diagnose-Log.
