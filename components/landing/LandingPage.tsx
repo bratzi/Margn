@@ -233,15 +233,25 @@ export default function LandingPage() {
     const cursor = cursorRef.current;
     if (!reduced && finePointer && cursor) {
       gsap.set(cursor, { x: -100, y: -100, scale: 0.28, opacity: 0 });
-      const xTo = gsap.quickTo(cursor, "x", { duration: 0.35, ease: "power3" });
-      const yTo = gsap.quickTo(cursor, "y", { duration: 0.35, ease: "power3" });
+      // Knapperes Folgen: 0.35s power3 wirkte träge/laggy. 0.12s = flüssig, aber noch
+      // sanft. quickTo recycelt EINEN Tween (kein Tween-Neubau pro Event).
+      const xTo = gsap.quickTo(cursor, "x", { duration: 0.12, ease: "power3" });
+      const yTo = gsap.quickTo(cursor, "y", { duration: 0.12, ease: "power3" });
+      let shown = false;
       const onMove = (e: PointerEvent) => {
-        gsap.to(cursor, { opacity: 1, duration: 0.3 });
+        // Einblenden nur EINMAL — vorher lief pro pointermove ein neuer gsap.to-Tween
+        // (Dutzende/s → GC-Druck → Ruckeln).
+        if (!shown) { shown = true; gsap.to(cursor, { opacity: 1, duration: 0.3 }); }
         xTo(e.clientX);
         yTo(e.clientY);
       };
+      let hot = false;
       const onOver = (e: PointerEvent) => {
-        const hot = (e.target as HTMLElement).closest("a, button, .mg-btn");
+        // pointerover feuert bei jedem Elementwechsel — nur tweenen, wenn sich der
+        // Hot-Zustand WIRKLICH ändert, statt jedes Mal einen Tween zu erzeugen.
+        const next = !!(e.target as HTMLElement).closest("a, button, .mg-btn");
+        if (next === hot) return;
+        hot = next;
         gsap.to(cursor, { scale: hot ? 1 : 0.28, duration: 0.3, ease: "power3.out" });
       };
       window.addEventListener("pointermove", onMove, { passive: true });

@@ -86,14 +86,22 @@ export default function HeroCanvas() {
     ro.observe(host);
     resize();
 
+    // Host-Rect cachen statt bei JEDEM pointermove neu zu messen: getBoundingClientRect
+    // erzwingt synchrones Layout — pro Event (Dutzende/s, seitenweit) ist das teuer.
+    // Nur nach Scroll/Resize als „dirty" markieren und beim nächsten Move einmal lesen.
     const mouse = { x: -9999, y: -9999, active: false };
+    let hostRect = host.getBoundingClientRect();
+    let rectDirty = false;
+    const markDirty = () => { rectDirty = true; };
     const onMove = (e: PointerEvent) => {
-      const r = host.getBoundingClientRect();
-      mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; mouse.active = true;
+      if (rectDirty) { hostRect = host.getBoundingClientRect(); rectDirty = false; }
+      mouse.x = e.clientX - hostRect.left; mouse.y = e.clientY - hostRect.top; mouse.active = true;
     };
     const onLeave = () => { mouse.active = false; };
     if (!small && !reduced) {
       window.addEventListener("pointermove", onMove, { passive: true });
+      window.addEventListener("scroll", markDirty, { passive: true });
+      window.addEventListener("resize", markDirty, { passive: true });
       host.addEventListener("pointerleave", onLeave);
     }
 
@@ -239,6 +247,8 @@ export default function HeroCanvas() {
         io.disconnect();
         document.removeEventListener("visibilitychange", onVis);
         window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("scroll", markDirty);
+        window.removeEventListener("resize", markDirty);
         host.removeEventListener("pointerleave", onLeave);
         ro.disconnect();
         if (canvas.parentNode) host.removeChild(canvas);
@@ -248,6 +258,8 @@ export default function HeroCanvas() {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("scroll", markDirty);
+      window.removeEventListener("resize", markDirty);
       host.removeEventListener("pointerleave", onLeave);
       ro.disconnect();
       if (canvas.parentNode) host.removeChild(canvas);

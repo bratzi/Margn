@@ -71,7 +71,9 @@ export default function ScrollSpine() {
     if (!root) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    let len = 0, raf = 0;
+    let len = 0, raf = 0, polyLen = 1;
+    let polyPts: Pt[] = [];
+    let cum = new Float64Array(0);
 
     const build = () => {
       const W = root.clientWidth, H = root.scrollHeight;
@@ -162,6 +164,14 @@ export default function ScrollSpine() {
 
       len = draw.getTotalLength();
       draw.style.strokeDasharray = String(len);
+      // Polylinien-Längentabelle EINMAL pro build vorberechnen → Kopfposition per
+      // Interpolation statt getPointAtLength PRO Scroll-Frame (das lief auf dem
+      // seitenlangen Pfad und war der Haupt-Scroll-Ruckler).
+      polyPts = pts;
+      cum = new Float64Array(pts.length);
+      let acc = 0;
+      for (let i = 1; i < pts.length; i++) { acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); cum[i] = acc; }
+      polyLen = acc || 1;
       if (reduced) { draw.style.strokeDashoffset = "0"; head.style.display = "none"; }
       else apply();
     };
@@ -170,14 +180,21 @@ export default function ScrollSpine() {
       raf = 0;
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
-      const drawn = len * progress;
-      draw.style.strokeDashoffset = String(len - drawn);
-      try {
-        const p = draw.getPointAtLength(drawn);
-        head.setAttribute("cx", p.x.toFixed(1));
-        head.setAttribute("cy", p.y.toFixed(1));
+      draw.style.strokeDashoffset = String(len * (1 - progress));
+      // Kopf entlang der vorberechneten Polylinie interpolieren (binäre Suche im
+      // cum-Array) — billig, statt getPointAtLength auf dem ganzen Pfad pro Frame.
+      if (polyPts.length > 1) {
+        const target = polyLen * progress;
+        let lo = 1, hi = polyPts.length - 1;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < target) lo = m + 1; else hi = m; }
+        const seg = cum[lo] - cum[lo - 1] || 1;
+        const t = (target - cum[lo - 1]) / seg;
+        const x = polyPts[lo - 1].x + (polyPts[lo].x - polyPts[lo - 1].x) * t;
+        const y = polyPts[lo - 1].y + (polyPts[lo].y - polyPts[lo - 1].y) * t;
+        head.setAttribute("cx", x.toFixed(1));
+        head.setAttribute("cy", y.toFixed(1));
         head.style.opacity = progress > 0.002 && progress < 0.999 ? "1" : "0";
-      } catch { /* getPointAtLength vor erstem Layout */ }
+      }
     };
 
     const onScroll = () => { if (!reduced && !raf) raf = requestAnimationFrame(apply); };
