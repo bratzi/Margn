@@ -4,24 +4,17 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 // Zeitplan (UTC, GitHub-Actions-Cron in .github/workflows/analyze.yml):
-//   Pipeline (Discovery + Render in EINEM Job):  "23 */4 * * *"
-//     → alle 4 h um :23 (UTC-Stunden 0,4,8,12,16,20).
+//   Pipeline (Discovery + Render in EINEM Job):  "23 * * * *"
+//     → STÜNDLICH um :23 (Repo public → Actions gratis/unbegrenzt; :23 ist ruhiger als :00).
 //   (scrape.yml-Cron ist AUS = nur manuell; structure läuft separat nur wöchentlich.)
-// WICHTIG: GitHub-Cron auf dem Free-Tier ist best-effort — der echte Start kann sich um
-// Minuten verzögern oder ein Slot ganz ausfallen. Angezeigt wird der GEPLANTE Zeitpunkt,
-// keine Garantie. (Früher stand hier der alte 2h/6h-Plan → Countdown stimmte nie.)
+// WICHTIG: GitHub-Cron ist best-effort — der echte Start kann sich um Minuten verzögern
+// oder ein Slot ganz ausfallen. Angezeigt wird der GEPLANTE Zeitpunkt, keine Garantie.
 function nextPipeline(): Date {
   const now = new Date();
-  for (let day = 0; day < 2; day++) {
-    for (const h of [0, 4, 8, 12, 16, 20]) {
-      const c = new Date(now);
-      c.setUTCDate(now.getUTCDate() + day);
-      c.setUTCHours(h, 23, 0, 0);
-      if (c.getTime() > now.getTime()) return c;
-    }
-  }
-  const f = new Date(now); f.setUTCDate(now.getUTCDate() + 1); f.setUTCHours(0, 23, 0, 0);
-  return f;
+  const c = new Date(now);
+  c.setUTCMinutes(23, 0, 0);                      // :23 der aktuellen Stunde
+  if (c.getTime() <= now.getTime()) c.setUTCHours(c.getUTCHours() + 1); // schon vorbei → nächste Stunde
+  return c;
 }
 function cd(target: Date): string {
   const s = Math.max(0, Math.floor((target.getTime() - Date.now()) / 1000));
@@ -59,14 +52,14 @@ export default function NextRun() {
   }, []);
 
   return (
-    <div className="nextrun nextrun-multi" title={"Automatik (UTC): Pipeline (Discovery + Render) alle 4 h um :23. GitHub-Cron ist best-effort — der Start kann sich verzögern oder ausfallen, der Wert ist der GEPLANTE Zeitpunkt. Badge „läuft“ = aktuell frische Daten erkannt."}>
+    <div className="nextrun nextrun-multi" title={"Automatik (UTC): Pipeline (Discovery + Render) stündlich um :23. GitHub-Cron ist best-effort — der Start kann sich verzögern oder ausfallen, der Wert ist der GEPLANTE Zeitpunkt. Badge „läuft“ = aktuell frische Daten erkannt."}>
       <div className="nr-head">
         <span>Automatik</span>
         {active && <span className="nr-live"><i />läuft</span>}
       </div>
       <div className="nr-row">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
-        <span className="nr-label">Pipeline <i className="nr-ivl">alle 4 h</i></span>
+        <span className="nr-label">Pipeline <i className="nr-ivl">stündlich</i></span>
         <span className={`nr-time mono tnum ${active ? "is-dim" : ""}`}>{pl}</span>
       </div>
       <div className="nr-row">
