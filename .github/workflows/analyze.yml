@@ -24,13 +24,18 @@ on:
         type: choice
         default: pipeline
         options: [pipeline, structure]
+  # Per Commit auslösbar: eine Änderung an .github/pipeline.trigger startet SOFORT einen
+  # Pipeline-Lauf (Entdeckung + Rendern) — zum manuellen Anstoßen ohne UI/Token.
+  push:
+    paths:
+      - ".github/pipeline.trigger"
 concurrency:
   group: pipeline
   cancel-in-progress: false
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,7 +60,7 @@ jobs:
       # 1) ENTDECKUNG — rein HTTP, kein Browser (~3 min). Findet neue Artikel-URLs
       #    via News-Sitemaps/Feeds/flachem HTML-Crawl und markiert sie als pages.
       - name: discover (HTTP, kein Browser)
-        if: ${{ github.event.schedule == '23 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
@@ -71,18 +76,20 @@ jobs:
 
       # 2) RENDERN — Playwright, neueste Artikel zuerst + Re-Scans (stille Edits).
       - name: render (Playwright)
-        if: ${{ github.event.schedule == '23 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "analyze"
-          # Stündlich → kleinere, schnellere Läufe (sicher unter dem 30-min-Timeout, auch 24×/Tag).
-          # Die hohe Frequenz kompensiert das kleinere Pro-Lauf-Budget bei Weitem.
-          CRAWL_MAX_PAGES: "1000"
-          CRAWL_RESCAN_SHARE: "0.35"   # größerer Re-Scan-Anteil (Edit-Jagd) — cap ~350/Lauf × 24 = ~8400/Tag
-          RESCAN_DAYS: "3"             # Edit-Fenster auf 3 Tage geweitet (Edits passieren auch Tag 2–3)
+          # Repo PUBLIC → Actions gratis/unbegrenzt → großzügiges Budget. Messung (#72): ~83
+          # Renders/min → 2500 Seiten ≈ 30 min, plus Discovery ~3 min, sicher unter 50-min-Timeout.
+          # Großer Re-Scan-Anteil, damit ALLE fälligen frischen Artikel JEDEN Lauf drankommen
+          # (Diagnose: 809 fällig, aber nur 350/Lauf → frische Artikel blieben „nur 1× gescannt").
+          CRAWL_MAX_PAGES: "2500"
+          CRAWL_RESCAN_SHARE: "0.6"    # cap ~1500 Re-Scans/Lauf → räumt den Fällig-Pool in EINEM Lauf
+          RESCAN_DAYS: "3"             # Edit-Fenster 3 Tage (Edits passieren auch Tag 2–3)
           CRAWL_DELAY_MS: "60"
           CRAWL_CONCURRENCY: "10"
 
