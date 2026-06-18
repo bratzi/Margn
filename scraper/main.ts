@@ -1236,7 +1236,7 @@ async function analyzeBacklog() {
     if (rescanBudget > 0) {
       const now = Date.now();
       const H = 3_600_000;
-      const horizonDays = Number(process.env.RESCAN_DAYS ?? 2); // Re-Scan-Fenster: heute + gestern (war 14)
+      const horizonDays = Number(process.env.RESCAN_DAYS ?? 3); // Re-Scan-Fenster (Tage); stündliche Pipeline → weiter gefasst
       const inQueue = new Set(queue.map((q) => q.url));
 
       // ALTERSGESTAFFELTE KADENZ statt „ältester last_seen zuerst" über ein flaches Fenster.
@@ -1250,11 +1250,13 @@ async function analyzeBacklog() {
       //   „fällig" = last_seen älter als das Stufen-Intervall (dueH).
       //   Spalte heißt in der Basistabelle `first_seen` (NICHT `discovered_at` — das ist nur
       //   ein View-Alias in page_overview; mit ihm warf die Query 400 → stiller Totalausfall).
-      // Pipeline läuft alle 4 h: dueH < 4 ⇒ „jeden Lauf". Gewichte summieren > 1 ⇒
-      // ungenutztes Budget einer Stufe rollt automatisch zur nächsten und zum Sicherheitsnetz.
+      // Auf die STÜNDLICHE Pipeline getunt (war alle 4 h): dueH ≤ 1 ⇒ praktisch jeden Lauf.
+      // Gewichte summieren > 1 ⇒ ungenutztes Budget einer Stufe rollt automatisch zur
+      // nächsten und zum Sicherheitsnetz. tier3 greift nur, wenn RESCAN_DAYS > 2 (sonst hiH ≤ loH → leer).
       const tiers = [
-        { loH: 0,  hiH: 24,               dueH: 3,  weight: 0.7 }, // heute <24 h: jeder Lauf
-        { loH: 24, hiH: horizonDays * 24, dueH: 12, weight: 0.3 }, // gestern 24–48 h: ~2×/Tag
+        { loH: 0,  hiH: 24,               dueH: 1,  weight: 0.55 }, // heute <24 h: ~jede Stunde (kurzlebige Edits!)
+        { loH: 24, hiH: 48,               dueH: 6,  weight: 0.30 }, // gestern 24–48 h: ~4×/Tag
+        { loH: 48, hiH: horizonDays * 24, dueH: 24, weight: 0.20 }, // älter bis Horizont: ~1×/Tag
       ];
 
       const reserve = async (loH: number, hiH: number, dueH: number, slice: number) => {

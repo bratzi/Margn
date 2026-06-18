@@ -4,8 +4,9 @@ on:
   #   1) billige HTTP-Entdeckung (CRAWL_RENDER=0)  →  2) teures Rendern (CRAWL_MODE=analyze)
   # …im SELBEN Job. So wird checkout + npm ci + Playwright-Install nur EINMAL pro
   # Zyklus bezahlt, statt die Entdeckung 12×/Tag separat mit vollem Setup-Overhead
-  # laufen zu lassen (das war der größte Minuten-Fresser). Alle 4 h → 6×/Tag frische
-  # Daten, bleibt sicher unter den 2000 Gratis-Minuten/Monat.
+  # laufen zu lassen (das war der größte Minuten-Fresser). STÜNDLICH → 24×/Tag frische
+  # Daten + 4× so viele Re-Scan-Chancen für stille Edits. Möglich, weil das Repo PUBLIC
+  # ist → GitHub-Actions-Minuten sind dann unbegrenzt & gratis (kein 2000-min-Limit mehr).
   #
   # Zweiter Cron = structure (wöchentlich): Rubriken/Hubs kartieren, Link-Klassifizierung
   # auffrischen — gleicher Playwright-Job, aber nur 1×/Woche statt bei jedem 4h-Zyklus.
@@ -14,7 +15,7 @@ on:
   # Cron-Slot (Millionen Repos auf "0 * * * *"), dort wartet man am längsten und
   # Runs werden bei Last am ehesten still verworfen. :23 ist deutlich ruhiger.
   schedule:
-    - cron: "23 */4 * * *"  # Pipeline: Entdeckung + Rendern, alle 4 h
+    - cron: "23 * * * *"    # Pipeline: Entdeckung + Rendern, stündlich (:23, ruhiger als :00)
     - cron: "23 5 * * 0"    # structure: wöchentlich, So 05:23 UTC
   workflow_dispatch:
     inputs:
@@ -54,7 +55,7 @@ jobs:
       # 1) ENTDECKUNG — rein HTTP, kein Browser (~3 min). Findet neue Artikel-URLs
       #    via News-Sitemaps/Feeds/flachem HTML-Crawl und markiert sie als pages.
       - name: discover (HTTP, kein Browser)
-        if: ${{ github.event.schedule == '23 */4 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event.schedule == '23 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
@@ -70,14 +71,18 @@ jobs:
 
       # 2) RENDERN — Playwright, neueste Artikel zuerst + Re-Scans (stille Edits).
       - name: render (Playwright)
-        if: ${{ github.event.schedule == '23 */4 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event.schedule == '23 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "analyze"
-          CRAWL_MAX_PAGES: "1500"
+          # Stündlich → kleinere, schnellere Läufe (sicher unter dem 30-min-Timeout, auch 24×/Tag).
+          # Die hohe Frequenz kompensiert das kleinere Pro-Lauf-Budget bei Weitem.
+          CRAWL_MAX_PAGES: "1000"
+          CRAWL_RESCAN_SHARE: "0.35"   # größerer Re-Scan-Anteil (Edit-Jagd) — cap ~350/Lauf × 24 = ~8400/Tag
+          RESCAN_DAYS: "3"             # Edit-Fenster auf 3 Tage geweitet (Edits passieren auch Tag 2–3)
           CRAWL_DELAY_MS: "60"
           CRAWL_CONCURRENCY: "10"
 

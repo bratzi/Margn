@@ -1,6 +1,10 @@
 node_modules/
-.env
-.env.local
+# Alle echten Env-/Secret-Dateien NIE einchecken (nur die *.example-Vorlagen).
+.env*
+!.env.example
+!.env.local.example
+*.pem
+*.key
 .next/
 dist/
 *.log
