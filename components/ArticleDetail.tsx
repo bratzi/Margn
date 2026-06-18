@@ -18,7 +18,7 @@ type Detail = {
   scan_count: number | null; scan_times: string[] | null;
 };
 type Change = { old?: string; new?: string };
-type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; changes: Change[] | null };
+type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; pubdate_old: string | null; pubdate_new: string | null; changes: Change[] | null };
 
 const LANG: Record<string, string> = { de: "Deutsch", fr: "Français", en: "English" };
 const TYPE_LABEL: Record<string, string> = {
@@ -62,7 +62,7 @@ export default function ArticleDetail({ id }: { id: number }) {
         supabase.from("article_authors").select("authors(name)").eq("article_id", id),
         supabase.from("article_keywords").select("keywords(term)").eq("article_id", id),
         supabase.from("article_categories").select("categories(name)").eq("article_id", id),
-        supabase.from("article_snapshots").select("*").eq("article_id", id).order("captured_at", { ascending: false }),
+        supabase.from("article_snapshots").select("*").eq("article_id", id).order("captured_at", { ascending: true }),
       ]);
       setAuthors(((au.data ?? []) as any[]).map((r) => r.authors?.name).filter(Boolean));
       setKeywords(((kw.data ?? []) as any[]).map((r) => r.keywords?.term).filter(Boolean));
@@ -153,25 +153,19 @@ export default function ArticleDetail({ id }: { id: number }) {
         </DL>
       )}
 
-      {/* Änderungsverlauf / Timeline */}
+      {/* Änderungsverlauf: chronologische Versions-Karten, alt/neu gegenübergestellt, in sich scrollbar */}
       <DL h="Änderungsverlauf">
         {snaps.length === 0 ? (
           <div className="empty">
-            Noch keine Änderungen erfasst. Sobald margn den Artikel erneut besucht und sich Text oder
-            Überschrift ändern, erscheint hier eine Zeitleiste — mit Unterscheidung zwischen
-            <strong> Erweiterungen</strong> (neu hinzugefügte Passagen) und <strong> stillen Änderungen</strong> (nachträglich überarbeitete Stellen).
+            Noch keine Änderungen erfasst. Sobald margn den Artikel erneut besucht und sich Text,
+            Überschrift oder Veröffentlichungsdatum ändern, erscheint hier der Verlauf — jede Version
+            mit <strong>Vorher/Jetzt</strong>-Gegenüberstellung und Badges für
+            <strong> unsichtbare Änderungen</strong> (Überschrift, Datum).
           </div>
         ) : (
-          <>
-            <div className="diff-legend">
-              <span><mark className="hl-add">grün</mark> = neu hinzugekommen</span>
-              <span><mark className="hl">gelb</mark> = ersetzt</span>
-              <span><del className="hl-rm">rot</del> = entfernt</span>
-            </div>
-            <div className="tl">
-              {snaps.map((s) => <TimelineItem key={s.id} s={s} />)}
-            </div>
-          </>
+          <div className="chist">
+            {snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)}
+          </div>
         )}
       </DL>
 
@@ -212,45 +206,86 @@ function inlineOps(oldS: string, newS: string): Op[] {
   for (let x = 1; x < segs.length; x++) if (segs[x].op === "ins" && segs[x - 1].op === "del") segs[x].op = "repl";
   return segs;
 }
-function InlineDiff({ oldS, newS }: { oldS: string; newS: string }) {
-  return <>{inlineOps(oldS, newS).map((s, x) =>
+// Aus der OP-Liste rendern wir ZWEI getrennte Versionen statt eines gemischten
+// Durchstreich-Texts: alte Seite zeigt eq + entfernte Wörter (rot), neue Seite zeigt
+// eq + ergänzte/ersetzte Wörter (grün). „repl" = ersetztes Wort (gehört zur neuen Seite).
+function SideOld({ ops }: { ops: Op[] }) {
+  return <>{ops.map((s, x) =>
     s.op === "del" ? <del key={x} className="hl-rm">{s.t}</del>
-    : s.op === "ins" ? <mark key={x} className="hl-add">{s.t}</mark>
-    : s.op === "repl" ? <mark key={x} className="hl">{s.t}</mark>
+    : s.op === "ins" || s.op === "repl" ? null
     : <span key={x}>{s.t}</span>)}</>;
 }
-// Eine geänderte/neue/entfernte Passage rendern.
-function ChangePassage({ c }: { c: Change }) {
-  if (c.old && c.new) return <div className="tl-passage edit"><span className="pk">✎ Geändert</span><span className="diff-body"><InlineDiff oldS={c.old} newS={c.new} /></span></div>;
-  if (c.new) return <div className="tl-passage add"><span className="pk">+ Neu hinzugekommen</span><span className="diff-body"><mark className="hl-add">{c.new}</mark></span></div>;
-  return <div className="tl-passage del"><span className="pk">− Entfernt</span><span className="diff-body"><del className="hl-rm">{c.old}</del></span></div>;
+function SideNew({ ops }: { ops: Op[] }) {
+  return <>{ops.map((s, x) =>
+    s.op === "ins" || s.op === "repl" ? <mark key={x} className="hl-add">{s.t}</mark>
+    : s.op === "del" ? null
+    : <span key={x}>{s.t}</span>)}</>;
+}
+// Zwei Versionen gegenübergestellt (Vorher | Jetzt) — geänderte Wörter je Seite dezent markiert.
+function Juxta({ oldS, newS, label }: { oldS: string; newS: string; label: string }) {
+  const ops = inlineOps(oldS, newS);
+  return (
+    <div className="chist-block">
+      <div className="lbl">{label}</div>
+      <div className="chist-2">
+        <div className="chist-ver old"><span className="vlbl">Vorher</span><span><SideOld ops={ops} /></span></div>
+        <div className="chist-ver new"><span className="vlbl">Jetzt</span><span><SideNew ops={ops} /></span></div>
+      </div>
+    </div>
+  );
 }
 
-function TimelineItem({ s }: { s: Snapshot }) {
-  const kindLabel = s.change_kind === "extension" ? "Erweiterung" : s.change_kind === "edit" ? "Stille Änderung" : "Geändert & erweitert";
-  const Icon = s.change_kind === "edit" ? Pencil : Plus;
-  const cls = s.change_kind === "extension" ? "ok" : s.change_kind === "edit" ? "lock" : "wait";
+// Eine Version im Verlauf = eine Karte (chronologisch). Badges markieren auch unsichtbare
+// Änderungen (Überschrift, Veröffentlichungsdatum), die auf den ersten Blick verborgen sind.
+function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
+  const isEdit = s.change_kind === "edit";
+  const kindLabel = s.change_kind === "extension" ? "Erweiterung" : isEdit ? "Stille Änderung" : "Geändert & erweitert";
+  const Icon = isEdit ? Pencil : Plus;
+  const cls = s.change_kind === "extension" ? "ok" : isEdit ? "lock" : "wait";
   const changes = (s.changes ?? []).filter((c) => c.old || c.new);
+  const titleChanged = !!(s.title_old && s.title_new);
+  const dateChanged = !!(s.pubdate_old && s.pubdate_new);
   return (
-    <div className="tl-item">
-      <span className={`tl-dot ${s.change_kind}`} />
-      <div className="tl-head">
+    <div className={`chist-card ${s.change_kind}`}>
+      <div className="chist-head">
+        <span className="chist-v">V{v}</span>
         <span className={`badge ${cls}`}><Icon /> {kindLabel}</span>
-        <span className="tl-when">{fmtDate(s.captured_at)}</span>
-        {s.word_delta ? <span className="faint" style={{ fontSize: 12.5 }}>{s.word_delta > 0 ? "+" : ""}{s.word_delta} Wörter</span> : null}
+        <span className="chist-when">{fmtDate(s.captured_at)}</span>
+        <span className="chist-chips">
+          {titleChanged && <span className="chist-chip">Überschrift</span>}
+          {dateChanged && <span className="chist-chip date">Datum</span>}
+          {s.added_count > 0 && <span className="chist-chip add">+{s.added_count}&nbsp;Absatz{s.added_count > 1 ? "e" : ""}</span>}
+          {s.removed_count > 0 && <span className="chist-chip del">−{s.removed_count}&nbsp;Absatz{s.removed_count > 1 ? "e" : ""}</span>}
+          {s.word_delta ? <span className="chist-chip">{s.word_delta > 0 ? "+" : ""}{s.word_delta}&nbsp;W</span> : null}
+        </span>
       </div>
-      {s.title_old && s.title_new && (
-        <div className="tl-title-change"><span className="diff-lbl">Überschrift</span><span className="new"><InlineDiff oldS={s.title_old} newS={s.title_new} /></span></div>
+      {dateChanged && (
+        <div className="chist-date"><Clock size={14} /><span>Veröffentlichungsdatum still geändert — <b>vorher</b> {fmtDate(s.pubdate_old)} · <b>jetzt</b> {fmtDate(s.pubdate_new)}</span></div>
       )}
-      {changes.length > 0
-        ? changes.map((c, x) => <ChangePassage key={x} c={c} />)
-        : s.added ? (
-          // Fallback für Altdaten ohne strukturierten Diff: ganze Passage (ohne Vollmarkierung)
-          <div className={`tl-passage ${s.change_kind === "edit" ? "edit" : "add"}`}>
-            <span className="pk">{s.change_kind === "edit" ? "✎ Geänderte Passage" : "+ Neu hinzugekommen"}</span>
-            <span className="diff-body">{s.added.length > 700 ? s.added.slice(0, 700) + "…" : s.added}</span>
+      {titleChanged && <Juxta oldS={s.title_old!} newS={s.title_new!} label="Überschrift" />}
+      {changes.map((c, i) =>
+        c.old && c.new ? <Juxta key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />
+        : c.new ? (
+          <div className="chist-block" key={i}>
+            <div className="lbl add-l">Neu hinzugekommen</div>
+            <div className="chist-ver new">{c.new}</div>
           </div>
-        ) : s.removed_count > 0 ? <p className="rm-note">− {s.removed_count} Passage(n) entfernt</p> : null}
+        ) : (
+          <div className="chist-block" key={i}>
+            <div className="lbl del-l">Entfernt</div>
+            <div className="chist-ver old">{c.old}</div>
+          </div>
+        )
+      )}
+      {changes.length === 0 && !titleChanged && s.added && (
+        <div className="chist-block">
+          <div className={`lbl ${isEdit ? "del-l" : "add-l"}`}>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
+          <div className={`chist-ver ${isEdit ? "old" : "new"}`}>{s.added.length > 700 ? s.added.slice(0, 700) + "…" : s.added}</div>
+        </div>
+      )}
+      {changes.length === 0 && !titleChanged && !s.added && !dateChanged && s.removed_count > 0 && (
+        <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>− {s.removed_count} Passage(n) entfernt</p>
+      )}
     </div>
   );
 }

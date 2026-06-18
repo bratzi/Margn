@@ -428,7 +428,7 @@ type PrevState = { title: string | null; content_hash: string | null; para_fps: 
 // Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
 // Unterscheidet "extension" (nur hinzugefügt = valide Erweiterung, z.B. Timeline-Artikel) von
 // "edit" (entfernt/ersetzt = stille Änderung) und "mixed".
-async function trackChanges(articleId: number, prev: PrevState, newTitle: string | null, body: string, isLiveblog: boolean) {
+async function trackChanges(articleId: number, prev: PrevState, newTitle: string | null, body: string, isLiveblog: boolean, prevPub: string | null = null, newPub: string | null = null) {
   const paras = normalizeParas(body);
   if (!paras.length) return;
   const fps = paras.map(fp);
@@ -445,7 +445,11 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     return;
   }
   const titleChanged = !!prev.title && !!newTitle && decodeEntities(prev.title) !== decodeEntities(newTitle);
-  if (prev.content_hash === contentHash && !titleChanged) return; // nichts geändert
+  // Verlage ändern beim Bearbeiten oft (nicht immer) STILL das Veröffentlichungsdatum mit.
+  // Als unsichtbare Änderung mit-tracken. ≥60 s Differenz, damit Format-/Sekundenjitter nicht zählt.
+  // (Sticky-Logik in saveArticleFull/enrich liefert hier eh nur PRÄZISE Datumswerte → kein Rauschen.)
+  const pubChanged = !!prevPub && !!newPub && Math.abs(Date.parse(newPub) - Date.parse(prevPub)) >= 60000;
+  if (prev.content_hash === contentHash && !titleChanged && !pubChanged) return; // nichts geändert
 
   // Absatz-Diff
   const oldSet = new Set((prev.para_fps ?? "").split(",").filter(Boolean));
@@ -457,7 +461,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
 
   // Nur reine Umsortierung (gleiche Absätze, andere Reihenfolge) → kein Snapshot.
   // Absätze sind durch normalizeParas bereits ≥60 Zeichen, daher zählt jeder echte Zugang.
-  if (!titleChanged && addedFps.length === 0 && removedCount === 0) {
+  if (!titleChanged && !pubChanged && addedFps.length === 0 && removedCount === 0) {
     await sb.from("articles").update({ content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords }).eq("id", articleId);
     await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
@@ -475,13 +479,15 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   //  - Sonst Netto-Zuwachs (mehr hinzu als entfernt) → Erweiterung.
   //  - Sonst (Umschreiben/Kürzen) → Edit.
   const isTimeline = isLiveblog || prev.article_type === "timeline" || (prev.extension_count ?? 0) >= 2;
+  const contentChanged = addedFps.length > 0 || removedCount > 0;
   let kind: "extension" | "edit";
-  if (isTimeline) kind = "extension";
+  if (!contentChanged && !titleChanged && pubChanged) kind = "edit"; // reines Um-Datieren = stille Änderung
+  else if (isTimeline) kind = "extension";
   else if (titleChanged) kind = "edit";
   else if (addedFps.length > removedCount) kind = "extension";
   else kind = "edit";
 
-  await sb.from("article_snapshots").insert({
+  const snapRow: Record<string, unknown> = {
     article_id: articleId, change_kind: kind,
     title_old: titleChanged ? decodeEntities(prev.title!) : null,
     title_new: titleChanged ? decodeEntities(newTitle!) : null,
@@ -489,7 +495,16 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     added_count: addedFps.length, removed_count: removedCount,
     word_delta: bodyWords - (prev.body_words ?? bodyWords),
     changes,
-  });
+  };
+  if (pubChanged) { snapRow.pubdate_old = prevPub; snapRow.pubdate_new = newPub; }
+  const { error: snapErr } = await sb.from("article_snapshots").insert(snapRow);
+  if (snapErr && pubChanged && /pubdate/i.test(snapErr.message)) {
+    // Spalten pubdate_old/new noch nicht via ALTER angelegt → Snapshot ohne Datumsfelder retten.
+    delete snapRow.pubdate_old; delete snapRow.pubdate_new;
+    await sb.from("article_snapshots").insert(snapRow);
+  } else if (snapErr) {
+    console.error("SNAPSHOT-FEHLER:", snapErr.message);
+  }
 
   const extCount = (prev.extension_count ?? 0) + (kind === "extension" ? 1 : 0);
   const editCount = (prev.edit_count ?? 0) + (kind === "edit" ? 1 : 0);
@@ -558,7 +573,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   const tb = trackBody(html, url, art, meta.article_type === "liveblog");
-  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive);
+  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null);
   return id;
 }
 
@@ -1407,7 +1422,7 @@ async function enrichArticles(sources: Source[]) {
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
           const tb = trackBody(html, item.url, art, meta.article_type === "liveblog");
-          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive);
+          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null);
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }

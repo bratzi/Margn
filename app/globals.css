@@ -661,6 +661,48 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .tl-title-change { padding:11px 14px; border-radius:8px; background: var(--surface-2); border:1px solid var(--line); border-left:3px solid var(--amber); }
 .tl-title-change .new { display:block; color:var(--ink); font-weight:650; font-size:14.5px; line-height:1.7; margin-top:3px; }
 
+/* === Änderungsverlauf v2: chronologische Versions-Karten, alt/neu gegenübergestellt, in sich scrollbar === */
+.chist { position: relative; max-height: 72vh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 6px 16px 10px 28px; margin-top: 4px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); }
+.chist::-webkit-scrollbar { width: 10px; }
+.chist::-webkit-scrollbar-track { background: transparent; }
+.chist::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 7px; border: 3px solid var(--surface-2); }
+.chist::before { content: ""; position: absolute; top: 22px; bottom: 22px; left: 12px; width: 2px; background: var(--line); border-radius: 2px; }
+.chist-card { position: relative; margin: 16px 0; padding: 15px 18px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r); box-shadow: 0 8px 26px -20px rgba(0,0,0,.55); }
+.chist-card::before { content: ""; position: absolute; left: -22px; top: 19px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent); border: 3px solid var(--surface-2); }
+.chist-card.edit::before { background: var(--red); }
+.chist-card.extension::before { background: var(--green); }
+.chist-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.chist-v { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 600; letter-spacing: .05em;
+  color: var(--accent); background: var(--accent-sub); border: 1px solid transparent; border-radius: 999px; padding: 2px 9px; }
+.chist-when { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.chist-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.chist-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .04em;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
+.chist-chip.add { color: var(--green); border-color: color-mix(in srgb, var(--green) 42%, transparent); }
+.chist-chip.del { color: var(--red); border-color: color-mix(in srgb, var(--red) 42%, transparent); }
+.chist-chip.date { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+.chist-date { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding: 9px 13px; border-radius: 8px;
+  font-size: 13px; line-height: 1.55; color: var(--muted); background: var(--accent-sub);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+.chist-date svg { position: relative; top: 2px; color: var(--accent); flex-shrink: 0; }
+.chist-date b { color: var(--ink); font-weight: 600; }
+.chist-block { margin-top: 13px; }
+.chist-block .lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 7px; }
+.chist-block .lbl.add-l { color: var(--green); }
+.chist-block .lbl.del-l { color: var(--red); }
+.chist-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 680px) { .chist-2 { grid-template-columns: 1fr; } }
+.chist-ver { font-size: 13px; line-height: 1.72; padding: 11px 13px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface-2); }
+.chist-ver .vlbl { display: block; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 5px; }
+.chist-ver.old { border-left: 3px solid var(--red); }
+.chist-ver.old .vlbl { color: var(--red); }
+.chist-ver.new { border-left: 3px solid var(--green); }
+.chist-ver.new .vlbl { color: var(--green); }
+
 .empty { color: var(--faint); font-size: 13px; padding: 16px; background: var(--surface-2); border-radius: 7px; border-left: 3px solid var(--line-2); line-height: 1.6; }
 
 /* edits/echoes Altseiten: zentrierter Fallback */
