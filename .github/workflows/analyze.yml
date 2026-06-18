@@ -1,31 +1,14 @@
 name: pipeline
 on:
-  # EINE zusammengelegte Pipeline (vormals getrennt: scrape + analyze + structure):
-  #   1) billige HTTP-Entdeckung (CRAWL_RENDER=0)  →  2) teures Rendern (CRAWL_MODE=analyze)
-  # …im SELBEN Job. So wird checkout + npm ci + Playwright-Install nur EINMAL pro
-  # Zyklus bezahlt, statt die Entdeckung 12×/Tag separat mit vollem Setup-Overhead
-  # laufen zu lassen (das war der größte Minuten-Fresser). STÜNDLICH → 24×/Tag frische
-  # Daten + 4× so viele Re-Scan-Chancen für stille Edits. Möglich, weil das Repo PUBLIC
-  # ist → GitHub-Actions-Minuten sind dann unbegrenzt & gratis (kein 2000-min-Limit mehr).
-  #
-  # Zweiter Cron = structure (wöchentlich): Rubriken/Hubs kartieren, Link-Klassifizierung
-  # auffrischen — gleicher Playwright-Job, aber nur 1×/Woche statt bei jedem 4h-Zyklus.
-  # Welcher Cron lief, steuert die `if:`-Bedingungen der Schritte (github.event.schedule).
-  # Krumme Minute (:23) statt :00 — die volle Stunde ist GitHubs meistgebuchter
-  # Cron-Slot (Millionen Repos auf "0 * * * *"), dort wartet man am längsten und
-  # Runs werden bei Last am ehesten still verworfen. :23 ist deutlich ruhiger.
   schedule:
-    - cron: "23 * * * *"    # Pipeline: Entdeckung + Rendern, stündlich (:23, ruhiger als :00)
-    - cron: "23 5 * * 0"    # structure: wöchentlich, So 05:23 UTC
+    - cron: "23 * * * *"
+    - cron: "23 5 * * 0"
   workflow_dispatch:
     inputs:
       mode:
-        description: "Manuell: pipeline (Entdeckung+Rendern) oder structure (Rubriken kartieren)"
         type: choice
         default: pipeline
         options: [pipeline, structure]
-  # Per Commit auslösbar: eine Änderung an .github/pipeline.trigger startet SOFORT einen
-  # Pipeline-Lauf (Entdeckung + Rendern) — zum manuellen Anstoßen ohne UI/Token.
   push:
     paths:
       - ".github/pipeline.trigger"
@@ -57,25 +40,22 @@ jobs:
       - run: npx playwright install-deps chromium
         working-directory: scraper
 
-      # 1) ENTDECKUNG — rein HTTP, kein Browser (~3 min). Findet neue Artikel-URLs
-      #    via News-Sitemaps/Feeds/flachem HTML-Crawl und markiert sie als pages.
-      - name: discover (HTTP, kein Browser)
+      - name: discover
         if: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          CRAWL_RENDER: "0"               # Discovery-Only, kein Browser
+          CRAWL_RENDER: "0"
           CRAWL_MAX_FETCHES: "150"
           CRAWL_MAX_SITEMAP_URLS: "1500"
           CRAWL_MAX_DEPTH: "2"
           CRAWL_DELAY_MS: "50"
           CRAWL_CONCURRENCY: "10"
-          CRAWL_TIME_BUDGET_MS: "180000"  # 3 min gesamt
+          CRAWL_TIME_BUDGET_MS: "180000"
 
-      # 2) RENDERN — Playwright, neueste Artikel zuerst + Re-Scans (stille Edits).
-      - name: render (Playwright)
+      - name: render
         if: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
@@ -83,19 +63,13 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "analyze"
-          # Repo PUBLIC → Actions gratis/unbegrenzt → großzügiges Budget. Messung (#72): ~83
-          # Renders/min → 2500 Seiten ≈ 30 min, plus Discovery ~3 min, sicher unter 50-min-Timeout.
-          # Großer Re-Scan-Anteil, damit ALLE fälligen frischen Artikel JEDEN Lauf drankommen
-          # (Diagnose: 809 fällig, aber nur 350/Lauf → frische Artikel blieben „nur 1× gescannt").
           CRAWL_MAX_PAGES: "2500"
-          CRAWL_RESCAN_SHARE: "0.6"    # cap ~1500 Re-Scans/Lauf → räumt den Fällig-Pool in EINEM Lauf
-          RESCAN_DAYS: "3"             # Edit-Fenster 3 Tage (Edits passieren auch Tag 2–3)
+          CRAWL_RESCAN_SHARE: "0.6"
+          RESCAN_DAYS: "3"
           CRAWL_DELAY_MS: "60"
           CRAWL_CONCURRENCY: "10"
 
-      # 3) STRUKTUR — nur beim wöchentlichen Cron (So) bzw. manuell mit mode=structure.
-      #    Kartiert Rubriken/Hubs (kein Embedding) → frische Crawl-Seeds für die Entdeckung.
-      - name: structure (wöchentlich, Rubriken kartieren)
+      - name: structure
         if: ${{ github.event.schedule == '23 5 * * 0' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'structure') }}
         run: npm run scrape
         working-directory: scraper

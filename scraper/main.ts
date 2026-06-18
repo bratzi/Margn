@@ -81,12 +81,6 @@ type Seed = { url: string; depth: number; feed?: boolean };
 
 // embed() DEAKTIVIERT – reaktivieren wenn Cluster-Feature wieder aufgenommen wird.
 
-// n-tv gibt JEDER Liveblog-Ticker-Meldung eine eigene URL (…/HH-MM-Schlagzeile-idNNNN.html,
-// alle mit derselben idNNNN; alte URLs 308→aktuelle Meldung). Das zersplitterte EINEN
-// Liveblog sonst in dutzende Artikel-Zeilen → verfälschter Änderungsverlauf. `…/idNNNN.html`
-// löst stabil (308) auf die aktuelle Meldung auf (verifiziert) → als Kanonik nutzen, damit
-// alle Varianten via Unique-Constraint auf EINE Zeile fallen. NUR Ticker-Einträge (Slug
-// beginnt mit HH-MM-); normale n-tv-Artikel & andere Verlage bleiben unangetastet.
 function canonUrl(raw: string): string {
   try {
     const u = new URL(raw);
@@ -117,10 +111,6 @@ async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<ty
 
 const PAYWALL_CSS = /paywall|premium-overlay|piano-|plus-artikel|abo-schranke|metered-wall|subscriber-only|locked-content/i;
 
-// EINDEUTIGE Liveblog-Erkennung aus URL/Titel (präzise, wenig Falschtreffer).
-// Bewusst NICHT erkannt: Rubriken/Tagesformate (n-tv "der_tag", "Transfer-Ticker" = Einzelmeldungen,
-// Spiegel "News des Tages"). Echte, über Zeit wachsende Artikel werden empirisch über
-// extension_count>=2 → 'timeline' erkannt (siehe trackChanges), unabhängig vom URL-Muster.
 function isLiveContent(url: string, title: string | null): boolean {
   const hay = (url + " " + (title ?? "")).toLowerCase();
   if (/news?ticker\/.*alle-[a-z-]+-news/.test(hay)) return false; // Bild News-Hubs
@@ -377,14 +367,7 @@ function appendScan(prev: unknown): string[] {
   return [...arr, new Date().toISOString()].slice(-150);
 }
 
-// Liveblog-Ticker aus JSON-LD `LiveBlogPosting.liveBlogUpdate[]` extrahieren — der
-// schema.org-Standard, den Tagesschau/FAZ/Bild/Le Monde serverseitig liefern (verifiziert
-// im echten HTML). Liefert den KOMPLETTEN Ticker als Absatztext, deterministisch nach
-// datePublished sortiert → unabhängig von Scroll/Lazy-Load und damit STABIL über Scans.
-// Behebt die Pseudo-Änderungen, die entstanden, weil Readability je Scan nur ein anderes
-// Teilfragment der noch nicht nachgeladenen Ticker-Liste griff (z.B. Bild 5830: 180 Wörter,
-// 33× „erweitert"). Verlage unterscheiden sich nur in der Mechanik des Anzeigens — die
-// JSON-LD-Repräsentation ist einheitlich, daher EIN Pfad für alle.
+// Liveblog-Ticker aus JSON-LD (LiveBlogPosting.liveBlogUpdate[]).
 function extractLiveBlog(html: string): { body: string; count: number } | null {
   const updates: any[] = [];
   for (const node of parseJsonLd(html)) {
@@ -413,30 +396,20 @@ function extractLiveBlog(html: string): { body: string; count: number } | null {
   return parts.length ? { body: parts.join("\n\n"), count: parts.length } : null;
 }
 
-// Entfernt verlagsspezifischen Kopf-/UI-Müll, den Readability/DOM mit in den Body zieht
-// (Kicker, Bildunterschrift, Foto-Credit, Datums-/Uhrzeit-Stempel, TTS-Buttons, „Artikel
-// weiterlesen"). Das ist KEIN Artikeltext und erzeugt sonst Pseudo-Änderungen im Verlauf,
-// wenn es zwischen zwei Scans auf-/abtaucht (z.B. Bild „Text to Speech:"). PRO VERLAG explizit,
-// weil das Muster je Seite anders ist. Geprüft 2026-06-18: Tagesschau/Spiegel/FAZ sind sauber,
-// nur Bild + n-tv betroffen. Liveblogs (JSON-LD) sind sauber → laufen NICHT hier durch.
+// Normalisiert den extrahierten Body je Quelle (entfernt Nicht-Fließtext am Anfang).
 function cleanBody(body: string, url: string, title: string | null): string {
   let b = body;
   let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
 
-  // Bild: der gesamte Artikel-Karten-Kopf endet mit „Artikel weiterlesen" → alles davor weg
-  // (Kicker · Bildunterschrift · „Foto: …" · Datum/Uhrzeit · TTS-Button).
   if (/(^|\.)bild\.de$/.test(host)) {
     const i = b.indexOf("Artikel weiterlesen");
     if (i >= 0 && i < 700) b = b.slice(i + "Artikel weiterlesen".length);
-    // Fallback, falls der Button mal fehlt: einzelne Chrome-Fragmente killen.
     b = b.replace(/\bFoto:[^]{0,90}?\d{1,2}\.\d{2}\.\d{4}\s*[-–—]\s*\d{1,2}:\d{2}\s*Uhr/g, " ")
          .replace(/TTS-Player überspringen/g, " ")
          .replace(/Text to Speech:[^]{0,140}?(?=Artikel weiterlesen|[A-ZÄÖÜ])/g, " ")
          .replace(/Artikel weiterlesen/g, " ");
   }
 
-  // n-tv: „<Kicker><Schlagzeile><Text>" verklebt → bis EINSCHLIESSLICH Titel kappen, wenn der
-  // in den ersten ~280 Zeichen steht. Tolerant ggü. Seitennamen-Suffix („… - n-tv.de").
   if (/(^|\.)n-tv\.de$/.test(host) && title) {
     const head = title.split(/\s+[-|–]\s+/)[0].trim();
     if (head.length > 12) {
