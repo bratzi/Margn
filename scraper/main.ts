@@ -359,6 +359,50 @@ function appendScan(prev: unknown): string[] {
   return [...arr, new Date().toISOString()].slice(-150);
 }
 
+// Liveblog-Ticker aus JSON-LD `LiveBlogPosting.liveBlogUpdate[]` extrahieren — der
+// schema.org-Standard, den Tagesschau/FAZ/Bild/Le Monde serverseitig liefern (verifiziert
+// im echten HTML). Liefert den KOMPLETTEN Ticker als Absatztext, deterministisch nach
+// datePublished sortiert → unabhängig von Scroll/Lazy-Load und damit STABIL über Scans.
+// Behebt die Pseudo-Änderungen, die entstanden, weil Readability je Scan nur ein anderes
+// Teilfragment der noch nicht nachgeladenen Ticker-Liste griff (z.B. Bild 5830: 180 Wörter,
+// 33× „erweitert"). Verlage unterscheiden sich nur in der Mechanik des Anzeigens — die
+// JSON-LD-Repräsentation ist einheitlich, daher EIN Pfad für alle.
+function extractLiveBlog(html: string): { body: string; count: number } | null {
+  const updates: any[] = [];
+  for (const node of parseJsonLd(html)) {
+    if (!node || typeof node !== "object" || !typeIncludes(node["@type"], "LiveBlogPosting")) continue;
+    const u = (node as any).liveBlogUpdate;
+    if (Array.isArray(u)) updates.push(...u);
+    else if (u && typeof u === "object") updates.push(u);
+  }
+  if (!updates.length) return null;
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const e of updates
+    .map((x) => ({
+      t: Date.parse(x?.datePublished ?? "") || 0,
+      head: typeof x?.headline === "string" ? x.headline.trim() : "",
+      text: typeof x?.articleBody === "string" ? x.articleBody.trim() : "",
+    }))
+    .filter((e) => e.head || e.text)
+    .sort((a, b) => a.t - b.t)) {
+    const para = [e.head, e.text].filter(Boolean).join(". ");
+    const key = fp(para);
+    if (seen.has(key)) continue; // doppelte Updates (gleicher Text) zusammenfassen
+    seen.add(key);
+    parts.push(para);
+  }
+  return parts.length ? { body: parts.join("\n\n"), count: parts.length } : null;
+}
+
+// Body + Liveblog-Flag fürs Change-Tracking bestimmen (verlagsübergreifend). Für echte
+// Liveblogs den vollständigen JSON-LD-Ticker bevorzugen; sonst den Readability-Body.
+function trackBody(html: string, art: { body: string } | null, metaIsLive: boolean): { body: string; isLive: boolean } | null {
+  const live = extractLiveBlog(html);
+  if (live) return { body: live.body, isLive: true };
+  return art ? { body: art.body, isLive: metaIsLive } : null;
+}
+
 type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null } | null;
 
 // Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
@@ -492,7 +536,8 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
-  if (art) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
+  const tb = trackBody(html, art, meta.article_type === "liveblog");
+  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive);
   return id;
 }
 
@@ -1308,7 +1353,8 @@ async function enrichArticles(sources: Source[]) {
           void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
-          if (art) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art.title, art.body, meta.article_type === "liveblog");
+          const tb = trackBody(html, art, meta.article_type === "liveblog");
+          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive);
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
