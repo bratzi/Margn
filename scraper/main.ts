@@ -1079,34 +1079,86 @@ async function analyzeBacklog() {
   // Wasserstand-Topf aufgefüllt wird, bekommt der Re-Scan-Pool garantiert sein
   // Minimum. Sonst würde ein großer Rückstand (z.B. Le Monde-Archiv) den gesamten
   // Topf schlucken und stille Edits wären nie sichtbar.
-  const RESCAN_CAP = Math.max(50, Math.ceil(MAX_PAGES * 0.1)); // mind. 10 %
+  // Re-Scan-Anteil am Render-Budget. War 10 % (=150 bei MAX_PAGES 1500) → viel zu knapp:
+  // bei ~950 fälligen frischen Artikeln/Lauf kam jeder nur ~0,6×/Tag dran, das Edit-Fenster
+  // (Stunden nach Veröffentlichung) blieb ungedeckt. Anteil hoch ⇒ frische Edits werden
+  // erfasst; kostet KEINE Extra-CI-Minuten (gerendert wird ohnehin bis MAX_PAGES), verschiebt
+  // nur Budget vom Backfill (nie gerenderte Altartikel) zu Re-Scans. Per Env tunbar.
+  const RESCAN_SHARE = Number(process.env.CRAWL_RESCAN_SHARE ?? 0.35);
+  const RESCAN_CAP = Math.max(50, Math.ceil(MAX_PAGES * RESCAN_SHARE));
   const newCount0 = queue.length;
   {
     const rescanBudget = Math.min(RESCAN_CAP, MAX_PAGES - queue.length);
     if (rescanBudget > 0) {
-      const rdays = Number(process.env.RESCAN_DAYS ?? 4);
-      const since = new Date(Date.now() - rdays * 86400000).toISOString();
+      const now = Date.now();
+      const H = 3_600_000;
+      const horizonDays = Number(process.env.RESCAN_DAYS ?? 14); // Gesamt-Fenster (vorher 4)
       const inQueue = new Set(queue.map((q) => q.url));
-      // WICHTIG: Spalte heißt in der Basistabelle `first_seen` (nicht `discovered_at` —
-      // das ist nur ein View-Alias in page_overview). Mit `discovered_at` warf diese
-      // Query JEDEN Lauf einen 400 → recent=undefined → 0 Re-Scans, stiller Totalausfall.
-      // `ältester last_seen zuerst` (ASC): re-scannt das Überfälligste zuerst → die
-      // Morgens-Artikel sind abends die ältesten Scans und werden so re-gescannt; nach
-      // dem Scan rückt ihr last_seen nach hinten → die Menge zykelt sauber durch.
-      const { data: recent, error: rescanErr } = await sb.from("articles")
-        .select("url,source_id,last_seen")
-        .in("source_id", activeIds)
-        .not("title", "is", null)
-        .or(`published_at.gte.${since},first_seen.gte.${since}`)
-        .order("last_seen", { ascending: true })
-        .limit(rescanBudget + 200);
-      if (rescanErr) console.error("RE-SCAN-QUERY-FEHLER:", rescanErr.message);
-      for (const r of (recent ?? []) as any[]) {
-        if (queue.length - newCount0 >= rescanBudget) break;
-        if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); }
+
+      // ALTERSGESTAFFELTE KADENZ statt „ältester last_seen zuerst" über ein flaches Fenster.
+      // Stille Überschriften-Edits — das Kernfeature — passieren STUNDEN nach der
+      // Veröffentlichung, nicht Tage danach. Die alte Strategie kam dem Fund kaum hinterher
+      // und re-scannte jeden Artikel erst ~4 T nach Entdeckung EINMAL (Lag empirisch exakt
+      // 3,8 T, knapp vor Ablauf des Fensters) → das Edit-Fenster war längst vorbei und die
+      // jüngste Kohorte stand im Frontend dauerhaft auf „Neu". Jetzt: frische Artikel JEDEN
+      // Lauf re-scannen, ältere zunehmend seltener.
+      //   Alter    = published_at (Fallback first_seen, wenn published_at NULL).
+      //   „fällig" = last_seen älter als das Stufen-Intervall (dueH).
+      //   Spalte heißt in der Basistabelle `first_seen` (NICHT `discovered_at` — das ist nur
+      //   ein View-Alias in page_overview; mit ihm warf die Query 400 → stiller Totalausfall).
+      // Pipeline läuft alle 4 h: dueH < 4 ⇒ „jeden Lauf". Gewichte summieren > 1 ⇒
+      // ungenutztes Budget einer Stufe rollt automatisch zur nächsten und zum Sicherheitsnetz.
+      const tiers = [
+        { loH: 0,   hiH: 24,               dueH: 3,  weight: 0.65 }, // frisch <24 h: jeder Lauf
+        { loH: 24,  hiH: 168,              dueH: 24, weight: 0.30 }, // jung 1–7 T: ~täglich
+        { loH: 168, hiH: horizonDays * 24, dueH: 48, weight: 0.15 }, // alt 7–14 T: ~alle 2 T
+      ];
+
+      const reserve = async (loH: number, hiH: number, dueH: number, slice: number) => {
+        if (slice <= 0 || hiH <= loH) return 0;
+        const lo = new Date(now - hiH * H).toISOString();         // älterer effTime-Rand
+        const hi = new Date(now - loH * H).toISOString();         // jüngerer effTime-Rand
+        const dueBefore = new Date(now - dueH * H).toISOString();  // nur „überfällige"
+        const { data, error } = await sb.from("articles")
+          .select("url,source_id")
+          .in("source_id", activeIds)
+          .not("title", "is", null)
+          .lte("last_seen", dueBefore)
+          .or(`and(published_at.gte.${lo},published_at.lte.${hi}),and(published_at.is.null,first_seen.gte.${lo},first_seen.lte.${hi})`)
+          .order("last_seen", { ascending: true }) // innerhalb der Stufe: Überfälligstes zuerst
+          .limit(slice + 100);
+        if (error) { console.error("RE-SCAN-STUFE-FEHLER:", error.message); return 0; }
+        let pushed = 0;
+        for (const r of (data ?? []) as any[]) {
+          if (pushed >= slice) break;
+          if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); pushed++; }
+        }
+        return pushed;
+      };
+
+      let remaining = rescanBudget;
+      for (const t of tiers) {
+        if (remaining <= 0) break;
+        remaining -= await reserve(t.loH, t.hiH, t.dueH, Math.min(remaining, Math.ceil(rescanBudget * t.weight)));
+      }
+      // Sicherheitsnetz: Restbudget mit dem global Überfälligsten im Gesamtfenster füllen
+      // (alte Strategie) — verhindert brachliegendes Budget in ruhigen Läufen.
+      if (remaining > 0) {
+        const since = new Date(now - horizonDays * 86_400_000).toISOString();
+        const { data } = await sb.from("articles")
+          .select("url,source_id")
+          .in("source_id", activeIds)
+          .not("title", "is", null)
+          .or(`published_at.gte.${since},first_seen.gte.${since}`)
+          .order("last_seen", { ascending: true })
+          .limit(remaining + 100);
+        for (const r of (data ?? []) as any[]) {
+          if (remaining <= 0) break;
+          if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); remaining--; }
+        }
       }
     }
-    console.log(`Re-Scan reserviert: ${queue.length - newCount0} jüngere Artikel (< ${Number(process.env.RESCAN_DAYS ?? 4)} Tage, ältester Scan zuerst, cap ${RESCAN_CAP})`);
+    console.log(`Re-Scan reserviert: ${queue.length - newCount0} Artikel (altersgestaffelt: frisch≫jung≫alt, cap ${RESCAN_CAP})`);
   }
 
   // Wasserstand-Auffüllung: nach Re-Scan-Reserve verbleibendes Budget mit NOCH NICHT
