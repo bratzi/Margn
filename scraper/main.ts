@@ -620,8 +620,14 @@ async function renderPage(ctx: BrowserContext, url: string, expand = false): Pro
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     const status = resp?.status() ?? 0;
-    await autoScroll(page, expand ? 9000 : 3000);
-    await expandTimeline(page, expand ? 12 : 5);
+    // Nur erkannte Liveblogs/Timelines vollständig nachladen (autoScroll + Button-Expansion).
+    // Normale Artikel haben den Volltext schon im Erst-Render → kein Scroll nötig; und der
+    // Liveblog-Ticker kommt ohnehin aus JSON-LD (serverseitig, scroll-unabhängig). autoScroll
+    // auf JEDEM Render war der Haupt-Laufzeit-Regress (10 → 25 min) → hier gezielt gegated.
+    if (expand) {
+      await autoScroll(page, 4500);
+      await expandTimeline(page, 6);
+    }
     const html = await page.content();
     return { status, html };
   } catch {
@@ -1203,12 +1209,11 @@ async function analyzeBacklog() {
   // Wasserstand-Topf aufgefüllt wird, bekommt der Re-Scan-Pool garantiert sein
   // Minimum. Sonst würde ein großer Rückstand (z.B. Le Monde-Archiv) den gesamten
   // Topf schlucken und stille Edits wären nie sichtbar.
-  // Re-Scan-Anteil am Render-Budget. War 10 % (=150 bei MAX_PAGES 1500) → viel zu knapp:
-  // bei ~950 fälligen frischen Artikeln/Lauf kam jeder nur ~0,6×/Tag dran, das Edit-Fenster
-  // (Stunden nach Veröffentlichung) blieb ungedeckt. Anteil hoch ⇒ frische Edits werden
-  // erfasst; kostet KEINE Extra-CI-Minuten (gerendert wird ohnehin bis MAX_PAGES), verschiebt
-  // nur Budget vom Backfill (nie gerenderte Altartikel) zu Re-Scans. Per Env tunbar.
-  const RESCAN_SHARE = Number(process.env.CRAWL_RESCAN_SHARE ?? 0.35);
+  // Re-Scan-Anteil am Render-Budget. 10 % (=150) war zu knapp fürs Edit-Fenster, 35 % zu viel
+  // (Laufzeit 10 → 25 min). 20 % (=300 bei MAX_PAGES 1500) ist der Kompromiss: deckt mit dem
+  // engen heute+gestern-Fenster die frischen Artikel gut ab, ohne den Lauf zu sprengen.
+  // Jeder Re-Scan ist ein teurer Browser-Render → direkter Laufzeit-Hebel. Per Env tunbar.
+  const RESCAN_SHARE = Number(process.env.CRAWL_RESCAN_SHARE ?? 0.2);
   const RESCAN_CAP = Math.max(50, Math.ceil(MAX_PAGES * RESCAN_SHARE));
   const newCount0 = queue.length;
   {
@@ -1216,7 +1221,7 @@ async function analyzeBacklog() {
     if (rescanBudget > 0) {
       const now = Date.now();
       const H = 3_600_000;
-      const horizonDays = Number(process.env.RESCAN_DAYS ?? 14); // Gesamt-Fenster (vorher 4)
+      const horizonDays = Number(process.env.RESCAN_DAYS ?? 2); // Re-Scan-Fenster: heute + gestern (war 14)
       const inQueue = new Set(queue.map((q) => q.url));
 
       // ALTERSGESTAFFELTE KADENZ statt „ältester last_seen zuerst" über ein flaches Fenster.
@@ -1233,9 +1238,8 @@ async function analyzeBacklog() {
       // Pipeline läuft alle 4 h: dueH < 4 ⇒ „jeden Lauf". Gewichte summieren > 1 ⇒
       // ungenutztes Budget einer Stufe rollt automatisch zur nächsten und zum Sicherheitsnetz.
       const tiers = [
-        { loH: 0,   hiH: 24,               dueH: 3,  weight: 0.65 }, // frisch <24 h: jeder Lauf
-        { loH: 24,  hiH: 168,              dueH: 24, weight: 0.30 }, // jung 1–7 T: ~täglich
-        { loH: 168, hiH: horizonDays * 24, dueH: 48, weight: 0.15 }, // alt 7–14 T: ~alle 2 T
+        { loH: 0,  hiH: 24,               dueH: 3,  weight: 0.7 }, // heute <24 h: jeder Lauf
+        { loH: 24, hiH: horizonDays * 24, dueH: 12, weight: 0.3 }, // gestern 24–48 h: ~2×/Tag
       ];
 
       const reserve = async (loH: number, hiH: number, dueH: number, slice: number) => {
