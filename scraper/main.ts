@@ -413,14 +413,49 @@ function extractLiveBlog(html: string): { body: string; count: number } | null {
   return parts.length ? { body: parts.join("\n\n"), count: parts.length } : null;
 }
 
+// Entfernt verlagsspezifischen Kopf-/UI-Müll, den Readability/DOM mit in den Body zieht
+// (Kicker, Bildunterschrift, Foto-Credit, Datums-/Uhrzeit-Stempel, TTS-Buttons, „Artikel
+// weiterlesen"). Das ist KEIN Artikeltext und erzeugt sonst Pseudo-Änderungen im Verlauf,
+// wenn es zwischen zwei Scans auf-/abtaucht (z.B. Bild „Text to Speech:"). PRO VERLAG explizit,
+// weil das Muster je Seite anders ist. Geprüft 2026-06-18: Tagesschau/Spiegel/FAZ sind sauber,
+// nur Bild + n-tv betroffen. Liveblogs (JSON-LD) sind sauber → laufen NICHT hier durch.
+function cleanBody(body: string, url: string, title: string | null): string {
+  let b = body;
+  let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
+
+  // Bild: der gesamte Artikel-Karten-Kopf endet mit „Artikel weiterlesen" → alles davor weg
+  // (Kicker · Bildunterschrift · „Foto: …" · Datum/Uhrzeit · TTS-Button).
+  if (/(^|\.)bild\.de$/.test(host)) {
+    const i = b.indexOf("Artikel weiterlesen");
+    if (i >= 0 && i < 700) b = b.slice(i + "Artikel weiterlesen".length);
+    // Fallback, falls der Button mal fehlt: einzelne Chrome-Fragmente killen.
+    b = b.replace(/\bFoto:[^]{0,90}?\d{1,2}\.\d{2}\.\d{4}\s*[-–—]\s*\d{1,2}:\d{2}\s*Uhr/g, " ")
+         .replace(/TTS-Player überspringen/g, " ")
+         .replace(/Text to Speech:[^]{0,140}?(?=Artikel weiterlesen|[A-ZÄÖÜ])/g, " ")
+         .replace(/Artikel weiterlesen/g, " ");
+  }
+
+  // n-tv: „<Kicker><Schlagzeile><Text>" verklebt → bis EINSCHLIESSLICH Titel kappen, wenn der
+  // in den ersten ~280 Zeichen steht. Tolerant ggü. Seitennamen-Suffix („… - n-tv.de").
+  if (/(^|\.)n-tv\.de$/.test(host) && title) {
+    const head = title.split(/\s+[-|–]\s+/)[0].trim();
+    if (head.length > 12) {
+      const esc = head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      b = b.replace(new RegExp("^[\\s\\S]{0,280}?" + esc), "");
+    }
+  }
+
+  return b.replace(/\s+/g, " ").trim();
+}
+
 // Body + Liveblog-Flag fürs Change-Tracking bestimmen (verlagsübergreifend). Für echte
-// Liveblogs den vollständigen JSON-LD-Ticker bevorzugen; sonst den Readability-Body.
-function trackBody(html: string, url: string, art: { body: string } | null, metaIsLive: boolean): { body: string; isLive: boolean } | null {
+// Liveblogs den vollständigen JSON-LD-Ticker bevorzugen; sonst den (bereinigten) Readability-Body.
+function trackBody(html: string, url: string, art: { body: string } | null, metaIsLive: boolean, title: string | null = null): { body: string; isLive: boolean } | null {
   const live = extractLiveBlog(html);
-  if (live) return { body: live.body, isLive: true };
-  if (art) return { body: art.body, isLive: metaIsLive };
+  if (live) return { body: live.body, isLive: true }; // JSON-LD-Ticker ist sauber → nicht bereinigen
+  if (art) return { body: cleanBody(art.body, url, title), isLive: metaIsLive };
   const fb = extractBodyFallback(html, url); // z.B. Spiegel: Readability scheiterte
-  return fb ? { body: fb.body, isLive: metaIsLive } : null;
+  return fb ? { body: cleanBody(fb.body, url, title), isLive: metaIsLive } : null;
 }
 
 type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null; description: string | null; og_image: string | null; paywalled: boolean | null; author_status: string | null; topic: string | null } | null;
@@ -605,7 +640,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
-  const tb = trackBody(html, url, art, meta.article_type === "liveblog");
+  const tb = trackBody(html, url, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
   if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
   return id;
 }
@@ -1458,7 +1493,7 @@ async function enrichArticles(sources: Source[]) {
           void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
-          const tb = trackBody(html, item.url, art, meta.article_type === "liveblog");
+          const tb = trackBody(html, item.url, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
           if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
