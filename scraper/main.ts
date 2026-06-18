@@ -1406,12 +1406,14 @@ async function enrichArticles(sources: Source[]) {
     // Anteil am Gesamt-Backlog → Budget (min. 10, damit kleine Quellen nicht verhungern)
     const quota = Math.max(10, Math.round((bl / Math.max(1, backlogTotal)) * MAX_PAGES));
     // Prio 1: kein Titel (komplette Lücke). NEUESTE zuerst, damit aktuelle Tage schnell
-    // vollständig werden (Nutzer schauen meist auf die jüngsten Artikel).
+    // vollständig werden. Darf das VOLLE Quota nehmen — wenn eine Quelle (z.B. Bild) den
+    // Backlog dominiert, soll der frühere 60%-Deckel sie nicht künstlich bremsen; das
+    // Datums-Backfill (Prio 2) bekommt nur den Rest, ist aber ohnehin nachrangig.
     const { data: noTitle } = await sb.from("articles").select("id,url,source_id")
       .eq("source_id", src.id).is("title", null)
-      .order("first_seen", { ascending: false }).limit(Math.ceil(quota * 0.6));
+      .order("first_seen", { ascending: false }).limit(quota);
     toEnrich.push(...((noTitle ?? []) as any[]));
-    // Prio 2: Titel vorhanden, aber Veröffentlichungsdatum fehlt
+    // Prio 2: Titel vorhanden, aber Veröffentlichungsdatum fehlt (nur falls Quota übrig)
     const missing = quota - (noTitle?.length ?? 0);
     if (missing > 0) {
       const { data: noDate } = await sb.from("articles").select("id,url,source_id")
