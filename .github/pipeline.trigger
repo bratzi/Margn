@@ -6,3 +6,4 @@
 # 2026-06-18 — Budget rauf (MAX_PAGES 2500, RESCAN_SHARE 0.6 → ~1500 Re-Scans/Lauf);
 #              Fällig-Pool (809, u.a. Artikel 74876) in einem Lauf abräumen.
 # 2026-06-18 — cleanBody: Bild-/n-tv-Kopf-Chrome aus dem Body-Tracking entfernen (saubere Re-Baseline).
+# 2026-06-18 — Re-Baseline-Zyklus anstoßen (vor dem Chrome-Snapshot-Cleanup).
