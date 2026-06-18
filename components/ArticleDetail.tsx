@@ -353,20 +353,26 @@ export default function ArticleDetail({ id }: { id: number }) {
         </DL>
       )}
 
-      {/* Änderungsverlauf: chronologische Versions-Karten, alt/neu gegenübergestellt, in sich scrollbar */}
+      {/* Änderungsverlauf als Zeitstrahl: oben die Veröffentlichung (Erstfassung) mit Uhrzeit,
+          darunter jede erfasste Version chronologisch, unten die aktuelle Fassung — Vorher/Jetzt. */}
       <DL h="Änderungsverlauf">
-        {snaps.length === 0 ? (
-          <div className="empty">
-            Noch keine Änderungen erfasst. Sobald margn den Artikel erneut besucht und sich etwas
-            ändert, erscheint hier der Verlauf — jede Version mit <strong>Vorher/Jetzt</strong>-Gegenüberstellung
-            und Badges für <strong>unsichtbare Änderungen</strong>: Überschrift, Veröffentlichungsdatum,
-            Teaser, Ressort, Paywall-Status und Autoren-Angabe.
-          </div>
-        ) : (
-          <div className="chist">
-            {snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)}
-          </div>
-        )}
+        <div className="chist">
+          <ChistAnchor kind="pub"
+            label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
+            time={a.published_at ?? a.first_seen}
+            sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
+          {snaps.length === 0 ? (
+            <div className="chist-none">
+              Seither <strong>keine Änderung erfasst</strong> — Überschrift, Text, Datum, Teaser,
+              Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
+              erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
+            </div>
+          ) : (
+            snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
+          )}
+          <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
+            sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
+        </div>
       </DL>
 
       <div style={{ marginTop: 28 }}>
@@ -460,6 +466,19 @@ function MetaEditView({ m }: { m: MetaEdit }) {
   }
   if (m.field === "author_status") return <MetaLine icon={<Pencil />}>Autoren-Angabe geändert — <b>{AUTHOR_STATUS_LABEL[m.old ?? ""] ?? m.old}</b> → <b>{AUTHOR_STATUS_LABEL[m.new ?? ""] ?? m.new}</b></MetaLine>;
   return null;
+}
+
+// Anker-Punkt auf dem Verlaufs-Zeitstrahl: oben = Veröffentlichung (Erstfassung), unten = aktuelle Fassung.
+function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: string; time: string | null; sub?: string }) {
+  return (
+    <div className={`chist-anchor ${kind}`}>
+      <div className="chist-anchor-head">
+        <span className="chist-anchor-label">{label}</span>
+        <span className="chist-anchor-time">{fmtDate(time)}</span>
+      </div>
+      {sub && <span className="chist-anchor-sub">{sub}</span>}
+    </div>
+  );
 }
 
 // Eine Version im Verlauf = eine Karte (chronologisch). Badges markieren auch unsichtbare
