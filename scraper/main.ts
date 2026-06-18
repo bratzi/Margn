@@ -500,9 +500,9 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
 // im DOM landen. Ohne das vergleicht das Änderungs-Tracking nur das sichtbare Fenster und
 // meldet falsche "Entfernungen", wenn Meldungen aus dem Erstausschnitt rutschen.
 // Verlagsübergreifende Textmuster (DE+FR); klickt bis nichts mehr wächst (max 12 Runden).
-const LOAD_MORE_RX = /^(mehr laden|mehr anzeigen|weitere (beiträge|meldungen|artikel|einträge)( laden| anzeigen)?|(ältere|frühere) (beiträge|meldungen|einträge)( laden| anzeigen)?|alle (beiträge|meldungen) anzeigen|nachladen|mehr beiträge|weiterlesen|load more|show more|charger plus|voir plus|plus de messages|afficher plus|lire la suite du live)$/i;
-async function expandTimeline(page: import("playwright").Page): Promise<void> {
-  for (let round = 0; round < 12; round++) {
+const LOAD_MORE_RX = /^(mehr laden|mehr anzeigen|weitere (beiträge|meldungen|artikel|einträge)( laden| anzeigen)?|(ältere|frühere) (beiträge|meldungen|einträge)( laden| anzeigen)?|alle (beiträge|meldungen) anzeigen|nachladen|mehr beiträge|load more|show more|charger plus|voir plus|plus de messages|afficher plus|lire la suite du live)$/i;
+async function expandTimeline(page: import("playwright").Page, maxRounds = 12): Promise<void> {
+  for (let round = 0; round < maxRounds; round++) {
     const before = await page.evaluate(() => document.body?.innerText.length ?? 0);
     const clicked = await page.evaluate((rxSrc: string) => {
       const rx = new RegExp(rxSrc, "i");
@@ -518,14 +518,44 @@ async function expandTimeline(page: import("playwright").Page): Promise<void> {
   }
 }
 
+// Lazy-/Infinite-Load anstoßen: in Schritten bis ans Seitenende scrollen, bis die
+// Höhe stabil bleibt (alle nachladenden Inhalte im DOM) oder das Zeitbudget aus ist.
+// Läuft für ALLE Verleger — billig für statische Seiten (Höhe sofort stabil → früher
+// Abbruch), gründlich für dynamische (Ticker/Timeline, JS-gerenderter Inhalt). Ohne
+// das erwischt jeder Scan ein anderes Teilfragment → das Change-Tracking meldet
+// Pseudo-Änderungen, die nur „noch nicht nachgeladen" waren (z.B. Bild-Live-Ticker:
+// Body 180 Wörter, 33× „erweitert", word_delta schwankt ±200). Danach zurück nach
+// oben, damit Readability sauber den Hauptinhalt greift.
+async function autoScroll(page: import("playwright").Page, maxMs = 6000): Promise<void> {
+  await page.evaluate(async (budget) => {
+    await new Promise<void>((resolve) => {
+      const t0 = Date.now();
+      let lastH = -1, stable = 0;
+      const tick = () => {
+        const h = document.documentElement.scrollHeight;
+        window.scrollTo(0, h);
+        if (h === lastH) { if (++stable >= 2) return resolve(); }
+        else { stable = 0; lastH = h; }
+        if (Date.now() - t0 > budget) return resolve();
+        setTimeout(tick, 250);
+      };
+      tick();
+    });
+  }, maxMs).catch(() => {});
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+}
+
 // Eine Seite im echten Browser rendern. Liefert HTTP-Status + gerendertes HTML.
-// expand=true: Timeline-/Liveblog-Seite vorher vollständig ausklappen (ältere Meldungen nachladen).
+// VOR dem Auslesen wird IMMER vollständig nachgeladen: erst autoScroll (lazy/infinite
+// für alle Verleger), dann Button-Expansion (self-gating — ohne passenden Button
+// sofort fertig). expand=true (erkannter Live-/Timeline-Inhalt) → gründlicher.
 async function renderPage(ctx: BrowserContext, url: string, expand = false): Promise<{ status: number; html: string | null }> {
   const page = await ctx.newPage();
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     const status = resp?.status() ?? 0;
-    if (expand) await expandTimeline(page);
+    await autoScroll(page, expand ? 9000 : 3000);
+    await expandTimeline(page, expand ? 12 : 5);
     const html = await page.content();
     return { status, html };
   } catch {
