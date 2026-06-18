@@ -21,13 +21,17 @@ type Detail = {
 type Change = { old?: string; new?: string };
 type Pctl = { label: string; verb: string; pct: number; n: number };
 type Neighbor = { articleId: number; title: string | null; outlet: string; country: string | null; shared: string[]; cross: boolean };
-type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; pubdate_old: string | null; pubdate_new: string | null; changes: Change[] | null };
+type MetaEdit = { field: string; old: string | null; new: string | null };
+type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; pubdate_old: string | null; pubdate_new: string | null; changes: Change[] | null; meta_edits: MetaEdit[] | null };
 
 const LANG: Record<string, string> = { de: "Deutsch", fr: "Français", en: "English" };
 const TYPE_LABEL: Record<string, string> = {
   news: "Nachricht", opinion: "Meinung", analysis: "Analyse", liveblog: "Liveblog", timeline: "Timeline-Artikel",
   review: "Rezension", reportage: "Reportage", interactive: "Interaktiv", interview: "Interview",
 };
+// Unsichtbare Metadaten-Edits: Feld-Schlüssel → kurzes Chip-Label.
+const META_LABEL: Record<string, string> = { description: "Teaser", og_image: "Bild", topic: "Ressort", paywalled: "Paywall", author_status: "Autor" };
+const AUTHOR_STATUS_LABEL: Record<string, string> = { named: "namentlich", anonymous: "Redaktion/Agentur", none: "kein Autor" };
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -353,10 +357,10 @@ export default function ArticleDetail({ id }: { id: number }) {
       <DL h="Änderungsverlauf">
         {snaps.length === 0 ? (
           <div className="empty">
-            Noch keine Änderungen erfasst. Sobald margn den Artikel erneut besucht und sich Text,
-            Überschrift oder Veröffentlichungsdatum ändern, erscheint hier der Verlauf — jede Version
-            mit <strong>Vorher/Jetzt</strong>-Gegenüberstellung und Badges für
-            <strong> unsichtbare Änderungen</strong> (Überschrift, Datum).
+            Noch keine Änderungen erfasst. Sobald margn den Artikel erneut besucht und sich etwas
+            ändert, erscheint hier der Verlauf — jede Version mit <strong>Vorher/Jetzt</strong>-Gegenüberstellung
+            und Badges für <strong>unsichtbare Änderungen</strong>: Überschrift, Veröffentlichungsdatum,
+            Teaser, Ressort, Paywall-Status und Autoren-Angabe.
           </div>
         ) : (
           <div className="chist">
@@ -431,8 +435,35 @@ function Juxta({ oldS, newS, label }: { oldS: string; newS: string; label: strin
   );
 }
 
+// Eine kompakte „so wurde es still geändert"-Zeile (Ressort/Paywall/Autor).
+function MetaLine({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return <div className="chist-meta">{icon}<span>{children}</span></div>;
+}
+// Rendert EINEN unsichtbaren Metadaten-Edit passend zum Feldtyp.
+function MetaEditView({ m }: { m: MetaEdit }) {
+  if (m.field === "description" && m.old && m.new) return <Juxta oldS={m.old} newS={m.new} label="Teaser geändert" />;
+  if (m.field === "og_image") return (
+    <div className="chist-block">
+      <div className="lbl">Vorschaubild getauscht</div>
+      <div className="chist-imgs">
+        <figure className="old"><figcaption>Vorher</figcaption>{m.old ? <img src={m.old} alt="" /> : <span className="faint">—</span>}</figure>
+        <figure className="new"><figcaption>Jetzt</figcaption>{m.new ? <img src={m.new} alt="" /> : <span className="faint">—</span>}</figure>
+      </div>
+    </div>
+  );
+  if (m.field === "topic") return <MetaLine icon={<Folder />}>Ressort verschoben — <b>{topicLabel(m.old ?? "")}</b> → <b>{topicLabel(m.new ?? "")}</b></MetaLine>;
+  if (m.field === "paywalled") {
+    const activated = m.new === "true";
+    return <MetaLine icon={activated ? <Lock size={14} /> : <LockOpen size={14} />}>{activated
+      ? <>Paywall <b>aktiviert</b> — der Artikel ist jetzt kostenpflichtig.</>
+      : <>Paywall <b>entfernt</b> — der Artikel ist jetzt frei zugänglich.</>}</MetaLine>;
+  }
+  if (m.field === "author_status") return <MetaLine icon={<Pencil />}>Autoren-Angabe geändert — <b>{AUTHOR_STATUS_LABEL[m.old ?? ""] ?? m.old}</b> → <b>{AUTHOR_STATUS_LABEL[m.new ?? ""] ?? m.new}</b></MetaLine>;
+  return null;
+}
+
 // Eine Version im Verlauf = eine Karte (chronologisch). Badges markieren auch unsichtbare
-// Änderungen (Überschrift, Veröffentlichungsdatum), die auf den ersten Blick verborgen sind.
+// Änderungen (Überschrift, Datum, Teaser, Ressort, Paywall, Autor), die auf den ersten Blick verborgen sind.
 function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   const isEdit = s.change_kind === "edit";
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : isEdit ? "Stille Änderung" : "Geändert & erweitert";
@@ -441,6 +472,7 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   const changes = (s.changes ?? []).filter((c) => c.old || c.new);
   const titleChanged = !!(s.title_old && s.title_new);
   const dateChanged = !!(s.pubdate_old && s.pubdate_new);
+  const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field);
   return (
     <div className={`chist-card ${s.change_kind}`}>
       <div className="chist-head">
@@ -450,6 +482,7 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
         <span className="chist-chips">
           {titleChanged && <span className="chist-chip">Überschrift</span>}
           {dateChanged && <span className="chist-chip date">Datum</span>}
+          {metaEdits.map((m) => <span key={m.field} className="chist-chip meta">{META_LABEL[m.field] ?? m.field}</span>)}
           {s.added_count > 0 && <span className="chist-chip add">+{s.added_count}&nbsp;Absatz{s.added_count > 1 ? "e" : ""}</span>}
           {s.removed_count > 0 && <span className="chist-chip del">−{s.removed_count}&nbsp;Absatz{s.removed_count > 1 ? "e" : ""}</span>}
           {s.word_delta ? <span className="chist-chip">{s.word_delta > 0 ? "+" : ""}{s.word_delta}&nbsp;W</span> : null}
@@ -458,6 +491,7 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
       {dateChanged && (
         <div className="chist-date"><Clock size={14} /><span>Veröffentlichungsdatum still geändert — <b>vorher</b> {fmtDate(s.pubdate_old)} · <b>jetzt</b> {fmtDate(s.pubdate_new)}</span></div>
       )}
+      {metaEdits.map((m, i) => <MetaEditView key={`${m.field}-${i}`} m={m} />)}
       {titleChanged && <Juxta oldS={s.title_old!} newS={s.title_new!} label="Überschrift" />}
       {changes.map((c, i) =>
         c.old && c.new ? <Juxta key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />

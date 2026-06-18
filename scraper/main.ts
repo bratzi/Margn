@@ -423,12 +423,41 @@ function trackBody(html: string, url: string, art: { body: string } | null, meta
   return fb ? { body: fb.body, isLive: metaIsLive } : null;
 }
 
-type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null } | null;
+type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null; description: string | null; og_image: string | null; paywalled: boolean | null; author_status: string | null; topic: string | null } | null;
+
+// Spalten der `articles`-Basistabelle, die wir je Scan vergleichen, um UNSICHTBARE Edits zu
+// finden. Müssen in BEIDEN prev-Selects (saveArticleFull + analyzeBacklog) mitgelesen werden.
+const PREV_COLS = "title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at,description,og_image,author_status,topic";
+
+type MetaNow = { description: string | null; og_image: string | null; paywalled: boolean | null; author_status: string | null; topic: string | null };
+type MetaEdit = { field: string; old: string | null; new: string | null };
+
+// Unsichtbare Metadaten-Edits zwischen zwei Scans erkennen: Teaser/Description, Vorschaubild,
+// Ressort, Paywall-Status, Autoren-Status — still geändert, ohne den Fließtext anzufassen.
+// Bewusst KONSERVATIV: nur echte Wechsel zwischen zwei belastbaren Werten, damit
+// Extraktions-Rauschen (mal kein Bild geliefert, Byline kurz nicht erkannt) nicht als Edit zählt.
+function buildMetaEdits(prev: NonNullable<PrevState>, m: MetaNow | null): MetaEdit[] {
+  if (!m) return [];
+  const out: MetaEdit[] = [];
+  const norm = (s: string | null | undefined) => (s ? decodeEntities(s) : "");
+  if (norm(prev.description) && norm(m.description) && norm(prev.description) !== norm(m.description))
+    out.push({ field: "description", old: prev.description!, new: m.description! });          // Teaser umformuliert
+  if (prev.og_image && m.og_image && prev.og_image !== m.og_image)
+    out.push({ field: "og_image", old: prev.og_image, new: m.og_image });                     // Vorschaubild getauscht
+  if (prev.topic && m.topic && prev.topic !== m.topic)
+    out.push({ field: "topic", old: prev.topic, new: m.topic });                              // Ressort umsortiert
+  if (typeof prev.paywalled === "boolean" && typeof m.paywalled === "boolean" && prev.paywalled !== m.paywalled)
+    out.push({ field: "paywalled", old: String(prev.paywalled), new: String(m.paywalled) });  // Paywall an/aus (kein null)
+  if (prev.author_status && m.author_status && prev.author_status !== m.author_status
+      && prev.author_status !== "none" && m.author_status !== "none")
+    out.push({ field: "author_status", old: prev.author_status, new: m.author_status });      // named<->anonymous (none zu flaky)
+  return out;
+}
 
 // Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
 // Unterscheidet "extension" (nur hinzugefügt = valide Erweiterung, z.B. Timeline-Artikel) von
 // "edit" (entfernt/ersetzt = stille Änderung) und "mixed".
-async function trackChanges(articleId: number, prev: PrevState, newTitle: string | null, body: string, isLiveblog: boolean, prevPub: string | null = null, newPub: string | null = null) {
+async function trackChanges(articleId: number, prev: PrevState, newTitle: string | null, body: string, isLiveblog: boolean, prevPub: string | null = null, newPub: string | null = null, metaNow: MetaNow | null = null) {
   const paras = normalizeParas(body);
   if (!paras.length) return;
   const fps = paras.map(fp);
@@ -449,7 +478,10 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   // Als unsichtbare Änderung mit-tracken. ≥60 s Differenz, damit Format-/Sekundenjitter nicht zählt.
   // (Sticky-Logik in saveArticleFull/enrich liefert hier eh nur PRÄZISE Datumswerte → kein Rauschen.)
   const pubChanged = !!prevPub && !!newPub && Math.abs(Date.parse(newPub) - Date.parse(prevPub)) >= 60000;
-  if (prev.content_hash === contentHash && !titleChanged && !pubChanged) return; // nichts geändert
+  // Unsichtbare Metadaten-Edits (Teaser/Bild/Ressort/Paywall/Autor) — das „zwischen den Zeilen".
+  const metaEdits = buildMetaEdits(prev, metaNow);
+  const metaChanged = metaEdits.length > 0;
+  if (prev.content_hash === contentHash && !titleChanged && !pubChanged && !metaChanged) return; // nichts geändert
 
   // Absatz-Diff
   const oldSet = new Set((prev.para_fps ?? "").split(",").filter(Boolean));
@@ -461,7 +493,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
 
   // Nur reine Umsortierung (gleiche Absätze, andere Reihenfolge) → kein Snapshot.
   // Absätze sind durch normalizeParas bereits ≥60 Zeichen, daher zählt jeder echte Zugang.
-  if (!titleChanged && !pubChanged && addedFps.length === 0 && removedCount === 0) {
+  if (!titleChanged && !pubChanged && !metaChanged && addedFps.length === 0 && removedCount === 0) {
     await sb.from("articles").update({ content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords }).eq("id", articleId);
     await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
@@ -481,7 +513,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   const isTimeline = isLiveblog || prev.article_type === "timeline" || (prev.extension_count ?? 0) >= 2;
   const contentChanged = addedFps.length > 0 || removedCount > 0;
   let kind: "extension" | "edit";
-  if (!contentChanged && !titleChanged && pubChanged) kind = "edit"; // reines Um-Datieren = stille Änderung
+  if (!contentChanged && !titleChanged && (pubChanged || metaChanged)) kind = "edit"; // reines Um-Datieren / Metadaten-Edit = stille Änderung
   else if (isTimeline) kind = "extension";
   else if (titleChanged) kind = "edit";
   else if (addedFps.length > removedCount) kind = "extension";
@@ -497,14 +529,15 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     changes,
   };
   if (pubChanged) { snapRow.pubdate_old = prevPub; snapRow.pubdate_new = newPub; }
-  const { error: snapErr } = await sb.from("article_snapshots").insert(snapRow);
-  if (snapErr && pubChanged && /pubdate/i.test(snapErr.message)) {
-    // Spalten pubdate_old/new noch nicht via ALTER angelegt → Snapshot ohne Datumsfelder retten.
-    delete snapRow.pubdate_old; delete snapRow.pubdate_new;
-    await sb.from("article_snapshots").insert(snapRow);
-  } else if (snapErr) {
-    console.error("SNAPSHOT-FEHLER:", snapErr.message);
+  if (metaChanged) snapRow.meta_edits = metaEdits;
+  let { error: snapErr } = await sb.from("article_snapshots").insert(snapRow);
+  // Optionale Spalten (pubdate_old/new, meta_edits) evtl. noch nicht via ALTER angelegt →
+  // Snapshot ohne diese Felder retten, statt ihn ganz zu verlieren.
+  if (snapErr && /pubdate|meta_edits/i.test(snapErr.message)) {
+    delete snapRow.pubdate_old; delete snapRow.pubdate_new; delete snapRow.meta_edits;
+    ({ error: snapErr } = await sb.from("article_snapshots").insert(snapRow));
   }
+  if (snapErr) console.error("SNAPSHOT-FEHLER:", snapErr.message);
 
   const extCount = (prev.extension_count ?? 0) + (kind === "extension" ? 1 : 0);
   const editCount = (prev.edit_count ?? 0) + (kind === "edit" ? 1 : 0);
@@ -565,7 +598,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
-    .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at")
+    .select(PREV_COLS)
     .eq("url", url).maybeSingle();
   meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
   // Präzises Datum (z.B. aus News-Sitemap) NICHT durch den URL-Mittags-Notnagel überschreiben.
@@ -573,7 +606,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   const tb = trackBody(html, url, art, meta.article_type === "liveblog");
-  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null);
+  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
   return id;
 }
 
@@ -1415,7 +1448,7 @@ async function enrichArticles(sources: Source[]) {
         try {
           // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
           const { data: prev } = await sb.from("articles")
-            .select("title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at")
+            .select(PREV_COLS)
             .eq("id", item.id).maybeSingle();
           meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
           if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
@@ -1424,7 +1457,7 @@ async function enrichArticles(sources: Source[]) {
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
           const tb = trackBody(html, item.url, art, meta.article_type === "liveblog");
-          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null);
+          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }

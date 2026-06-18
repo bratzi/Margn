@@ -702,6 +702,21 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .chist-ver.old .vlbl { color: var(--red); }
 .chist-ver.new { border-left: 3px solid var(--green); }
 .chist-ver.new .vlbl { color: var(--green); }
+/* Unsichtbare Metadaten-Edits (Teaser/Bild/Ressort/Paywall/Autor) */
+.chist-chip.meta { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 42%, transparent); }
+.chist-meta { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding: 9px 13px; border-radius: 8px;
+  font-size: 13px; line-height: 1.55; color: var(--muted); background: var(--teal-sub);
+  border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent); }
+.chist-meta svg { position: relative; top: 2px; color: var(--teal); flex-shrink: 0; }
+.chist-meta b { color: var(--ink); font-weight: 600; }
+.chist-imgs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.chist-imgs figure { margin: 0; }
+.chist-imgs figcaption { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 5px; color: var(--faint); }
+.chist-imgs figure.old figcaption { color: var(--red); }
+.chist-imgs figure.new figcaption { color: var(--green); }
+.chist-imgs img { width: 100%; height: 120px; object-fit: cover; border-radius: 7px; border: 1px solid var(--line); display: block; }
+.chist-imgs figure.old img { border-left: 3px solid var(--red); }
+.chist-imgs figure.new img { border-left: 3px solid var(--green); }
 
 .empty { color: var(--faint); font-size: 13px; padding: 16px; background: var(--surface-2); border-radius: 7px; border-left: 3px solid var(--line-2); line-height: 1.6; }
 
