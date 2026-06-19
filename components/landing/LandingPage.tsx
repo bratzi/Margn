@@ -95,16 +95,24 @@ export default function LandingPage() {
 
     /* ---------- Nav-Blur + Scroll-Fortschritt ---------- */
     const prog = root.querySelector<HTMLElement>(".mg-progress > i");
+    // scrollHeight ist ein Layout-Read → NICHT pro Scroll-Event lesen, sondern cachen
+    // (nur bei Resize/Font-Load neu berechnen). Scroll-Arbeit zusätzlich rAF-gedrosselt.
+    const docEl = document.documentElement;
+    let scrollMax = docEl.scrollHeight - docEl.clientHeight;
+    const recalcMax = () => { scrollMax = docEl.scrollHeight - docEl.clientHeight; };
+    let scrollRaf = 0;
     const onScroll = () => {
-      const nav = navRef.current;
-      if (nav) nav.classList.toggle("is-scrolled", window.scrollY > 24);
-      if (prog) {
-        const d = document.documentElement;
-        const max = d.scrollHeight - d.clientHeight;
-        prog.style.transform = `scaleX(${max > 0 ? Math.min(1, window.scrollY / max) : 0})`;
-      }
+      if (scrollRaf) return;
+      scrollRaf = requestAnimationFrame(() => {
+        scrollRaf = 0;
+        const nav = navRef.current;
+        if (nav) nav.classList.toggle("is-scrolled", window.scrollY > 24);
+        if (prog) prog.style.transform = `scaleX(${scrollMax > 0 ? Math.min(1, window.scrollY / scrollMax) : 0})`;
+      });
     };
     window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", recalcMax, { passive: true });
+    document.fonts?.ready?.then(recalcMax).catch(() => {});
     onScroll();
 
     /* ---------- Raster-Glow unter dem Cursor ---------- */
@@ -112,12 +120,18 @@ export default function LandingPage() {
       ? Array.from(root.querySelectorAll<HTMLElement>(".mg-section, .mg-stats, .mg-foot"))
       : [];
     let glowRaf = 0;
+    // Rects cachen statt pro pointermove zu messen (getBoundingClientRect = Layout-Read).
+    // Nur bei Scroll/Resize als „dirty" markieren und beim nächsten Move einmal neu lesen.
+    let glowRects: DOMRect[] = [];
+    let glowDirty = true;
+    const markGlowDirty = () => { glowDirty = true; };
     const onGlow = (e: PointerEvent) => {
       if (glowRaf) return;
       glowRaf = requestAnimationFrame(() => {
         glowRaf = 0;
-        for (const el of glowEls) {
-          const r = el.getBoundingClientRect();
+        if (glowDirty) { glowRects = glowEls.map((el) => el.getBoundingClientRect()); glowDirty = false; }
+        for (let i = 0; i < glowEls.length; i++) {
+          const el = glowEls[i], r = glowRects[i];
           const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
           if (inside) {
             el.style.setProperty("--mx", `${e.clientX}px`);
@@ -129,7 +143,11 @@ export default function LandingPage() {
         }
       });
     };
-    if (glowEls.length) window.addEventListener("pointermove", onGlow, { passive: true });
+    if (glowEls.length) {
+      window.addEventListener("pointermove", onGlow, { passive: true });
+      window.addEventListener("scroll", markGlowDirty, { passive: true });
+      window.addEventListener("resize", markGlowDirty, { passive: true });
+    }
 
     const ctx = gsap.context(() => {
       if (reduced) return;
@@ -267,7 +285,11 @@ export default function LandingPage() {
       removeCursor?.();
       root.removeEventListener("click", onAnchorClick);
       window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", recalcMax);
       window.removeEventListener("pointermove", onGlow);
+      window.removeEventListener("scroll", markGlowDirty);
+      window.removeEventListener("resize", markGlowDirty);
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
       if (glowRaf) cancelAnimationFrame(glowRaf);
       if (rafCb) gsap.ticker.remove(rafCb);
       lenis?.destroy();

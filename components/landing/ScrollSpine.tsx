@@ -71,7 +71,7 @@ export default function ScrollSpine() {
     if (!root) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    let len = 0, raf = 0, polyLen = 1;
+    let len = 0, raf = 0, polyLen = 1, scrollMax = 1;
     let polyPts: Pt[] = [];
     let cum = new Float64Array(0);
 
@@ -128,7 +128,7 @@ export default function ScrollSpine() {
       };
 
       // Punkte abtasten: Mittellinie + globaler Drift + Charakter-Textur mit Hüllkurve.
-      const S = narrow ? 15 : 11;
+      const S = narrow ? 20 : 16;
       const pts: Pt[] = [];
       for (let y = 0; y <= H; y += S) {
         let cx = laneToX(laneAt(y)) + driftPx * Math.sin(y * 0.0016 + 0.7);
@@ -172,13 +172,16 @@ export default function ScrollSpine() {
       let acc = 0;
       for (let i = 1; i < pts.length; i++) { acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); cum[i] = acc; }
       polyLen = acc || 1;
+      // Scroll-Maximum hier einmal pro build cachen → apply() liest scrollHeight nicht
+      // pro Scroll-Frame (Layout-Read im heißen Pfad).
+      scrollMax = document.documentElement.scrollHeight - window.innerHeight;
       if (reduced) { draw.style.strokeDashoffset = "0"; head.style.display = "none"; }
       else apply();
     };
 
     const apply = () => {
       raf = 0;
-      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const max = scrollMax;
       const progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
       draw.style.strokeDashoffset = String(len * (1 - progress));
       // Kopf entlang der vorberechneten Polylinie interpolieren (binäre Suche im
