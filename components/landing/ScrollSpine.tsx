@@ -92,6 +92,8 @@ export default function ScrollSpine() {
     // Checkpoints: Position auf der Linie + zugehöriges SVG-<g> + „gezündet"-Status.
     let checkpoints: { y: number; el: SVGGElement; hit: boolean }[] = [];
     let lastActive = -1;
+    let finalBtnEl: HTMLElement | null = null; // Endpunkt: der „Dashboard öffnen"-Button
+    let arrived = false;
 
     const build = () => {
       const W = root.clientWidth, H = root.scrollHeight;
@@ -141,9 +143,18 @@ export default function ScrollSpine() {
         return bands[bands.length - 1];
       };
 
+      // Endpunkt der Linie = Mitte des „Dashboard öffnen"-Buttons (statt unten rauszulaufen).
+      finalBtnEl = root.querySelector<HTMLElement>(".mg-final .mg-btn");
+      let endY = H, endX: number | null = null;
+      if (finalBtnEl) {
+        const br = finalBtnEl.getBoundingClientRect();
+        endY = br.top + window.scrollY + br.height / 2;
+        endX = br.left + br.width / 2;
+      }
+
       const S = narrow ? 20 : 16;
       const pts: Pt[] = [];
-      for (let y = 0; y <= H; y += S) {
+      for (let y = 0; y <= endY; y += S) {
         let cx = laneToX(laneAt(y)) + driftPx * Math.sin(y * 0.0016 + 0.7);
         const b = bandAt(y);
         const lp = Math.min(1, Math.max(0, (y - b.start) / Math.max(1, b.end - b.start)));
@@ -153,7 +164,10 @@ export default function ScrollSpine() {
         const x = Math.min(W - 6, Math.max(6, cx + off));
         pts.push({ x, y });
       }
-      if (pts.length && pts[pts.length - 1].y < H) pts.push({ x: pts[pts.length - 1].x, y: H });
+      // exakt auf dem Button landen (sanft einlenken über den letzten Punkt)
+      const lastX = endX ?? (pts.length ? pts[pts.length - 1].x : 6);
+      if (pts.length && pts[pts.length - 1].y < endY) pts.push({ x: lastX, y: endY });
+      else if (pts.length) pts[pts.length - 1] = { x: lastX, y: endY };
 
       const d = smooth(pts);
 
@@ -181,7 +195,12 @@ export default function ScrollSpine() {
       let acc = 0;
       for (let i = 1; i < pts.length; i++) { acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); cum[i] = acc; }
       polyLen = acc || 1;
-      scrollMax = document.documentElement.scrollHeight - window.innerHeight;
+      // progress=1 erreichen, sobald der Button angenehm im Bild ist (bei ~72 % Viewporthöhe) —
+      // so „andockt" der Kopf am Button, statt erst am absoluten Seitenende.
+      const lastPt = polyPts[polyPts.length - 1];
+      scrollMax = finalBtnEl
+        ? Math.max(1, lastPt.y - window.innerHeight * 0.72)
+        : document.documentElement.scrollHeight - window.innerHeight;
 
       // ----- Checkpoints auf der Linie platzieren (an den Sektions-Mitten) -----
       const xAtY = (yy: number) => {
@@ -249,6 +268,11 @@ export default function ScrollSpine() {
         if (on) act = i;
       }
       if (act !== lastActive) { lastActive = act; setActive(act); }
+      // Finale: Kopf dockt am Button an → einmalige Impact-Animation + Dauerpuls.
+      if (finalBtnEl) {
+        const on = progress > 0.992;
+        if (on !== arrived) { arrived = on; finalBtnEl.classList.toggle("is-arrived", on); }
+      }
     };
 
     const onScroll = () => { if (!reduced && !raf) raf = requestAnimationFrame(apply); };

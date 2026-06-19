@@ -89,43 +89,38 @@ html.lenis, html.lenis body { height: auto; }
 .mg-section { position: relative; isolation: isolate; max-width: var(--mg-max); margin: 0 auto; padding: clamp(88px, 12vw, 160px) var(--mg-pad); }
 .mg-section > .mg-head { margin-bottom: clamp(40px, 6vw, 72px); }
 
-/* Sektions-Atmosphäre: full-bleed Blueprint-Raster + weiche Akzent-Glows,
-   vertikal maskiert (oben/unten ausgeblendet) → Tiefe ohne leere Flächen,
-   Typo bleibt ruhig. -1 unter dem Inhalt dank isolation: isolate. */
-/* Blueprint-Raster (dezent) + weiche Akzent-Blooms je Sektion. Das Raster
-   ist die ruhende Schicht; unter dem Cursor leuchtet es auf (siehe ::after).
-   Full-bleed, vertikal maskiert für weiche Übergänge. */
+/* Blueprint-Raster als RUHENDE Hauptschicht (Eck-Blobs entfernt): feines Minor-Grid +
+   kräftigeres Major-Grid + leuchtende Knoten an den Major-Kreuzungen + ein weicher
+   Schimmer oben. Technischer Observatorium-Look. Full-bleed, vertikal maskiert.
+   -1 unter dem Inhalt dank isolation: isolate. */
 .mg-section::before {
   content: ""; position: absolute; z-index: -1; top: 0; bottom: 0;
   left: 50%; width: 100vw; transform: translateX(-50%); pointer-events: none;
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 7%, #000 93%, transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0, #000 7%, #000 93%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 94%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 6%, #000 94%, transparent 100%);
   background-image:
-    radial-gradient(60% 78% at 8% -12%, rgba(110, 138, 255, 0.17), transparent 62%),
-    radial-gradient(56% 74% at 102% 112%, rgba(159, 178, 255, 0.13), transparent 64%),
-    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px;
-}
-#abdeckung.mg-section::before {
-  background-image:
-    radial-gradient(60% 78% at 94% -12%, rgba(110, 138, 255, 0.17), transparent 62%),
-    radial-gradient(56% 74% at -2% 112%, rgba(159, 178, 255, 0.14), transparent 64%),
-    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px;
+    radial-gradient(72% 40% at 50% -6%, rgba(110, 138, 255, 0.10), transparent 62%),
+    radial-gradient(rgba(159, 178, 255, 0.5) 1.4px, transparent 1.6px),                 /* Knoten */
+    linear-gradient(rgba(159, 178, 255, 0.11) 1px, transparent 1px),                    /* Major H */
+    linear-gradient(90deg, rgba(159, 178, 255, 0.11) 1px, transparent 1px),             /* Major V */
+    linear-gradient(rgba(159, 178, 255, 0.045) 1px, transparent 1px),                   /* Minor H */
+    linear-gradient(90deg, rgba(159, 178, 255, 0.045) 1px, transparent 1px);            /* Minor V */
+  background-size: 100% 100%, 112px 112px, 112px 112px, 112px 112px, 28px 28px, 28px 28px;
+  background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0;
 }
 #transparenz.mg-section::before {
   background-image:
-    radial-gradient(80% 72% at 50% -18%, rgba(110, 138, 255, 0.15), transparent 60%),
-    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px);
-  background-size: 100% 100%, 64px 64px, 64px 64px;
+    radial-gradient(82% 46% at 50% -10%, rgba(110, 138, 255, 0.12), transparent 60%),
+    radial-gradient(rgba(159, 178, 255, 0.5) 1.4px, transparent 1.6px),
+    linear-gradient(rgba(159, 178, 255, 0.11) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(159, 178, 255, 0.11) 1px, transparent 1px),
+    linear-gradient(rgba(159, 178, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(159, 178, 255, 0.045) 1px, transparent 1px);
+  background-size: 100% 100%, 112px 112px, 112px 112px, 112px 112px, 28px 28px, 28px 28px;
 }
 
-/* Interaktiver Schein: dieselbe Rasterung, hell, nur in einem Kreis um den
-   Cursor sichtbar (Maske folgt --mx/--my, per JS gesetzt). Linien „glühen"
-   dort, wo man hinfährt. Perfekt deckungsgleich mit dem ruhenden Raster. */
+/* Interaktiver Schein: helle Rasterlinien, nur in einem Kreis um den Cursor sichtbar
+   (Maske folgt --mx/--my, per JS). Deckungsgleich mit dem Major-Raster (112px). */
 .mg-section::after,
 .mg-stats::after,
 .mg-foot::after {
@@ -133,16 +128,20 @@ html.lenis, html.lenis body { height: auto; }
   left: 50%; width: 100vw; transform: translateX(-50%); pointer-events: none;
   opacity: var(--spot, 0); transition: opacity 0.35s ease;
   background-image:
-    linear-gradient(rgba(159, 178, 255, 0.55) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(159, 178, 255, 0.55) 1px, transparent 1px);
-  background-size: 64px 64px, 64px 64px;
-  -webkit-mask-image: radial-gradient(circle 150px at var(--mx, -200px) var(--my, -200px), #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%);
-  mask-image: radial-gradient(circle 150px at var(--mx, -200px) var(--my, -200px), #000 0%, rgba(0,0,0,0.35) 45%, transparent 72%);
+    linear-gradient(rgba(159, 178, 255, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(159, 178, 255, 0.6) 1px, transparent 1px);
+  background-size: 112px 112px, 112px 112px;
+  -webkit-mask-image: radial-gradient(circle 160px at var(--mx, -200px) var(--my, -200px), #000 0%, rgba(0,0,0,0.4) 46%, transparent 72%);
+  mask-image: radial-gradient(circle 160px at var(--mx, -200px) var(--my, -200px), #000 0%, rgba(0,0,0,0.4) 46%, transparent 72%);
 }
 
+/* NEU statt „breathe": ein langsamer Blueprint-Scan — das Raster driftet sacht (28 px =
+   Minor-Tile, nahtloser Loop), wirkt wie ein vermessender Scanner. Sehr ruhig. */
 @media (prefers-reduced-motion: no-preference) {
-  .mg-section::before { animation: mg-bg-breathe 16s ease-in-out infinite; }
-  @keyframes mg-bg-breathe { 50% { opacity: 0.82; } }
+  .mg-section::before { animation: mg-grid-scan 24s linear infinite; }
+  @keyframes mg-grid-scan {
+    to { background-position: 0 0, 0 -112px, 0 -112px, 0 -112px, 0 -112px, 0 -112px; }
+  }
 }
 
 /* ---------------------------------------------------------------- Nav */
@@ -819,10 +818,31 @@ html.lenis, html.lenis body { height: auto; }
 .mg-evo-hint { font-size: 12px; color: #aeb3c2; }
 @media (max-width: 760px) { .mg-evo { display: none; } }
 
+/* ---------- Finale: Linien-Endpunkt dockt am „Dashboard öffnen"-Button an ---------- */
+/* .mg-btn::before ist die Button-Füllung — NICHT überschreiben. Impact-Ring läuft am
+   Element selbst (box-shadow), der Dauerpuls über das freie ::after. */
+.mg-final .mg-btn.is-arrived { animation: mgCtaArrive 0.75s cubic-bezier(.2,.8,.2,1); }
+.mg-final .mg-btn.is-arrived::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 0;
+  animation: mgCtaPulse 2.2s ease-out 0.75s infinite;
+}
+@keyframes mgCtaArrive {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(110,138,255,0.85); }
+  36% { transform: scale(1.07); }
+  100% { transform: scale(1); box-shadow: 0 0 0 28px rgba(110,138,255,0); }
+}
+@keyframes mgCtaPulse {
+  0% { box-shadow: 0 0 0 0 rgba(110,138,255,0.5), 0 0 20px rgba(110,138,255,0.45); }
+  70% { box-shadow: 0 0 0 15px rgba(110,138,255,0), 0 0 26px rgba(110,138,255,0.3); }
+  100% { box-shadow: 0 0 0 0 rgba(110,138,255,0), 0 0 16px rgba(110,138,255,0.18); }
+}
+
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   .mg-grain, .mg-marquee-track, .mg-scrollhint i::after, .mg-pair-link .line, .mg-method-note .pulse::after { animation: none !important; }
   .mg-cp.pulse .mg-cp-burst, .mg-cp.pulse .mg-cp-dot, .mg-evo-card { animation: none !important; }
+  .mg-section::before { animation: none !important; }
+  .mg-final .mg-btn.is-arrived, .mg-final .mg-btn.is-arrived::before, .mg-final .mg-btn.is-arrived::after { animation: none !important; }
   .mg-evo { transition: none !important; }
   .mg *, .mg *::before, .mg *::after { transition-duration: 0.01ms !important; }
   .mg-spine-draw { opacity: 0.6; }
