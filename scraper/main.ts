@@ -418,6 +418,24 @@ function cleanBody(body: string, url: string, title: string | null): string {
     }
   }
 
+  if (/(^|\.)faz\.net$/.test(host)) {
+    // FAZ klebt VOR den Lauftext einen Kopf-Block, der je nach Render-Zeitpunkt ganz/teilweise/
+    // gar nicht im extrahierten Body landet — daraus entstehen sonst reine Phantom-Edits:
+    //   "[Ressort]FAZ+<Kicker> : <Überschrift>[18.06.2026, 12:58][Lesezeit: 6 Min.]<Lauftext…>"
+    // 1) "Lesezeit: N Min." (Web-Komponente) inkl. evtl. direkt davorstehendem Datum/Uhrzeit als
+    //    EINHEIT entfernen — durch Space ersetzen, damit Überschrift und Lede nicht verkleben.
+    b = b.replace(/(?:\d{1,2}\.\d{2}\.\d{4},\s*\d{1,2}:\d{2}\s*(?:Uhr)?\s*)?Lesezeit:\s*\d+\s*Min\.?/g, " ");
+    // 2) Führender "[Ressort]FAZ+<Kicker> :"-Kopf (Ressort = ein großgeschriebenes Wort direkt davor).
+    b = b.replace(/^\s*(?:[A-ZÄÖÜ][A-Za-zäöüß-]{2,20})?FAZ\+[^:]{0,80}:\s*/, "");
+    // 3) Abschluss-Chrome am Ende abschneiden (wächst/wechselt je Scan → Phantom-Edits):
+    //    Paywall-CTA, "Das Beste von FAZ+"-Empfehlungen, Verlags-Footer. Marker VOR der FAZ+-
+    //    Neutralisierung suchen (sonst sind die "FAZ+"-Anker schon weg).
+    const tail = b.search(/jetzt nur \d+,\d{2}\s*€|Zugang zu allen FAZ\+|Mit einem Klick online kündbar|Das Beste von FAZ\+|Stellenmarkt\s+Verlagsangebot|FAZ\+ kostenlos testen/);
+    if (tail > 120) b = b.slice(0, tail);
+    // 4) Verbliebene "FAZ+"-Badges (FAZ-Plus-Empfehlungen/Recirculation-Teaser im Text) neutralisieren.
+    b = b.replace(/\bFAZ\+/g, " ");
+  }
+
   return b.replace(/\s+/g, " ").trim();
 }
 
@@ -489,7 +507,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   let prevHash = prev.content_hash;
   let oldParasClean: string[] | null = null;
   let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
-  if (prevHash !== contentHash && (/(^|\.)bild\.de$/.test(host) || /(^|\.)n-tv\.de$/.test(host))) {
+  if (prevHash !== contentHash && (/(^|\.)bild\.de$/.test(host) || /(^|\.)n-tv\.de$/.test(host) || /(^|\.)faz\.net$/.test(host))) {
     const { data: pr } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
     const raw: string[] = Array.isArray(pr?.paras) ? (pr!.paras as string[]) : [];
     if (raw.length) {
