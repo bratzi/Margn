@@ -59,9 +59,9 @@ export default function Sidebar() {
     (ind.subcats ? 1 : 0) + (ind.lang ? 1 : 0) + (ind.keyword ? 1 : 0) +
     (ind.changed ? 1 : 0) + (ind.depth ? 1 : 0) + (ind.range ? 1 : 0);
 
-  // Landingpage ist full-bleed ohne App-Chrome.
+  // Landingpage + Login sind full-bleed ohne App-Chrome.
   // WICHTIG: erst NACH allen Hooks returnen (Rules of Hooks — Layout persistiert über Routen).
-  if (path === "/") return null;
+  if (path === "/" || path === "/login") return null;
 
   return (
     <aside className={`sidebar ${drawer ? "drawer-open" : ""} ${collapsed ? "is-collapsed" : ""}`}>
@@ -148,6 +148,12 @@ export default function Sidebar() {
         <span className="obs">Erscheinungsbild</span>
         <ThemeToggle />
       </div>
+      <form className="side-logout" method="POST" action="/api/logout">
+        <button type="submit" title="Abmelden" aria-label="Abmelden">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
+          <span>Abmelden</span>
+        </button>
+      </form>
 
       {/* Backdrop hinter dem Drawer (nur mobil sichtbar) */}
       {drawer && <button className="drawer-backdrop" onClick={() => setDrawer(false)} aria-label="Filter schließen" />}
