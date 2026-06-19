@@ -556,15 +556,29 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
       oldParas = Array.isArray(paraRow?.paras) ? (paraRow!.paras as string[]) : [];
     }
   }
-  const removedTexts = contentChanged ? oldParas.filter((p) => !newSet.has(fp(p))) : [];
-  const changes = contentChanged ? buildChanges(removedTexts, addedTexts) : [];
+  // Liveblog/Ticker/Timeline gelten als WACHSEND (auch wenn die Live-Erkennung bei EINEM Scan
+  // mal scheitert) — ein einmal erkannter Liveblog bleibt einer. Für ALLE Verlage.
+  const isTimeline = isLiveblog || prev.article_type === "liveblog" || prev.article_type === "timeline" || (prev.extension_count ?? 0) >= 2;
+
+  // Diff aufbauen. Bei Liveblogs/Timelines NUR Neuzugänge führen: „entfernt" ist dort fast immer
+  // Re-Segmentierung durch lazyload/Re-Render (kein echtes Verschwinden) — sonst erschiene es als
+  // „geänderte Passage" und sähe aus wie viele stille Edits. removed=0 für den Snapshot.
+  let removedForSnap = removedCount;
+  let changes: Change[];
+  if (!contentChanged) {
+    changes = [];
+  } else if (isTimeline) {
+    changes = addedTexts.map((t) => ({ new: t.slice(0, 1500) }));
+    removedForSnap = 0;
+  } else {
+    changes = buildChanges(oldParas.filter((p) => !newSet.has(fp(p))), addedTexts);
+  }
 
   // Eindeutige Klassifikation (sich gegenseitig ausschließend):
   //  - Liveblog/Timeline: laufendes Wachstum → IMMER Erweiterung (kein "stiller Edit").
   //  - Sonst stille Titeländerung → Edit (das journalistisch interessante Signal).
   //  - Sonst Netto-Zuwachs (mehr hinzu als entfernt) → Erweiterung.
   //  - Sonst (Umschreiben/Kürzen) → Edit.
-  const isTimeline = isLiveblog || prev.article_type === "timeline" || (prev.extension_count ?? 0) >= 2;
   let kind: "extension" | "edit";
   if (!contentChanged && !titleChanged && (pubChanged || metaChanged)) kind = "edit"; // reines Um-Datieren / Metadaten-Edit = stille Änderung
   else if (isTimeline) kind = "extension";
@@ -577,7 +591,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     title_old: titleChanged ? decodeEntities(prev.title!) : null,
     title_new: titleChanged ? decodeEntities(newTitle!) : null,
     added: contentChanged ? addedTexts.join("\n\n").slice(0, 8000) : "",
-    added_count: addedFps.length, removed_count: removedCount,
+    added_count: addedFps.length, removed_count: removedForSnap,
     word_delta: bodyWords - (prev.body_words ?? bodyWords),
     changes,
   };
