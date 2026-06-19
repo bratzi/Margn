@@ -349,6 +349,8 @@ export default function ScrollSpine() {
     const trySnap = () => {
       if (reduced || !snapYs.length) return;
       const sy = window.scrollY;
+      // Hero-Sektion (ganz oben) frei lassen — sonst zieht es beim Laden sofort zum 1. Punkt.
+      if (sy < firstEnd) return;
       // In der gepinnten Anatomie-Sektion (sehr lang) KEINE Magnetik.
       if (anaRange && sy >= anaRange[0] - 30 && sy <= anaRange[1] + 30) return;
       let target = -1, bestD = 1e9;
