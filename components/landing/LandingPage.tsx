@@ -75,6 +75,7 @@ export default function LandingPage() {
     let rafCb: ((t: number) => void) | null = null;
     if (!reduced) {
       lenis = new Lenis({ duration: 1.15 });
+      (window as unknown as { __mgLenis?: Lenis }).__mgLenis = lenis; // ScrollSpine nutzt es für die Checkpoint-Magnetik
       lenis.on("scroll", ScrollTrigger.update);
       rafCb = (t: number) => lenis!.raf(t * 1000);
       gsap.ticker.add(rafCb);
@@ -292,6 +293,7 @@ export default function LandingPage() {
       if (scrollRaf) cancelAnimationFrame(scrollRaf);
       if (glowRaf) cancelAnimationFrame(glowRaf);
       if (rafCb) gsap.ticker.remove(rafCb);
+      delete (window as unknown as { __mgLenis?: Lenis }).__mgLenis;
       lenis?.destroy();
     };
   }, []);

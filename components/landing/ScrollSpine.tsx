@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 /* ----------------------------------------------------------------------------
    ScrollSpine — eine mitlaufende Linie, die quer über die Seite WANDERT und sich
@@ -75,12 +75,11 @@ export default function ScrollSpine() {
   const headRef = useRef<SVGCircleElement | null>(null);
   const gradRef = useRef<SVGLinearGradientElement | null>(null);
   const cpLayerRef = useRef<SVGGElement | null>(null);
-  // aktiver Beat-Index (für HUD). -1 = noch keiner erreicht.
-  const [active, setActive] = useState(-1);
+  const notesRef = useRef<HTMLDivElement | null>(null); // HTML-Karten an den Checkpoints
 
   useEffect(() => {
-    const svg = svgRef.current, ghost = ghostRef.current, draw = drawRef.current, head = headRef.current, grad = gradRef.current, cpLayer = cpLayerRef.current;
-    if (!svg || !ghost || !draw || !head || !grad || !cpLayer) return;
+    const svg = svgRef.current, ghost = ghostRef.current, draw = drawRef.current, head = headRef.current, grad = gradRef.current, cpLayer = cpLayerRef.current, notes = notesRef.current;
+    if (!svg || !ghost || !draw || !head || !grad || !cpLayer || !notes) return;
     const root = svg.parentElement;
     if (!root) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -89,9 +88,9 @@ export default function ScrollSpine() {
     let len = 0, raf = 0, polyLen = 1, scrollMax = 1;
     let polyPts: Pt[] = [];
     let cum = new Float64Array(0);
-    // Checkpoints: Position auf der Linie + zugehöriges SVG-<g> + „gezündet"-Status.
-    let checkpoints: { y: number; el: SVGGElement; hit: boolean }[] = [];
-    let lastActive = -1;
+    // Checkpoints: Position auf der Linie + SVG-<g> (Dot) + HTML-Karte + „gezündet"-Status.
+    let checkpoints: { y: number; el: SVGGElement; note: HTMLElement; hit: boolean }[] = [];
+    let snapYs: number[] = []; // Magnet-Ziele: Scroll-Position je Checkpoint (Kopf sitzt dann auf dem Dot)
     let finalBtnEl: HTMLElement | null = null; // Endpunkt: der „Dashboard öffnen"-Button
     let arrived = false;
 
@@ -153,6 +152,9 @@ export default function ScrollSpine() {
       }
 
       const S = narrow ? 20 : 16;
+      // Einlenk-Zone vor dem Endpunkt: x wird über die letzten ~440 px sanft auf die Button-Mitte
+      // gezogen → die Linie läuft GERADE und ZENTRIERT hinter dem Button aus (kein Knick).
+      const blendZ = endX != null ? Math.max(1, Math.min(440, endY * 0.16)) : 0;
       const pts: Pt[] = [];
       for (let y = 0; y <= endY; y += S) {
         let cx = laneToX(laneAt(y)) + driftPx * Math.sin(y * 0.0016 + 0.7);
@@ -161,10 +163,13 @@ export default function ScrollSpine() {
         const env = Math.sin(Math.PI * lp);
         const jit = 0.82 + 0.32 * Math.sin(lp * 6.3 + b.seed);
         const off = ampPx * b.amp * env * jit * shape(b.mood, lp);
-        const x = Math.min(W - 6, Math.max(6, cx + off));
+        let x = Math.min(W - 6, Math.max(6, cx + off));
+        if (endX != null && blendZ > 0 && y > endY - blendZ) {
+          const t = smoothstep((y - (endY - blendZ)) / blendZ);
+          x = x + (endX - x) * t;
+        }
         pts.push({ x, y });
       }
-      // exakt auf dem Button landen (sanft einlenken über den letzten Punkt)
       const lastX = endX ?? (pts.length ? pts[pts.length - 1].x : 6);
       if (pts.length && pts[pts.length - 1].y < endY) pts.push({ x: lastX, y: endY });
       else if (pts.length) pts[pts.length - 1] = { x: lastX, y: endY };
@@ -212,31 +217,70 @@ export default function ScrollSpine() {
         return a.x + (b.x - a.x) * t;
       };
       cpLayer.replaceChildren();
+      notes.replaceChildren();
+      const mkCircle = (cls: string, r: number) => { const c = document.createElementNS(NS, "circle"); c.setAttribute("class", cls); c.setAttribute("r", String(r)); return c; };
       checkpoints = found.slice(0, STORY.length).map((f, i) => {
-        const y = Math.min(H - 4, f.mid);
+        // Checkpoint in den FREIEN Bereich legen: im mittleren Teil des Sektions-Bands die Stelle
+        // suchen, an der die Linie am weitesten von der Mitte weg (Richtung Rand/Weißraum) liegt —
+        // so sitzt der Dot neben dem Inhalt, nicht mitten in Text/Box.
+        const band = bands[i];
+        const yLo = band.start + (band.end - band.start) * 0.24;
+        const yHi = band.start + (band.end - band.start) * 0.76;
+        let y = f.mid, bestDev = -1;
+        for (let yy = yLo; yy <= yHi; yy += 24) {
+          const dev = Math.abs(xAtY(yy) - W / 2);
+          if (dev > bestDev) { bestDev = dev; y = yy; }
+        }
+        y = Math.min(H - 4, y);
         const x = xAtY(y);
+        const beat = STORY[i];
+
+        // --- dramatischer Dot: zwei Schockwellen + Flash + Ring + Kern ---
         const g = document.createElementNS(NS, "g") as SVGGElement;
         g.setAttribute("class", "mg-cp");
         g.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
         g.style.setProperty("--cp", f.color);
-        const burst = document.createElementNS(NS, "circle");
-        burst.setAttribute("class", "mg-cp-burst"); burst.setAttribute("r", "9");
-        const ring = document.createElementNS(NS, "circle");
-        ring.setAttribute("class", "mg-cp-ring"); ring.setAttribute("r", "9");
-        const dot = document.createElementNS(NS, "circle");
-        dot.setAttribute("class", "mg-cp-dot"); dot.setAttribute("r", "4");
-        const num = document.createElementNS(NS, "text");
-        num.setAttribute("class", "mg-cp-num"); num.setAttribute("dy", "0.5"); num.textContent = String(i + 1);
-        g.append(burst, ring, dot, num);
+        g.append(
+          mkCircle("mg-cp-wave", 8), mkCircle("mg-cp-wave2", 8),
+          mkCircle("mg-cp-flash", 8), mkCircle("mg-cp-ring", 8.5), mkCircle("mg-cp-core", 4.5),
+        );
         cpLayer.appendChild(g);
-        return { y, el: g, hit: false };
+
+        // --- HTML-Karte, am Dot verankert (Seite je nach Linienlage), blendet beim Zünden ein ---
+        const side = narrow ? "b" : x < W * 0.5 ? "r" : "l";
+        const note = document.createElement("div");
+        note.className = "mg-cpn";
+        note.dataset.side = side;
+        note.style.left = `${x.toFixed(1)}px`;
+        note.style.top = `${y.toFixed(1)}px`;
+        note.style.setProperty("--cp", f.color);
+        note.style.setProperty("--d", `${0.04 * i}s`);
+        note.innerHTML =
+          `<span class="mg-cpn-link"></span>` +
+          `<div class="mg-cpn-card">` +
+            `<div class="mg-cpn-pub"><i></i>Version ${i + 1} veröffentlicht</div>` +
+            `<div class="mg-cpn-h"><span class="mg-cpn-kind">${KIND_LABEL[beat.k] ?? beat.k}</span><span class="mg-cpn-t">${beat.t}</span></div>` +
+            `<div class="mg-cpn-title">${beat.title}</div>` +
+            `<div class="mg-cpn-detail">${beat.detail}</div>` +
+          `</div>`;
+        notes.appendChild(note);
+
+        return { y, el: g, note, hit: false };
       });
-      lastActive = -1;
+
+      // Magnet-Ziele: Scroll-Position, an der der Kopf genau auf dem jeweiligen Checkpoint sitzt.
+      snapYs = checkpoints.map((c) => {
+        let lo = 1, hi = polyPts.length - 1;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (polyPts[m].y < c.y) lo = m + 1; else hi = m; }
+        const a = polyPts[lo - 1], b = polyPts[lo];
+        const t = (c.y - a.y) / Math.max(1, b.y - a.y);
+        const lenAt = cum[lo - 1] + (cum[lo] - cum[lo - 1]) * t;
+        return Math.max(0, Math.min(scrollMax, (lenAt / polyLen) * scrollMax));
+      });
 
       if (reduced) {
         draw.style.strokeDashoffset = "0"; head.style.display = "none";
-        checkpoints.forEach((c) => { c.el.classList.add("is-hit"); c.hit = true; });
-        setActive(checkpoints.length - 1);
+        checkpoints.forEach((c) => { c.el.classList.add("is-hit"); c.note.classList.add("show"); c.hit = true; });
       } else apply();
     };
 
@@ -260,14 +304,16 @@ export default function ScrollSpine() {
       }
       // Checkpoints zünden, sobald der Kopf sie (vertikal) passiert; rückwärts wieder lösen.
       const reach = hy + 26; // etwas Vorlauf, damit es „beim Anfahren" zündet
-      let act = -1;
       for (let i = 0; i < checkpoints.length; i++) {
         const c = checkpoints[i];
         const on = reach >= c.y;
-        if (on !== c.hit) { c.hit = on; c.el.classList.toggle("is-hit", on); if (on) { c.el.classList.remove("pulse"); void c.el.getBBox(); c.el.classList.add("pulse"); } }
-        if (on) act = i;
+        if (on !== c.hit) {
+          c.hit = on;
+          c.el.classList.toggle("is-hit", on);
+          c.note.classList.toggle("show", on);
+          if (on) { c.el.classList.remove("pulse"); void c.el.getBBox(); c.el.classList.add("pulse"); }
+        }
       }
-      if (act !== lastActive) { lastActive = act; setActive(act); }
       // Finale: Kopf dockt am Button an → einmalige Impact-Animation + Dauerpuls.
       if (finalBtnEl) {
         const on = progress > 0.992;
@@ -277,6 +323,22 @@ export default function ScrollSpine() {
 
     const onScroll = () => { if (!reduced && !raf) raf = requestAnimationFrame(apply); };
 
+    // Leichte Magnetik: nach dem Scrollen sanft zum nächsten Checkpoint einrasten — aber nur, wenn
+    // man ohnehin schon dicht dran ist (kleines Fenster), damit es sich „leicht" anfühlt, nicht zwingt.
+    let snapT = 0;
+    const trySnap = () => {
+      if (reduced) return;
+      const sy = window.scrollY;
+      let target = -1, bestD = 1e9;
+      for (const ty of snapYs) { const d = Math.abs(ty - sy); if (d < bestD) { bestD = d; target = ty; } }
+      if (target >= 0 && bestD > 5 && bestD < 86) {
+        const lenis = (window as unknown as { __mgLenis?: { scrollTo: (t: number, o?: unknown) => void } }).__mgLenis;
+        if (lenis?.scrollTo) lenis.scrollTo(target, { duration: 0.55 });
+        else window.scrollTo({ top: target, behavior: "smooth" });
+      }
+    };
+    const onScrollSnap = () => { clearTimeout(snapT); snapT = window.setTimeout(trySnap, 165); };
+
     let rebuildT = 0;
     const scheduleBuild = () => { clearTimeout(rebuildT); rebuildT = window.setTimeout(build, 120); };
     const ro = new ResizeObserver(scheduleBuild);
@@ -284,6 +346,7 @@ export default function ScrollSpine() {
 
     build();
     window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("scroll", onScrollSnap, { passive: true });
     window.addEventListener("resize", scheduleBuild);
     document.fonts?.ready?.then(scheduleBuild).catch(() => {});
     const t1 = window.setTimeout(build, 400);
@@ -291,14 +354,13 @@ export default function ScrollSpine() {
 
     return () => {
       window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onScrollSnap);
       window.removeEventListener("resize", scheduleBuild);
       ro.disconnect();
-      clearTimeout(rebuildT); clearTimeout(t1); clearTimeout(t2);
+      clearTimeout(rebuildT); clearTimeout(t1); clearTimeout(t2); clearTimeout(snapT);
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
-
-  const cur = active >= 0 ? STORY[Math.min(active, STORY.length - 1)] : null;
 
   return (
     <>
@@ -309,35 +371,10 @@ export default function ScrollSpine() {
         <path className="mg-spine-ghost" ref={ghostRef} fill="none" />
         <path className="mg-spine-draw" ref={drawRef} fill="none" stroke="url(#mgSpineGrad)" />
         <g className="mg-cp-layer" ref={cpLayerRef} />
-        <circle className="mg-spine-head" ref={headRef} r="4.5" />
+        <circle className="mg-spine-head" ref={headRef} r="5" />
       </svg>
-
-      {/* HUD: erzählt die Artikel-Evolution Station für Station, getrieben vom Scroll. */}
-      <div className={`mg-evo ${cur ? "is-on" : ""}`} aria-hidden>
-        <div className="mg-evo-rail">
-          {STORY.map((b, i) => (
-            <span key={i} className={`mg-evo-tick ${i <= active ? "on" : ""} ${i === active ? "now" : ""}`} data-k={b.k} />
-          ))}
-        </div>
-        <div className="mg-evo-body">
-          <div className="mg-evo-top">
-            <span className="mg-evo-eyebrow">Leben eines Artikels</span>
-            <span className="mg-evo-step">{active >= 0 ? `${active + 1} / ${STORY.length}` : ""}</span>
-          </div>
-          {cur ? (
-            <div className="mg-evo-card" key={active} data-k={cur.k}>
-              <div className="mg-evo-card-head">
-                <span className="mg-evo-kind">{KIND_LABEL[cur.k] ?? cur.k}</span>
-                <span className="mg-evo-time">{cur.t}</span>
-              </div>
-              <div className="mg-evo-title">{cur.title}</div>
-              <div className="mg-evo-detail">{cur.detail}</div>
-            </div>
-          ) : (
-            <div className="mg-evo-hint">Scrollen — die Linie spult ein Artikel-Leben ab.</div>
-          )}
-        </div>
-      </div>
+      {/* Verlaufs-Karten, exakt an den Checkpoints verankert (am Dot orientiert). */}
+      <div className="mg-spine-notes" ref={notesRef} aria-hidden />
     </>
   );
 }
