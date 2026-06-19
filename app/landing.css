@@ -386,18 +386,39 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------------------------------------------------------------- Anatomie (Pin) */
 .mg-anatomy {
   position: relative; isolation: isolate; border-bottom: 1px solid var(--mg-line);
-  /* Behandelte Zeitungstextur: entsättigt (saturation), abgedunkelt
-     (multiply), Akzent-Schein (screen). Foto wird zur Atmosphäre, nicht laut. */
-  background-color: var(--mg-bg-2);
+  /* Statt Foto: tiefer Grund, die Atmosphäre macht der animierte Aurora-Layer (.mg-ana-bg). */
+  background-color: #07080b;
   background-image:
-    radial-gradient(60% 70% at 8% -6%, rgba(110, 138, 255, 0.20), transparent 62%),
-    linear-gradient(180deg, rgba(10, 11, 15, 0.86), rgba(10, 11, 15, 0.93)),
-    linear-gradient(rgba(120, 128, 150, 1), rgba(120, 128, 150, 1)),
-    url(/landing/anatomy.jpg);
-  background-repeat: no-repeat; background-position: center; background-size: cover;
-  background-blend-mode: screen, multiply, saturation, normal;
+    radial-gradient(90% 60% at 50% -10%, rgba(110, 138, 255, 0.08), transparent 60%),
+    linear-gradient(180deg, #090a0e, #06070a);
 }
-.mg-anatomy-pin { position: relative; }
+.mg-anatomy-pin { position: relative; overflow: hidden; }
+
+/* ---------- Abstrakter, morphender Aurora-Hintergrund ---------- */
+.mg-ana-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.mg-anatomy-stage { position: relative; z-index: 1; }
+.mg-ana-orb {
+  position: absolute; width: 62vw; height: 62vw; max-width: 880px; max-height: 880px;
+  border-radius: 50%; filter: blur(72px); opacity: 0.55; will-change: transform;
+}
+.mg-ana-orb.a { top: -14%; left: -8%;  background: radial-gradient(circle, rgba(110, 138, 255, 0.62), transparent 68%); animation: mgAnaA 28s ease-in-out infinite; }
+.mg-ana-orb.b { bottom: -20%; right: -10%; background: radial-gradient(circle, rgba(43, 179, 168, 0.50), transparent 68%); animation: mgAnaB 36s ease-in-out infinite; }
+.mg-ana-orb.c { top: 26%; left: 40%; background: radial-gradient(circle, rgba(159, 178, 255, 0.42), transparent 70%); animation: mgAnaC 24s ease-in-out infinite; }
+@keyframes mgAnaA { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(16%, 12%) scale(1.22); } }
+@keyframes mgAnaB { 0%,100% { transform: translate(0,0) scale(1.05); } 50% { transform: translate(-14%, -10%) scale(0.86); } }
+@keyframes mgAnaC { 0%,100% { transform: translate(0,0) scale(0.92); } 50% { transform: translate(-12%, 14%) scale(1.16); } }
+
+/* Fließendes Linienfeld (abstraktes SVG) — langsam vertikal wogend. */
+.mg-ana-lines { position: absolute; inset: -6%; width: 112%; height: 112%; opacity: 0.16; }
+.mg-ana-lines path { fill: none; stroke: rgba(159, 178, 255, 0.55); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+.mg-ana-lines g { transform-origin: center; animation: mgAnaLines 30s ease-in-out infinite; }
+@keyframes mgAnaLines { 0%,100% { transform: translateY(-16px) scaleY(1); } 50% { transform: translateY(20px) scaleY(1.05); } }
+
+/* Wärme wächst mit dem Scroll-Fortschritt: aus kühl-blau wird rot (still editiert → Paywall). */
+.mg-ana-warm { position: absolute; inset: 0; opacity: calc(var(--ana-p, 0) * 0.6); transition: opacity 0.25s ease;
+  background: radial-gradient(120% 95% at 78% 112%, rgba(229, 103, 92, 0.55), transparent 58%); }
+.mg-ana-vignette { position: absolute; inset: 0;
+  background: radial-gradient(120% 80% at 50% 50%, transparent 52%, rgba(5, 6, 9, 0.72) 100%); }
 .mg-anatomy-stage {
   min-height: 100svh; display: grid; align-content: center;
   grid-template-columns: minmax(60px, 130px) minmax(0, 720px);
@@ -841,7 +862,7 @@ html.lenis, html.lenis body { height: auto; }
 @media (prefers-reduced-motion: reduce) {
   .mg-grain, .mg-marquee-track, .mg-scrollhint i::after, .mg-pair-link .line, .mg-method-note .pulse::after { animation: none !important; }
   .mg-cp.pulse .mg-cp-burst, .mg-cp.pulse .mg-cp-dot, .mg-evo-card { animation: none !important; }
-  .mg-section::before { animation: none !important; }
+  .mg-section::before, .mg-ana-orb, .mg-ana-lines g { animation: none !important; }
   .mg-final .mg-btn.is-arrived, .mg-final .mg-btn.is-arrived::before, .mg-final .mg-btn.is-arrived::after { animation: none !important; }
   .mg-evo { transition: none !important; }
   .mg *, .mg *::before, .mg *::after { transition-duration: 0.01ms !important; }

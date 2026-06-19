@@ -161,6 +161,9 @@ export default function Anatomy() {
           onUpdate(self) {
             const idx = Math.min(3, Math.floor(self.progress * 3.999));
             railSteps.forEach((s, i) => s.classList.toggle("on", i <= idx));
+            // Hintergrund-Stimmung an den Fortschritt koppeln: kühl/blau (Erstfassung) →
+            // warm/rot (stiller Edit bis Paywall). Treibt --ana-p im CSS.
+            root.style.setProperty("--ana-p", self.progress.toFixed(3));
           },
         },
       });
@@ -201,6 +204,24 @@ export default function Anatomy() {
   return (
     <section className="mg-anatomy" id="anatomie" ref={rootRef}>
       <div className="mg-anatomy-pin">
+        {/* Abstrakter, langsam morphender Hintergrund über die gesamte Pin-Strecke.
+            Gecachter Blur + reine Transform-Animation (GPU) → flüssig. Die Wärme
+            wächst mit dem Scroll-Fortschritt (--ana-p). */}
+        <div className="mg-ana-bg" aria-hidden>
+          <i className="mg-ana-orb a" />
+          <i className="mg-ana-orb b" />
+          <i className="mg-ana-orb c" />
+          <svg className="mg-ana-lines" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice">
+            <g>
+              <path d="M-50 180 Q 300 90 600 200 T 1250 170" />
+              <path d="M-50 330 Q 320 250 600 350 T 1250 320" />
+              <path d="M-50 470 Q 300 560 600 440 T 1250 470" />
+              <path d="M-50 620 Q 320 540 600 650 T 1250 610" />
+            </g>
+          </svg>
+          <span className="mg-ana-warm" />
+          <span className="mg-ana-vignette" />
+        </div>
         <div className="mg-anatomy-stage">
           <div className="mg-head">
             <p className="mg-overline">Fallbeispiel · nachgestellt</p>
