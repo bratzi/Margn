@@ -219,28 +219,22 @@ export default function ScrollSpine() {
       cpLayer.replaceChildren();
       notes.replaceChildren();
       const mkCircle = (cls: string, r: number) => { const c = document.createElementNS(NS, "circle"); c.setAttribute("class", cls); c.setAttribute("r", String(r)); return c; };
-      checkpoints = found.slice(0, STORY.length).map((f, i) => {
-        // Checkpoint in den FREIEN Bereich legen: im mittleren Teil des Sektions-Bands die Stelle
-        // suchen, an der die Linie am weitesten von der Mitte weg (Richtung Rand/Weißraum) liegt —
-        // so sitzt der Dot neben dem Inhalt, nicht mitten in Text/Box.
-        const band = bands[i];
-        const yLo = band.start + (band.end - band.start) * 0.24;
-        const yHi = band.start + (band.end - band.start) * 0.76;
-        let y = f.mid, bestDev = -1;
-        for (let yy = yLo; yy <= yHi; yy += 24) {
-          const dev = Math.abs(xAtY(yy) - W / 2);
-          if (dev > bestDev) { bestDev = dev; y = yy; }
-        }
-        y = Math.min(H - 4, y);
+      // Checkpoints liegen ZWISCHEN zwei Sektionen (im Zwischenraum = Weißraum), nicht im Inhalt.
+      // Der letzte „Checkpoint" ist der Button (separat, is-arrived) → hier nur die Lücken bestücken.
+      const gapCount = Math.min(found.length - 1, STORY.length);
+      checkpoints = Array.from({ length: gapCount }, (_, i) => {
+        const a = found[i], b = found[i + 1];
+        const y = Math.min(H - 4, (a.top + a.h + b.top) / 2); // Mitte des Zwischenraums
         const x = xAtY(y);
         const beat = STORY[i];
+        const color = a.color;
 
         // --- dramatischer Dot: zwei Schockwellen + Flash + Ring + Kern ---
         const g = document.createElementNS(NS, "g") as SVGGElement;
         g.setAttribute("class", "mg-cp");
         g.setAttribute("data-k", beat.k); // Variation je Änderungstyp (Wellenweite/Charakter)
         g.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
-        g.style.setProperty("--cp", f.color);
+        g.style.setProperty("--cp", color);
         g.append(
           mkCircle("mg-cp-wave", 8), mkCircle("mg-cp-wave2", 8),
           mkCircle("mg-cp-flash", 8), mkCircle("mg-cp-ring", 8.5), mkCircle("mg-cp-core", 4.5),
@@ -254,7 +248,7 @@ export default function ScrollSpine() {
         note.dataset.side = side;
         note.style.left = `${x.toFixed(1)}px`;
         note.style.top = `${y.toFixed(1)}px`;
-        note.style.setProperty("--cp", f.color);
+        note.style.setProperty("--cp", color);
         note.style.setProperty("--d", `${0.04 * i}s`);
         note.innerHTML =
           `<span class="mg-cpn-link"></span>` +

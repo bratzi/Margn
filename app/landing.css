@@ -636,7 +636,7 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Finale */
 .mg-final {
-  position: relative; isolation: isolate; text-align: center; overflow: clip;
+  position: relative; text-align: center; overflow: clip;
   padding: clamp(110px, 16vw, 200px) var(--mg-pad);
   border-top: 1px solid var(--mg-line);
   /* Behandelte Tinten-/Rauch-Textur als dramatischer Abschluss */
@@ -858,23 +858,31 @@ html.lenis, html.lenis body { height: auto; }
 .mg-cpn-detail { font-size: 12px; color: #aeb3c2; line-height: 1.5; margin-top: 4px; }
 @media (max-width: 760px) { .mg-cpn-card { width: min(220px, 74vw); } }
 
-/* ---------- Finale: Linien-Endpunkt dockt am „Dashboard öffnen"-Button an ---------- */
-/* .mg-btn::before ist die Button-Füllung — NICHT überschreiben. Impact-Ring läuft am
-   Element selbst (box-shadow), der Dauerpuls über das freie ::after. */
-.mg-final .mg-btn.is-arrived { animation: mgCtaArrive 0.75s cubic-bezier(.2,.8,.2,1); }
+/* ---------- Finale: die Linie verschwindet HINTER dem Button (z-index 6 > Spine 4),
+   dann zündet ein langer, schriller Eyecatcher. ::before ist die Button-Füllung —
+   nicht anfassen; Impact läuft am Element (box-shadow + brightness) + ::after (Schockwelle→Puls). */
+.mg-final .mg-btn { position: relative; z-index: 6; }
+.mg-final .mg-btn.is-arrived { animation: mgCtaArrive 1.45s cubic-bezier(.2,.8,.2,1); }
 .mg-final .mg-btn.is-arrived::after {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 0;
-  animation: mgCtaPulse 2.2s ease-out 0.75s infinite;
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1;
+  animation: mgCtaShock 1s ease-out, mgCtaPulse 2s ease-out 1.15s infinite;
 }
 @keyframes mgCtaArrive {
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(110,138,255,0.85); }
-  36% { transform: scale(1.07); }
-  100% { transform: scale(1); box-shadow: 0 0 0 28px rgba(110,138,255,0); }
+  0%   { transform: scale(0.95); filter: brightness(1); box-shadow: 0 0 0 0 rgba(159,178,255,0); }
+  13%  { transform: scale(1.15); filter: brightness(1.8); box-shadow: 0 0 0 0 rgba(159,178,255,0.95), 0 0 46px rgba(110,138,255,0.95); }
+  30%  { filter: brightness(1.15); }
+  42%  { transform: scale(0.985); }
+  62%  { transform: scale(1.05); }
+  100% { transform: scale(1); filter: brightness(1); box-shadow: 0 0 0 52px rgba(110,138,255,0), 0 0 24px rgba(110,138,255,0.4); }
+}
+@keyframes mgCtaShock {
+  0%   { box-shadow: 0 0 0 0 rgba(159,178,255,0.7); }
+  100% { box-shadow: 0 0 0 64px rgba(159,178,255,0); }
 }
 @keyframes mgCtaPulse {
-  0% { box-shadow: 0 0 0 0 rgba(110,138,255,0.5), 0 0 20px rgba(110,138,255,0.45); }
-  70% { box-shadow: 0 0 0 15px rgba(110,138,255,0), 0 0 26px rgba(110,138,255,0.3); }
-  100% { box-shadow: 0 0 0 0 rgba(110,138,255,0), 0 0 16px rgba(110,138,255,0.18); }
+  0%   { box-shadow: 0 0 0 0 rgba(110,138,255,0.6), 0 0 24px rgba(110,138,255,0.5); }
+  70%  { box-shadow: 0 0 0 20px rgba(110,138,255,0), 0 0 32px rgba(110,138,255,0.35); }
+  100% { box-shadow: 0 0 0 0 rgba(110,138,255,0), 0 0 18px rgba(110,138,255,0.2); }
 }
 
 /* Reduced Motion */
