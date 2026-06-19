@@ -168,9 +168,8 @@ export default function ScrollSpine() {
       let endY = H, endX: number | null = null;
       if (finalBtnEl) {
         const br = finalBtnEl.getBoundingClientRect();
-        // Endpunkt knapp UNTER der Button-Oberkante → die Linie läuft in den Button hinein und
-        // verschwindet hinter ihm (Button liegt auf z-index 6 über der Spine).
-        endY = br.top + window.scrollY + Math.min(br.height * 0.5, 12);
+        // Endpunkt an der OBERKANTE des Buttons (mittig) — die Linie läuft genau bis dort und endet.
+        endY = br.top + window.scrollY + 1;
         endX = br.left + br.width / 2;
       }
       endYv = endY;
