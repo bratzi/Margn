@@ -36,10 +36,12 @@ function cmpTyped(a: unknown, b: unknown): number {
   return as.localeCompare(bs, "de", { numeric: true, sensitivity: "base" });
 }
 
-export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass, tableId, onSortChange }: {
+export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass, tableId, onSortChange, onRowClick }: {
   columns: Col<T>[]; rows: T[]; rowKey: (r: T) => string | number; minWidth?: number; rowClass?: (r: T) => string; tableId?: string;
   // Wenn gesetzt: Sort-State wird nach oben delegiert (Server-Sort) — kein client-seitiges Umsortieren.
   onSortChange?: (s: { key: string; dir: "asc" | "desc" } | null) => void;
+  // Klick auf eine Datenzeile (außerhalb von Links/Buttons/Inputs) — z.B. zur Detailseite.
+  onRowClick?: (r: T) => void;
 }) {
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
@@ -205,6 +207,12 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
     </>
   ); };
 
+  // Klickbare Zeile (außerhalb von Links/Buttons/Inputs/Resize-Griff) → onRowClick.
+  const rowProps = (r: T) => ({
+    className: `${rowClass?.(r) ?? ""}${onRowClick ? " dt-clickable" : ""}`.trim() || undefined,
+    onClick: onRowClick ? (e: React.MouseEvent) => { if (!(e.target as HTMLElement).closest("a,button,input,label,.dt-resize")) onRowClick(r); } : undefined,
+  });
+
   return (
     <div className="dt-wrap" ref={wrapRef}>
       <div className="dt-toolbar">
@@ -244,11 +252,11 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
             )}
           </thead>
           <tbody>
-            {!groups && view.map((r) => <tr key={rowKey(r)} className={rowClass?.(r)}><Cells r={r} /></tr>)}
+            {!groups && view.map((r) => <tr key={rowKey(r)} {...rowProps(r)}><Cells r={r} /></tr>)}
             {groups && groups.map(([g, rs]) => (
               <GroupBlock key={g} g={g} count={rs.length} colSpan={nCols}
                 collapsed={collapsed.has(g)} onToggle={() => setCollapsed((s) => { const n = new Set(s); n.has(g) ? n.delete(g) : n.add(g); return n; })}>
-                {!collapsed.has(g) && rs.map((r) => <tr key={rowKey(r)} className={rowClass?.(r)}><Cells r={r} /></tr>)}
+                {!collapsed.has(g) && rs.map((r) => <tr key={rowKey(r)} {...rowProps(r)}><Cells r={r} /></tr>)}
               </GroupBlock>
             ))}
             {!view.length && <tr><td colSpan={nCols} className="faint" style={{ padding: 28, textAlign: "center" }}>Keine Zeilen.</td></tr>}

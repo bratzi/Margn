@@ -198,7 +198,7 @@ export default function ArticleDashboard() {
 
         <h2 className="section-h">Artikel <span className="count">{ctxLabel}</span></h2>
         <div className="data-fade-in" key={`${page}-${rows.length}-${f.topics.join(",")}-${f.subcats.join(",")}`}>
-          <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={2000} tableId="articles" rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} onSortChange={setTableSort} />
+          <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} minWidth={2000} tableId="articles" rowClass={(r) => (r.scan_count ?? 1) <= 1 ? "row-new" : ""} onSortChange={setTableSort} onRowClick={(r) => { if (r.article_id) window.open(`/articles/${r.article_id}`, "_blank", "noopener"); }} />
         </div>
 
         <div className="pager">

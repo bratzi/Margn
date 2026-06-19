@@ -485,6 +485,7 @@ function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: s
 // Änderungen (Überschrift, Datum, Teaser, Ressort, Paywall, Autor), die auf den ersten Blick verborgen sind.
 function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   const isEdit = s.change_kind === "edit";
+  const isExt = s.change_kind === "extension";
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : isEdit ? "Stille Änderung" : "Geändert & erweitert";
   const Icon = isEdit ? Pencil : Plus;
   const cls = s.change_kind === "extension" ? "ok" : isEdit ? "lock" : "wait";
@@ -503,7 +504,7 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
           {dateChanged && <span className="chist-chip date">Datum</span>}
           {metaEdits.map((m) => <span key={m.field} className="chist-chip meta">{META_LABEL[m.field] ?? m.field}</span>)}
           {s.added_count > 0 && <span className="chist-chip add">+{s.added_count}&nbsp;Absatz{s.added_count > 1 ? "e" : ""}</span>}
-          {s.removed_count > 0 && <span className="chist-chip del">−{s.removed_count}&nbsp;Absatz{s.removed_count > 1 ? "e" : ""}</span>}
+          {!isExt && s.removed_count > 0 && <span className="chist-chip del">−{s.removed_count}&nbsp;Absatz{s.removed_count > 1 ? "e" : ""}</span>}
           {s.word_delta ? <span className="chist-chip">{s.word_delta > 0 ? "+" : ""}{s.word_delta}&nbsp;W</span> : null}
         </span>
       </div>
@@ -512,28 +513,42 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
       )}
       {metaEdits.map((m, i) => <MetaEditView key={`${m.field}-${i}`} m={m} />)}
       {titleChanged && <Juxta oldS={s.title_old!} newS={s.title_new!} label="Überschrift" />}
-      {changes.map((c, i) =>
-        c.old && c.new ? <Juxta key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />
-        : c.new ? (
-          <div className="chist-block" key={i}>
+      {isExt ? (() => {
+        // Erweiterung (Liveblog/Ticker/Wachstum): NUR die Neuzugänge zeigen — „entfernt/geändert"
+        // ist hier fast immer Re-Segmentierung durch lazyload, kein echtes Verschwinden.
+        const newText = s.added || changes.filter((c) => c.new).map((c) => c.new).join("\n\n");
+        return newText ? (
+          <div className="chist-block">
             <div className="lbl add-l">Neu hinzugekommen</div>
-            <div className="chist-ver new">{c.new}</div>
+            <div className="chist-ver new">{newText.length > 1400 ? newText.slice(0, 1400) + "…" : newText}</div>
           </div>
-        ) : (
-          <div className="chist-block" key={i}>
-            <div className="lbl del-l">Entfernt</div>
-            <div className="chist-ver old">{c.old}</div>
-          </div>
-        )
-      )}
-      {changes.length === 0 && !titleChanged && s.added && (
-        <div className="chist-block">
-          <div className={`lbl ${isEdit ? "del-l" : "add-l"}`}>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
-          <div className={`chist-ver ${isEdit ? "old" : "new"}`}>{s.added.length > 700 ? s.added.slice(0, 700) + "…" : s.added}</div>
-        </div>
-      )}
-      {changes.length === 0 && !titleChanged && !s.added && !dateChanged && s.removed_count > 0 && (
-        <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>− {s.removed_count} Passage(n) entfernt</p>
+        ) : null;
+      })() : (
+        <>
+          {changes.map((c, i) =>
+            c.old && c.new ? <Juxta key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />
+            : c.new ? (
+              <div className="chist-block" key={i}>
+                <div className="lbl add-l">Neu hinzugekommen</div>
+                <div className="chist-ver new">{c.new}</div>
+              </div>
+            ) : (
+              <div className="chist-block" key={i}>
+                <div className="lbl del-l">Entfernt</div>
+                <div className="chist-ver old">{c.old}</div>
+              </div>
+            )
+          )}
+          {changes.length === 0 && !titleChanged && s.added && (
+            <div className="chist-block">
+              <div className={`lbl ${isEdit ? "del-l" : "add-l"}`}>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
+              <div className={`chist-ver ${isEdit ? "old" : "new"}`}>{s.added.length > 700 ? s.added.slice(0, 700) + "…" : s.added}</div>
+            </div>
+          )}
+          {changes.length === 0 && !titleChanged && !s.added && !dateChanged && s.removed_count > 0 && (
+            <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>− {s.removed_count} Passage(n) entfernt</p>
+          )}
+        </>
       )}
     </div>
   );

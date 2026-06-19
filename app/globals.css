@@ -485,7 +485,8 @@ select { background: var(--surface); color: var(--ink); border: 1px solid var(--
 .dt-tbtn:hover { border-color: var(--accent); color: var(--ink); }
 .dt-tbtn.on { background: var(--accent-sub); border-color: var(--accent); color: var(--accent); }
 .dt-count { margin-left: auto; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
-.dt-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); }
+.dt-scroll { overflow: auto; max-height: calc(100vh - 170px); border: 1px solid var(--line); border-radius: var(--r); }
+.dt thead { position: sticky; top: 0; z-index: 4; }  /* Kopfzeile bleibt beim Durchscrollen sichtbar */
 table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .dt thead th { position: relative; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; user-select: none; }
 .dt thead th.num { text-align: right; }
@@ -496,6 +497,7 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .dt tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .dt tbody tr:hover { background: var(--surface-2); }
+.dt tbody tr.dt-clickable { cursor: pointer; }
 /* Neu erfasste Artikel (erster Scan): dezent grün hinterlegt */
 .dt tbody tr.row-new { background: var(--green-sub); }
 .dt tbody tr.row-new:hover { background: color-mix(in srgb, var(--green-sub) 70%, var(--surface-2)); }
