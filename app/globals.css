@@ -702,7 +702,6 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
 .chist-date svg { position: relative; top: 2px; color: var(--accent); flex-shrink: 0; }
 .chist-date b { color: var(--ink); font-weight: 600; }
-.chist-bodynote { margin-top: 12px; font-size: 12.5px; line-height: 1.55; color: var(--ink); }
 .chist-block { margin-top: 13px; }
 .chist-block .lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 7px; }
 .chist-block .lbl.add-l { color: var(--green); }

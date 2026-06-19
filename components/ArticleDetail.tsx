@@ -492,8 +492,6 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   const titleChanged = !!(s.title_old && s.title_new);
   const dateChanged = !!(s.pubdate_old && s.pubdate_new);
   const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field);
-  const rewritten = changes.filter((c) => c.old && c.new).length;
-  const bodyTouched = changes.length > 0 || !!s.added || s.added_count > 0 || s.removed_count > 0;
   return (
     <div className={`chist-card ${s.change_kind}`}>
       <div className="chist-head">
@@ -514,11 +512,28 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
       )}
       {metaEdits.map((m, i) => <MetaEditView key={`${m.field}-${i}`} m={m} />)}
       {titleChanged && <Juxta oldS={s.title_old!} newS={s.title_new!} label="Überschrift" />}
-      {bodyTouched && (
-        <p className="chist-bodynote">
-          Fließtext still bearbeitet{rewritten > 0 ? ` · ${rewritten} Passage${rewritten > 1 ? "n" : ""} umgeschrieben` : ""}
-          {" — "}<span className="faint">Volltext nicht gespiegelt, im Original bei der Quelle lesen.</span>
-        </p>
+      {changes.map((c, i) =>
+        c.old && c.new ? <Juxta key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />
+        : c.new ? (
+          <div className="chist-block" key={i}>
+            <div className="lbl add-l">Neu hinzugekommen</div>
+            <div className="chist-ver new">{c.new}</div>
+          </div>
+        ) : (
+          <div className="chist-block" key={i}>
+            <div className="lbl del-l">Entfernt</div>
+            <div className="chist-ver old">{c.old}</div>
+          </div>
+        )
+      )}
+      {changes.length === 0 && !titleChanged && s.added && (
+        <div className="chist-block">
+          <div className={`lbl ${isEdit ? "del-l" : "add-l"}`}>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
+          <div className={`chist-ver ${isEdit ? "old" : "new"}`}>{s.added.length > 700 ? s.added.slice(0, 700) + "…" : s.added}</div>
+        </div>
+      )}
+      {changes.length === 0 && !titleChanged && !s.added && !dateChanged && s.removed_count > 0 && (
+        <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>− {s.removed_count} Passage(n) entfernt</p>
       )}
     </div>
   );
