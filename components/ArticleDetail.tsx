@@ -19,7 +19,9 @@ type Detail = {
   scan_count: number | null; scan_times: string[] | null;
 };
 type Change = { old?: string; new?: string };
-type Pctl = { label: string; verb: string; pct: number; n: number };
+// Eine Einordnungs-Zeile: Perzentil ODER (für die seltene Bearbeitung) Rang innerhalb der
+// bearbeiteten Artikel + Median-Kontext, damit die Zahl aussagekräftig ist statt „immer ~100 %".
+type Pctl = { key: string; label: string; verb: string; pct: number; n: number; selfVal: number; median: number | null; cohort?: string };
 type Neighbor = { articleId: number; title: string | null; outlet: string; country: string | null; shared: string[]; cross: boolean };
 type MetaEdit = { field: string; old: string | null; new: string | null };
 type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; pubdate_old: string | null; pubdate_new: string | null; changes: Change[] | null; meta_edits: MetaEdit[] | null };
@@ -29,7 +31,6 @@ const TYPE_LABEL: Record<string, string> = {
   news: "Nachricht", opinion: "Meinung", analysis: "Analyse", liveblog: "Liveblog", timeline: "Timeline-Artikel",
   review: "Rezension", reportage: "Reportage", interactive: "Interaktiv", interview: "Interview",
 };
-// Unsichtbare Metadaten-Edits: Feld-Schlüssel → kurzes Chip-Label.
 const META_LABEL: Record<string, string> = { description: "Teaser", og_image: "Bild", topic: "Ressort", paywalled: "Paywall", author_status: "Autor" };
 const AUTHOR_STATUS_LABEL: Record<string, string> = { named: "namentlich", anonymous: "Redaktion/Agentur", none: "kein Autor" };
 
@@ -37,12 +38,6 @@ function fmtDate(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
-function fmtShort(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "short", year: "numeric" });
-}
-// Eine Zeitspanne (ms) menschenlesbar: Min → h → d. Quelle der Wahrheit für alle
-// abgeleiteten Dauer-Angaben auf der Detailseite.
 function durStr(ms: number): string {
   const mins = Math.round(ms / 60000);
   if (mins < 1) return "unter 1 Min";
@@ -63,6 +58,7 @@ export default function ArticleDetail({ id }: { id: number }) {
   const [categories, setCategories] = useState<string[]>([]);
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [pctls, setPctls] = useState<Pctl[] | null>(null);
+  const [editedShare, setEditedShare] = useState<number | null>(null); // Anteil bearbeiteter Artikel der Quelle
   const [neighbors, setNeighbors] = useState<Neighbor[] | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -85,50 +81,53 @@ export default function ArticleDetail({ id }: { id: number }) {
     })();
   }, [id]);
 
-  // Einordnung: wie dieser Artikel im Vergleich zu seinen Peers liegt (gleiche Quelle,
-  // gleiches Thema). Reine COUNT-Queries (head:true) gegen page_overview — günstig, kein
-  // Datentransfer. Perzentil = Anteil der Peers, die unter dem eigenen Wert liegen.
+  // Einordnung gegen Peers (gleiche Quelle / gleiches Thema). Statt vieler COUNT-Round-Trips je
+  // EINE Abfrage je Vergleichsraum (die Peer-Mengen sind klein) → Perzentil + Median client-seitig.
+  // WICHTIG (Fix): Die Bearbeitungs-Häufigkeit wird NICHT gegen ALLE Artikel verglichen — die
+  // meisten haben 0 Änderungen, jeder bearbeitete landete so bei ~100 %. Stattdessen Perzentil
+  // INNERHALB der bearbeiteten Artikel (revision_count ≥ 1) + Median, plus Seltenheits-Quote.
   useEffect(() => {
     if (!a) return;
     let cancelled = false;
     (async () => {
       const wc = a.word_count, rc = a.revision_count ?? 0, sid = a.source_id, topic = a.topic;
-      // Vergleichsbasis: nur echte journalistische Seiten, die schon analysiert sind (word_count gesetzt).
-      const base = (q: any) => q.in("ptype", ALLOWED_PTYPES).not("word_count", "is", null);
-      const cnt = async (mut: (q: any) => any) => {
-        const { count } = await mut(supabase.from("page_overview").select("id", { count: "exact", head: true }));
-        return count ?? 0;
+      const median = (arr: number[]): number | null => {
+        if (arr.length < 4) return null;
+        const s = [...arr].sort((x, y) => x - y); const m = Math.floor(s.length / 2);
+        return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
       };
-      const jobs: Promise<Pctl | null>[] = [];
-      const mk = async (label: string, verb: string, minN: number, total: () => Promise<number>, below: () => Promise<number>): Promise<Pctl | null> => {
-        const [tot, blw] = await Promise.all([total(), below()]);
-        return tot >= minN ? { label, verb, pct: Math.round((blw / tot) * 100), n: tot } : null;
-      };
-      if (wc != null) {
-        jobs.push(mk(`Länge · ${a.outlet}`, "länger als", 5,
-          () => cnt((q) => base(q).eq("source_id", sid)),
-          () => cnt((q) => base(q).eq("source_id", sid).lt("word_count", wc))));
-        if (topic) jobs.push(mk(`Länge · Thema ${topicLabel(topic)}`, "länger als", 8,
-          () => cnt((q) => base(q).eq("topic", topic)),
-          () => cnt((q) => base(q).eq("topic", topic).lt("word_count", wc))));
+      const pctBelow = (arr: number[], v: number) => arr.length ? Math.round((arr.filter((x) => x < v).length / arr.length) * 100) : 0;
+
+      // Quelle: Wortzahl + Revisionen in EINER Abfrage.
+      const { data: srcRows } = await supabase.from("page_overview")
+        .select("word_count,revision_count").eq("source_id", sid).in("ptype", ALLOWED_PTYPES).not("word_count", "is", null).limit(3000);
+      const src = (srcRows ?? []) as { word_count: number | null; revision_count: number | null }[];
+      const srcWc = src.map((r) => r.word_count).filter((n): n is number => n != null);
+      const srcEdited = src.map((r) => r.revision_count ?? 0).filter((n) => n >= 1);
+
+      // Thema: nur Wortzahl, nur falls vorhanden.
+      let topicWc: number[] = [];
+      if (topic) {
+        const { data: tRows } = await supabase.from("page_overview")
+          .select("word_count").eq("topic", topic).in("ptype", ALLOWED_PTYPES).not("word_count", "is", null).limit(3000);
+        topicWc = ((tRows ?? []) as any[]).map((r) => r.word_count).filter((n) => n != null);
       }
-      if (rc > 0) {
-        // revision_count ist bei unveränderten Artikeln NULL → als 0 (= unter rc) werten.
-        jobs.push(mk(`Bearbeitung · ${a.outlet}`, "öfter geändert als", 5,
-          () => cnt((q) => base(q).eq("source_id", sid)),
-          () => cnt((q) => base(q).eq("source_id", sid).or(`revision_count.lt.${rc},revision_count.is.null`))));
-      }
-      const res = (await Promise.all(jobs)).filter(Boolean) as Pctl[];
-      if (!cancelled) setPctls(res);
+
+      const res: Pctl[] = [];
+      if (wc != null && srcWc.length >= 5)
+        res.push({ key: "len_src", label: `Umfang · ${a.outlet}`, verb: "länger als", pct: pctBelow(srcWc, wc), n: srcWc.length, selfVal: wc, median: median(srcWc) });
+      if (wc != null && topicWc.length >= 8)
+        res.push({ key: "len_topic", label: `Umfang · ${topicLabel(topic!)}`, verb: "länger als", pct: pctBelow(topicWc, wc), n: topicWc.length, selfVal: wc, median: median(topicWc) });
+      if (rc > 0 && srcEdited.length >= 4)
+        res.push({ key: "edit", label: `Bearbeitung · ${a.outlet}`, verb: "öfter geändert als", pct: pctBelow(srcEdited, rc), n: srcEdited.length, selfVal: rc, median: median(srcEdited), cohort: "bearbeiteten Artikeln" });
+
+      const share = srcWc.length >= 8 ? srcEdited.length / srcWc.length : null;
+      if (!cancelled) { setPctls(res); setEditedShare(share); }
     })();
     return () => { cancelled = true; };
   }, [a?.id]);
 
-  // Thematische Nachbarn: andere Artikel, die viele Schlagwörter teilen → Hinweis auf
-  // dieselbe Story / gemeinsames Framing (Kernkonzept). Geteilte Keywords werden per
-  // inverser Dokumentfrequenz gewichtet (IDF, 1/√df) — seltene, spezifische Begriffe
-  // (z.B. „eu-haushalt") wiegen schwer, allgegenwärtige („ukraine") kaum; ultragenerische
-  // (df > 1200) fallen ganz raus. So dominieren echte Story-Nachbarn statt Themen-Rauschen.
+  // Thematische Nachbarn: blattübergreifendes Echo über IDF-gewichtete, geteilte Schlagwörter.
   useEffect(() => {
     if (!a) return;
     let cancelled = false;
@@ -137,7 +136,6 @@ export default function ArticleDetail({ id }: { id: number }) {
       const { data: kwRows } = await supabase.from("article_keywords").select("keyword_id, keywords(term)").eq("article_id", self);
       const myKw = ((kwRows ?? []) as any[]).map((r) => ({ id: r.keyword_id as number, term: r.keywords?.term as string })).filter((r) => r.id && r.term);
       if (myKw.length < 2) { if (!cancelled) setNeighbors([]); return; }
-      // Dokumentfrequenz je Keyword (parallele COUNT-HEADs) → IDF-Gewicht.
       const withDf = await Promise.all(myKw.slice(0, 24).map(async (kw) => {
         const { count } = await supabase.from("article_keywords").select("article_id", { count: "exact", head: true }).eq("keyword_id", kw.id);
         return { ...kw, df: count ?? 0 };
@@ -168,8 +166,7 @@ export default function ArticleDetail({ id }: { id: number }) {
     return () => { cancelled = true; };
   }, [a?.id]);
 
-  // Verhaltensprofil: aus bereits geladenen Daten abgeleitete, „auf den ersten Blick
-  // unsichtbare" Kennzahlen (Latenz, stilles Bearbeitungsfenster, Wort-Bilanz, Scan-Takt).
+  // Verhaltensprofil: abgeleitete, „auf den ersten Blick unsichtbare" Kennzahlen.
   const profile = useMemo(() => {
     if (!a) return null;
     const pub = a.published_at ? Date.parse(a.published_at) : NaN;
@@ -199,8 +196,29 @@ export default function ArticleDetail({ id }: { id: number }) {
     return { tiles, edit, ext, rev, insight };
   }, [a, snaps]);
 
-  if (loading) return <div className="page"><p className="faint">Lade…</p></div>;
-  if (!a) return <div className="page"><p className="faint">Artikel nicht gefunden.</p></div>;
+  // Radar-„Fingerabdruck": 6 normalisierte Achsen (0..1), die das Verhalten des Artikels auf
+  // einen Blick zeigen — das „zwischen den Zeilen". Perzentil-Achsen kommen aus pctls, der Rest
+  // aus bereits geladenen Daten (sanfte Obergrenzen). Bewusst robust gegen fehlende Werte.
+  const radar = useMemo(() => {
+    if (!a) return null;
+    const byKey = (k: string) => pctls?.find((p) => p.key === k)?.pct ?? null;
+    const lenPct = byKey("len_src");
+    const editPct = byKey("edit");
+    const rev = a.revision_count ?? 0, sc = a.scan_count ?? 0;
+    const axes = [
+      { label: "Umfang", v: lenPct != null ? lenPct / 100 : Math.min(1, (a.word_count ?? 0) / 1500), hint: "Länge vs. Quelle" },
+      { label: "Bearbeitung", v: rev === 0 ? 0 : editPct != null ? Math.max(0.12, editPct / 100) : Math.min(1, rev / 8), hint: "Änderungs-Intensität" },
+      { label: "Volatilität", v: sc > 0 ? Math.min(1, rev / sc / 0.5) : 0, hint: "Änderungen je Scan" },
+      { label: "Schlagwörter", v: Math.min(1, keywords.length / 12), hint: "thematische Dichte" },
+      { label: "Echo", v: Math.min(1, (neighbors?.length ?? 0) / 8), hint: "blattübergreifende Nähe" },
+      { label: "Beobachtung", v: Math.min(1, sc / 24), hint: "wie oft margn nachsah" },
+    ];
+    const area = axes.reduce((s, x) => s + x.v, 0) / axes.length; // grobes „Aktivitäts"-Maß
+    return { axes, area };
+  }, [a, pctls, keywords.length, neighbors]);
+
+  if (loading) return <div className="page detail"><p className="faint">Lade…</p></div>;
+  if (!a) return <div className="page detail"><p className="faint">Artikel nicht gefunden.</p></div>;
 
   const segs = (() => { try { return new URL(a.url).pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean); } catch { return []; } })();
   const type = a.article_type ?? "news";
@@ -209,7 +227,7 @@ export default function ArticleDetail({ id }: { id: number }) {
     <div className="page detail">
       <Link href="/articles" className="back"><ArrowLeft size={15} /> Alle Artikel</Link>
 
-      {/* Kicker */}
+      {/* Kopf — volle Breite */}
       <div className="d-kicker">
         <ExtLink href={a.base_url} className="d-outlet">{a.outlet}</ExtLink>
         <span className="cc">{a.country}</span>
@@ -218,165 +236,215 @@ export default function ArticleDetail({ id }: { id: number }) {
         {a.paywalled === true && <span className="badge lock"><Lock /> Paywall</span>}
         {a.paywalled === false && <span className="badge free"><LockOpen /> Frei zugänglich</span>}
       </div>
-
       <h1 className="d-title">{a.title ?? a.url.replace(/^https?:\/\/(www\.)?/, "")}</h1>
       {a.description && <p className="d-dek">{a.description}</p>}
-
-      {/* Kategorien prominent */}
       {categories.length > 0 && (
         <div className="cat-banner">
           <span className="cat-label">Ressort</span>
           <div className="cat-chips">{categories.map((x) => <span key={x} className="cat-chip">{x}</span>)}</div>
         </div>
       )}
-
       {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
 
-      {/* Stats */}
-      <div className="panel statbar">
-        {a.published_at ? (
-          <Stat k="Veröffentlicht" v={fmtDate(a.published_at)}
-            sub={a.first_seen ? `Erfasst ${timeDelta(a.published_at, a.first_seen)} später` : undefined} />
-        ) : (
-          <Stat k="Veröffentlicht" v="Kein Datum vom Verlag" sub={a.first_seen ? `Erster Scan: ${fmtDate(a.first_seen)}` : undefined} />
-        )}
-        {a.modified_at && a.modified_at !== a.published_at && <Stat k="Aktualisiert" v={fmtDate(a.modified_at)} />}
-        {a.word_count ? <Stat k="Umfang" v={`${a.word_count.toLocaleString("de-DE")} Wörter`} /> : null}
-        {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
-        <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
-      </div>
-
-      {/* Einordnung: Perzentil-Vergleich gegen Peers (gleiche Quelle / gleiches Thema) */}
-      {pctls && pctls.length > 0 && (
-        <DL h="Einordnung">
-          <div className="pctls">
-            {pctls.map((p) => (
-              <div className="pctl" key={p.label}>
-                <div className="pctl-top">
-                  <span className="pctl-lbl">{p.label}</span>
-                  <span className="pctl-val">{p.verb} <b>{p.pct}%</b></span>
-                </div>
-                <div className="pctl-bar"><i style={{ width: `${p.pct}%` }} /></div>
-                <div className="pctl-sub">verglichen mit {p.n.toLocaleString("de-DE")} Artikeln</div>
-              </div>
-            ))}
+      {/* 2-spaltig: links Analytik/Infos, rechts der Änderungsverlauf */}
+      <div className="d-grid">
+        <div className="d-main">
+          <div className="panel statbar">
+            {a.published_at ? (
+              <Stat k="Veröffentlicht" v={fmtDate(a.published_at)}
+                sub={a.first_seen ? `Erfasst ${timeDelta(a.published_at, a.first_seen)} später` : undefined} />
+            ) : (
+              <Stat k="Veröffentlicht" v="Kein Datum vom Verlag" sub={a.first_seen ? `Erster Scan: ${fmtDate(a.first_seen)}` : undefined} />
+            )}
+            {a.modified_at && a.modified_at !== a.published_at && <Stat k="Aktualisiert" v={fmtDate(a.modified_at)} />}
+            {a.word_count ? <Stat k="Umfang" v={`${a.word_count.toLocaleString("de-DE")} Wörter`} /> : null}
+            {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
+            <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
           </div>
-        </DL>
-      )}
 
-      {/* Scan-Timeline */}
-      <DL h="Scan-Verlauf">
-        <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
-          changeTimes={snaps.map((s) => s.captured_at)} />
-      </DL>
-
-      {/* Verhaltensprofil: abgeleitete, „auf den ersten Blick unsichtbare" Kennzahlen */}
-      {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
-        <DL h="Was die Daten verraten">
-          {profile.tiles.length > 0 && (
-            <div className="dprofile">
-              {profile.tiles.map((t) => (
-                <div className="dmetric" key={t.k}>
-                  <div className="k">{t.k}</div>
-                  <div className="v">{t.v}</div>
-                  {t.s && <div className="s">{t.s}</div>}
-                </div>
-              ))}
-            </div>
+          {/* Fingerabdruck-Radar */}
+          {radar && (
+            <DL h="Profil auf einen Blick">
+              <RadarChart axes={radar.axes} />
+            </DL>
           )}
-          {profile.rev > 0 && profile.edit + profile.ext > 0 && (
-            <div className="dsplit">
-              <div className="dsplit-bar">
-                {profile.edit > 0 && <span className="seg-edit" style={{ flex: profile.edit }} />}
-                {profile.ext > 0 && <span className="seg-ext" style={{ flex: profile.ext }} />}
+
+          {/* Einordnung — jetzt mit Median-Kontext + Bearbeitung gegen bearbeitete Peers */}
+          {pctls && pctls.length > 0 && (
+            <DL h="Einordnung">
+              <div className="pctls">
+                {pctls.map((p) => (
+                  <div className="pctl" key={p.key}>
+                    <div className="pctl-top">
+                      <span className="pctl-lbl">{p.label}</span>
+                      <span className="pctl-val">{p.verb} <b>{p.pct}%</b></span>
+                    </div>
+                    <div className="pctl-bar"><i style={{ width: `${p.pct}%` }} /></div>
+                    <div className="pctl-sub">
+                      {p.median != null && <>Median <b>{p.median.toLocaleString("de-DE")}</b>, dieser <b>{p.selfVal.toLocaleString("de-DE")}</b> · </>}
+                      {p.n.toLocaleString("de-DE")} {p.cohort ?? "Artikel"}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="dsplit-legend">
-                <span className="le edit">{profile.edit} stille Änderung{profile.edit !== 1 ? "en" : ""}</span>
-                <span className="le ext">{profile.ext} Erweiterung{profile.ext !== 1 ? "en" : ""}</span>
+              {editedShare != null && (
+                <p className="pctl-rarity">
+                  Nur <b>{Math.round(editedShare * 100)}%</b> aller {a.outlet}-Artikel wurden nach dem Erscheinen überhaupt noch angefasst —
+                  {(a.revision_count ?? 0) > 0 ? " dieser gehört dazu." : " dieser nicht."}
+                </p>
+              )}
+            </DL>
+          )}
+
+          {/* Verhaltensprofil */}
+          {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
+            <DL h="Was die Daten verraten">
+              {profile.tiles.length > 0 && (
+                <div className="dprofile">
+                  {profile.tiles.map((t) => (
+                    <div className="dmetric" key={t.k}>
+                      <div className="k">{t.k}</div>
+                      <div className="v">{t.v}</div>
+                      {t.s && <div className="s">{t.s}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {profile.rev > 0 && profile.edit + profile.ext > 0 && (
+                <div className="dsplit">
+                  <div className="dsplit-bar">
+                    {profile.edit > 0 && <span className="seg-edit" style={{ flex: profile.edit }} />}
+                    {profile.ext > 0 && <span className="seg-ext" style={{ flex: profile.ext }} />}
+                  </div>
+                  <div className="dsplit-legend">
+                    <span className="le edit">{profile.edit} stille Änderung{profile.edit !== 1 ? "en" : ""}</span>
+                    <span className="le ext">{profile.ext} Erweiterung{profile.ext !== 1 ? "en" : ""}</span>
+                  </div>
+                </div>
+              )}
+              {profile.insight && <p className="dinsight">{profile.insight}</p>}
+            </DL>
+          )}
+
+          <DL h="Scan-Verlauf">
+            <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
+              changeTimes={snaps.map((s) => s.captured_at)} />
+          </DL>
+
+          <DL h="Autoren">
+            {a.author_status === "named" && authors.length > 0
+              ? <div className="row">{authors.map((x) => <span key={x} className="tag a">{x}</span>)}</div>
+              : a.author_status === "anonymous"
+              ? <span className="badge wait">Redaktion / Agentur{authors.length ? ` · ${authors.join(", ")}` : ""}</span>
+              : <span className="badge neutral">Kein Autor genannt</span>}
+          </DL>
+          <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>
+            {keywords.length > 0
+              ? <div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div>
+              : <span className="faint" style={{ fontSize: 13 }}>Keine Schlagwörter im Quelltext gefunden (oder noch nicht erfasst).</span>}
+          </DL>
+
+          {neighbors && neighbors.length > 0 && (
+            <DL h="Thematische Nachbarn">
+              <p className="neigh-intro">
+                Andere Artikel, die auffällig viele — und besonders seltene — Schlagwörter mit diesem teilen.
+                {neighbors.some((n) => n.cross) && <> <b>{neighbors.filter((n) => n.cross).length}</b> davon aus anderen Blättern.</>}
+              </p>
+              <div className="neigh">
+                {neighbors.map((n) => (
+                  <Link key={n.articleId} href={`/articles/${n.articleId}`} className="neigh-card">
+                    <div className="neigh-main">
+                      <div className="neigh-title">{n.title ?? "(ohne Titel)"}</div>
+                      <div className="neigh-kws">{n.shared.map((t) => <span key={t} className="neigh-chip">{t}</span>)}</div>
+                    </div>
+                    <div className="neigh-meta">
+                      <span className="neigh-outlet">{n.outlet} <span className="cc">{n.country}</span></span>
+                      {n.cross && <span className="neigh-echo">↔ blattübergreifend</span>}
+                    </div>
+                  </Link>
+                ))}
               </div>
-            </div>
+            </DL>
           )}
-          {profile.insight && <p className="dinsight">{profile.insight}</p>}
-        </DL>
-      )}
 
-      <DL h="Autoren">
-        {a.author_status === "named" && authors.length > 0
-          ? <div className="row">{authors.map((x) => <span key={x} className="tag a">{x}</span>)}</div>
-          : a.author_status === "anonymous"
-          ? <span className="badge wait">Redaktion / Agentur{authors.length ? ` · ${authors.join(", ")}` : ""}</span>
-          : <span className="badge neutral">Kein Autor genannt</span>}
-      </DL>
-      <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>
-        {keywords.length > 0
-          ? <div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div>
-          : <span className="faint" style={{ fontSize: 13 }}>Keine Schlagwörter im Quelltext gefunden (oder noch nicht erfasst).</span>}
-      </DL>
-
-      {/* Thematische Nachbarn: blattübergreifendes Echo über geteilte Schlagwörter */}
-      {neighbors && neighbors.length > 0 && (
-        <DL h="Thematische Nachbarn">
-          <p className="neigh-intro">
-            Andere Artikel, die auffällig viele — und besonders seltene — Schlagwörter mit diesem teilen.
-            Ein Hinweis auf dieselbe Story oder ein gemeinsames Framing.
-            {neighbors.some((n) => n.cross) && <> <b>{neighbors.filter((n) => n.cross).length}</b> davon aus anderen Blättern.</>}
-          </p>
-          <div className="neigh">
-            {neighbors.map((n) => (
-              <Link key={n.articleId} href={`/articles/${n.articleId}`} className="neigh-card">
-                <div className="neigh-main">
-                  <div className="neigh-title">{n.title ?? "(ohne Titel)"}</div>
-                  <div className="neigh-kws">{n.shared.map((t) => <span key={t} className="neigh-chip">{t}</span>)}</div>
-                </div>
-                <div className="neigh-meta">
-                  <span className="neigh-outlet">{n.outlet} <span className="cc">{n.country}</span></span>
-                  {n.cross && <span className="neigh-echo">↔ blattübergreifend</span>}
-                </div>
-              </Link>
-            ))}
-          </div>
-        </DL>
-      )}
-
-      {/* Seitenbaum */}
-      {segs.length > 0 && (
-        <DL h="Position im Seitenbaum">
-          <div className="crumb">
-            <span className="seg">{a.base_url.replace(/^https?:\/\/(www\.)?/, "")}</span>
-            {segs.map((s, i) => (
-              <span key={i} style={{ display: "inline-flex", alignItems: "center" }}>
-                <span className="sep">/</span><span className={`seg ${i === segs.length - 1 ? "last" : ""}`}>{s}</span>
-              </span>
-            ))}
-          </div>
-          {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
-        </DL>
-      )}
-
-      {/* Änderungsverlauf als Zeitstrahl: oben die Veröffentlichung (Erstfassung) mit Uhrzeit,
-          darunter jede erfasste Version chronologisch, unten die aktuelle Fassung — Vorher/Jetzt. */}
-      <DL h="Änderungsverlauf">
-        <div className="chist">
-          <ChistAnchor kind="pub"
-            label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
-            time={a.published_at ?? a.first_seen}
-            sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
-          {snaps.length === 0 ? (
-            <div className="chist-none">
-              Seither <strong>keine Änderung erfasst</strong> — Überschrift, Text, Datum, Teaser,
-              Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
-              erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
-            </div>
-          ) : (
-            snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
+          {segs.length > 0 && (
+            <DL h="Position im Seitenbaum">
+              <div className="crumb">
+                <span className="seg">{a.base_url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                {segs.map((s, i) => (
+                  <span key={i} style={{ display: "inline-flex", alignItems: "center" }}>
+                    <span className="sep">/</span><span className={`seg ${i === segs.length - 1 ? "last" : ""}`}>{s}</span>
+                  </span>
+                ))}
+              </div>
+              {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
+            </DL>
           )}
-          <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
-            sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
         </div>
-      </DL>
+
+        {/* Rechte Spalte: Änderungsverlauf neben den Infos */}
+        <aside className="d-aside">
+          <DL h="Änderungsverlauf">
+            <div className="chist">
+              <ChistAnchor kind="pub"
+                label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
+                time={a.published_at ?? a.first_seen}
+                sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
+              {snaps.length === 0 ? (
+                <div className="chist-none">
+                  Seither <strong>keine Änderung erfasst</strong> — Überschrift, Text, Datum, Teaser,
+                  Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
+                  erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
+                </div>
+              ) : (
+                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
+              )}
+              <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
+                sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
+            </div>
+          </DL>
+        </aside>
+      </div>
 
       <div style={{ marginTop: 28 }}>
         <ExtLink href={a.url} className="cta">Originalartikel öffnen <External size={15} /></ExtLink>
+      </div>
+    </div>
+  );
+}
+
+// Radar/Spinnendiagramm (handgemaltes SVG, keine Dependency). Zeigt 6 normalisierte Achsen als
+// gefülltes Polygon über zwei Gitterringen — der „Fingerabdruck" des Artikels.
+function RadarChart({ axes }: { axes: { label: string; v: number; hint: string }[] }) {
+  const N = axes.length;
+  const size = 260, cx = size / 2, cy = size / 2 + 6, R = 86;
+  const ang = (i: number) => (Math.PI * 2 * i) / N - Math.PI / 2;
+  const pt = (i: number, r: number) => [cx + Math.cos(ang(i)) * R * r, cy + Math.sin(ang(i)) * R * r] as const;
+  const poly = (r: (i: number) => number) => axes.map((_, i) => pt(i, r(i)).join(",")).join(" ");
+  const shape = poly((i) => Math.max(0.02, Math.min(1, axes[i].v)));
+  return (
+    <div className="radar">
+      <svg viewBox={`0 0 ${size} ${size}`} className="radar-svg" role="img" aria-label="Profil-Radar">
+        {[1, 0.66, 0.33].map((r) => (
+          <polygon key={r} className="radar-grid" points={poly(() => r)} />
+        ))}
+        {axes.map((_, i) => { const [x, y] = pt(i, 1); return <line key={i} className="radar-spoke" x1={cx} y1={cy} x2={x} y2={y} />; })}
+        <polygon className="radar-area" points={shape} />
+        {axes.map((ax, i) => { const [x, y] = pt(i, Math.max(0.02, Math.min(1, ax.v))); return <circle key={i} className="radar-dot" cx={x} cy={y} r={3} />; })}
+        {axes.map((ax, i) => {
+          const [x, y] = pt(i, 1.2);
+          const anchor = Math.abs(Math.cos(ang(i))) < 0.3 ? "middle" : Math.cos(ang(i)) > 0 ? "start" : "end";
+          return <text key={i} className="radar-lbl" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">{ax.label}</text>;
+        })}
+      </svg>
+      <div className="radar-legend">
+        {axes.map((ax) => (
+          <div className="radar-leg" key={ax.label}>
+            <span className="radar-leg-bar"><i style={{ width: `${Math.round(Math.min(1, ax.v) * 100)}%` }} /></span>
+            <span className="radar-leg-lbl">{ax.label}</span>
+            <span className="radar-leg-hint">{ax.hint}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -389,8 +457,7 @@ function TypeBadge({ type }: { type: string }) {
   return <span className="badge neutral"><FileText /> {label}</span>;
 }
 
-// Inline-Wort-Diff (LCS): EIN durchgehender Text, in dem nur die geänderten Wörter
-// markiert sind — entfernt = rot durchgestrichen, neu = grün, ersetzt = gelb.
+// Inline-Wort-Diff (LCS): EIN durchgehender Text, in dem nur die geänderten Wörter markiert sind.
 type Op = { t: string; op: "eq" | "del" | "ins" | "repl" };
 function inlineOps(oldS: string, newS: string): Op[] {
   const o = oldS.split(/(\s+)/).filter((x) => x !== ""), n = newS.split(/(\s+)/).filter((x) => x !== "");
@@ -404,17 +471,12 @@ function inlineOps(oldS: string, newS: string): Op[] {
     else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) { raw.push({ t: n[j], op: "ins" }); j++; }
     else { raw.push({ t: o[i], op: "del" }); i++; }
   }
-  // Whitespace zwischen gleichartigen Änderungen mitfärben (durchgehender Marker)
   for (let x = 1; x < raw.length - 1; x++) if (/^\s+$/.test(raw[x].t) && raw[x].op === "eq" && raw[x - 1].op === raw[x + 1].op && raw[x - 1].op !== "eq") raw[x].op = raw[x - 1].op;
-  // Segmente bilden; del unmittelbar gefolgt von ins = Ersetzung → ins als "repl" (gelb).
   const segs: Op[] = [];
   for (const r of raw) { const l = segs[segs.length - 1]; if (l && l.op === r.op) l.t += r.t; else segs.push({ ...r }); }
   for (let x = 1; x < segs.length; x++) if (segs[x].op === "ins" && segs[x - 1].op === "del") segs[x].op = "repl";
   return segs;
 }
-// Aus der OP-Liste rendern wir ZWEI getrennte Versionen statt eines gemischten
-// Durchstreich-Texts: alte Seite zeigt eq + entfernte Wörter (rot), neue Seite zeigt
-// eq + ergänzte/ersetzte Wörter (grün). „repl" = ersetztes Wort (gehört zur neuen Seite).
 function SideOld({ ops }: { ops: Op[] }) {
   return <>{ops.map((s, x) =>
     s.op === "del" ? <del key={x} className="hl-rm">{s.t}</del>
@@ -427,7 +489,6 @@ function SideNew({ ops }: { ops: Op[] }) {
     : s.op === "del" ? null
     : <span key={x}>{s.t}</span>)}</>;
 }
-// Zwei Versionen gegenübergestellt (Vorher | Jetzt) — geänderte Wörter je Seite dezent markiert.
 function Juxta({ oldS, newS, label }: { oldS: string; newS: string; label: string }) {
   const ops = inlineOps(oldS, newS);
   return (
@@ -441,11 +502,9 @@ function Juxta({ oldS, newS, label }: { oldS: string; newS: string; label: strin
   );
 }
 
-// Eine kompakte „so wurde es still geändert"-Zeile (Ressort/Paywall/Autor).
 function MetaLine({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return <div className="chist-meta">{icon}<span>{children}</span></div>;
 }
-// Rendert EINEN unsichtbaren Metadaten-Edit passend zum Feldtyp.
 function MetaEditView({ m }: { m: MetaEdit }) {
   if (m.field === "description" && m.old && m.new) return <Juxta oldS={m.old} newS={m.new} label="Teaser geändert" />;
   if (m.field === "og_image") return (
@@ -468,7 +527,6 @@ function MetaEditView({ m }: { m: MetaEdit }) {
   return null;
 }
 
-// Anker-Punkt auf dem Verlaufs-Zeitstrahl: oben = Veröffentlichung (Erstfassung), unten = aktuelle Fassung.
 function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: string; time: string | null; sub?: string }) {
   return (
     <div className={`chist-anchor ${kind}`}>
@@ -481,8 +539,6 @@ function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: s
   );
 }
 
-// Eine Version im Verlauf = eine Karte (chronologisch). Badges markieren auch unsichtbare
-// Änderungen (Überschrift, Datum, Teaser, Ressort, Paywall, Autor), die auf den ersten Blick verborgen sind.
 function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   const isEdit = s.change_kind === "edit";
   const isExt = s.change_kind === "extension";
@@ -514,8 +570,6 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
       {metaEdits.map((m, i) => <MetaEditView key={`${m.field}-${i}`} m={m} />)}
       {titleChanged && <Juxta oldS={s.title_old!} newS={s.title_new!} label="Überschrift" />}
       {isExt ? (() => {
-        // Erweiterung (Liveblog/Ticker/Wachstum): NUR die Neuzugänge zeigen — „entfernt/geändert"
-        // ist hier fast immer Re-Segmentierung durch lazyload, kein echtes Verschwinden.
         const newText = s.added || changes.filter((c) => c.new).map((c) => c.new).join("\n\n");
         return newText ? (
           <div className="chist-block">

@@ -559,7 +559,34 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .pager button:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ---------- Detail ---------- */
-.detail { max-width: 880px; }
+.detail { max-width: 1240px; }
+
+/* 2-spaltiges Detail-Layout: links Analytik/Infos, rechts der Änderungsverlauf.
+   Der Verlauf bleibt beim Scrollen oben kleben (sticky), solange die Infospalte länger ist. */
+.d-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: 18px; align-items: start; margin-top: 4px; }
+.d-grid .d-main { min-width: 0; }
+.d-grid .d-aside { min-width: 0; position: sticky; top: 14px; }
+.d-grid .d-aside .dl-section { margin-top: 0; }
+@media (max-width: 980px) { .d-grid { grid-template-columns: 1fr; } .d-grid .d-aside { position: static; } }
+
+/* Radar / Fingerabdruck */
+.radar { display: grid; grid-template-columns: 260px 1fr; gap: 18px; align-items: center; }
+@media (max-width: 560px) { .radar { grid-template-columns: 1fr; } }
+.radar-svg { width: 100%; height: auto; overflow: visible; }
+.radar-grid { fill: none; stroke: var(--line); stroke-width: 1; }
+.radar-spoke { stroke: var(--line); stroke-width: 1; }
+.radar-area { fill: color-mix(in srgb, var(--accent) 24%, transparent); stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.radar-dot { fill: var(--accent); }
+.radar-lbl { fill: var(--muted); font-size: 10px; font-weight: 600; }
+.radar-legend { display: flex; flex-direction: column; gap: 9px; }
+.radar-leg { display: grid; grid-template-columns: 64px auto; grid-template-rows: auto auto; column-gap: 10px; align-items: center; }
+.radar-leg-bar { grid-row: 1 / 3; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; border: 1px solid var(--line); }
+.radar-leg-bar i { display: block; height: 100%; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, transparent), var(--accent)); border-radius: 99px; }
+.radar-leg-lbl { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.radar-leg-hint { font-size: 11px; color: var(--faint); grid-column: 2; }
+
+.pctl-rarity { margin: 12px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); padding: 10px 12px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+.pctl-rarity b { color: var(--ink); }
 .back { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; margin-bottom: 20px; cursor: pointer; transition: color .15s; }
 .back:hover { color: var(--accent); }
 .d-kicker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
