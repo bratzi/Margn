@@ -93,8 +93,20 @@ export default function ScrollSpine() {
     let snapYs: number[] = []; // Magnet-Ziele: Scroll-Position je Checkpoint (Dot dann mittig im Bild)
     let finalBtnEl: HTMLElement | null = null; // Endpunkt: der „Dashboard öffnen"-Button
     let endYv = 0;             // Dokument-Y, an dem die Linie endet (Button)
+    let firstEnd = 0;          // Dokument-Y, an dem die erste Sektion endet (für die Beschleunigung)
+    let anaRange: [number, number] | null = null; // Scroll-Bereich der gepinnten Anatomie-Sektion (Magnetik dort aus)
     let arrived = false;
     const HEAD_VP = 0.55;      // Kopf liegt konstant auf dieser Viewporthöhe → Dots erscheinen mittig
+
+    // Kopf-Position (Dokument-Y) abhängig vom Scroll. In der ERSTEN Sektion zieht die Linie
+    // schneller vor (Boost, der zum Sektionsende ausläuft) → der erste Checkpoint kommt früh und
+    // bleibt lang sichtbar. Monoton (firstEnd > 0.6·vh) → für die Magnetik invertierbar.
+    const headYat = (s: number) => {
+      const vh = window.innerHeight;
+      let hy = s + vh * HEAD_VP;
+      if (firstEnd > 0 && s < firstEnd) { const k = 1 - s / firstEnd; hy += vh * 0.3 * k * k; }
+      return Math.min(endYv > 0 ? endYv : 1e9, Math.max(0, hy));
+    };
 
     const build = () => {
       const W = root.clientWidth, H = root.scrollHeight;
@@ -117,6 +129,13 @@ export default function ScrollSpine() {
           return { ...s, top, h: r.height, mid: top + r.height / 2 };
         });
       if (found.length < 2) return;
+      firstEnd = found[1].top; // Ende der ersten Sektion (Beginn der zweiten)
+
+      // Scroll-Bereich der gepinnten Anatomie-Sektion ermitteln → dort Magnetik aus (sehr lang).
+      const pinEl = root.querySelector<HTMLElement>(".mg-anatomy-pin");
+      const spacer = pinEl?.closest<HTMLElement>(".pin-spacer") ?? root.querySelector<HTMLElement>("#anatomie");
+      if (spacer) { const sr = spacer.getBoundingClientRect(); anaRange = [sr.top + window.scrollY, sr.bottom + window.scrollY]; }
+      else anaRange = null;
 
       const anchors = [
         { y: 0, lane: found[0].lane },
@@ -268,10 +287,17 @@ export default function ScrollSpine() {
         return { y, el: g, note, hit: false };
       });
 
-      // Magnet-Ziele: Scroll-Position, an der der Checkpoint auf HEAD_VP (≈ Bildmitte) liegt — dann
-      // sitzt der Kopf genau auf dem Dot UND der Dot ist gut sichtbar.
+      // Magnet-Ziele: Scroll-Position, an der der Kopf auf dem Dot sitzt (Dot ≈ Bildmitte). Per
+      // Inversion von headYat (wegen Beschleunigung in der 1. Sektion). Der LETZTE Magnetpunkt
+      // ist der Button-Endpunkt.
       const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-      snapYs = checkpoints.map((c) => Math.max(0, Math.min(maxScroll, c.y - window.innerHeight * HEAD_VP)));
+      const invHead = (targetY: number) => {
+        let lo = 0, hi = maxScroll;
+        for (let k = 0; k < 22; k++) { const m = (lo + hi) / 2; if (headYat(m) < targetY) lo = m; else hi = m; }
+        return Math.max(0, Math.min(maxScroll, lo));
+      };
+      snapYs = checkpoints.map((c) => invHead(c.y));
+      if (finalBtnEl) snapYs.push(invHead(endYv));
 
       if (reduced) {
         draw.style.strokeDashoffset = "0"; head.style.display = "none";
@@ -282,9 +308,9 @@ export default function ScrollSpine() {
     const apply = () => {
       raf = 0;
       if (polyPts.length < 2) return;
-      // Der Kopf liegt konstant auf HEAD_VP der Viewporthöhe (Dokument-Y) — bis zum Button-Endpunkt.
-      // So „läuft die Linie mit", ein Dot zündet genau dann, wenn er die Bildmitte erreicht.
-      const hy = Math.min(endYv, Math.max(0, window.scrollY + window.innerHeight * HEAD_VP));
+      // Der Kopf liegt (bis zum Button-Endpunkt) auf HEAD_VP der Viewporthöhe — in der 1. Sektion
+      // beschleunigt. So „läuft die Linie mit", ein Dot zündet, sobald er die Bildmitte erreicht.
+      const hy = headYat(window.scrollY);
       let lo = 1, hi = polyPts.length - 1;
       while (lo < hi) { const m = (lo + hi) >> 1; if (polyPts[m].y < hy) lo = m + 1; else hi = m; }
       const a = polyPts[lo - 1], b = polyPts[lo];
@@ -324,17 +350,21 @@ export default function ScrollSpine() {
     const trySnap = () => {
       if (reduced || !snapYs.length) return;
       const sy = window.scrollY;
+      // In der gepinnten Anatomie-Sektion (sehr lang) KEINE Magnetik.
+      if (anaRange && sy >= anaRange[0] - 30 && sy <= anaRange[1] + 30) return;
       let target = -1, bestD = 1e9;
       for (const ty of snapYs) { const d = Math.abs(ty - sy); if (d < bestD) { bestD = d; target = ty; } }
       const range = window.innerHeight * 0.6;
-      if (target >= 0 && bestD > 4 && bestD < range) {
-        const dur = Math.max(0.26, Math.min(0.8, bestD / 720)); // näher = kürzer = stärker
+      if (target >= 0 && bestD > 6 && bestD < range) {
+        // glatt & elegant: spürbare Mindestdauer + sanfte Deceleration; näher = nur etwas schneller.
+        const dur = Math.max(0.55, Math.min(1.15, 0.5 + bestD / 1100));
+        const ease = (t: number) => 1 - Math.pow(1 - t, 3); // easeOutCubic
         const lenis = (window as unknown as { __mgLenis?: { scrollTo: (t: number, o?: unknown) => void } }).__mgLenis;
-        if (lenis?.scrollTo) lenis.scrollTo(target, { duration: dur });
+        if (lenis?.scrollTo) lenis.scrollTo(target, { duration: dur, easing: ease });
         else window.scrollTo({ top: target, behavior: "smooth" });
       }
     };
-    const onScrollSnap = () => { clearTimeout(snapT); snapT = window.setTimeout(trySnap, 150); };
+    const onScrollSnap = () => { clearTimeout(snapT); snapT = window.setTimeout(trySnap, 180); };
 
     let rebuildT = 0;
     const scheduleBuild = () => { clearTimeout(rebuildT); rebuildT = window.setTimeout(build, 120); };
