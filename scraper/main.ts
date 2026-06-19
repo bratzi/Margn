@@ -634,13 +634,29 @@ function similarity(a: string, b: string): number {
 // Entfernte ↔ hinzugefügte Absätze paaren → strukturierter Diff:
 //  {old,new} = geänderter Absatz (Wort-Diff im Frontend), {new} = neu, {old} = entfernt.
 type Change = { old?: string; new?: string };
+// Bei einem GEÄNDERTEN Absatz nur die tatsächlich abweichende Stelle (mit Kontext) speichern.
+// Sonst zeigt ein Riesen-Absatz, dessen Änderung jenseits von 1500 Zeichen liegt, identischen
+// Anfangstext → scheinbar „leerer" stiller Edit. Gemeinsamen Prä-/Suffix abschneiden.
+function diffRegion(o: string, n: string, ctx = 140, cap = 1500): [string, string] {
+  const minL = Math.min(o.length, n.length);
+  let p = 0; while (p < minL && o[p] === n[p]) p++;
+  let so = o.length - 1, sn = n.length - 1;
+  while (so >= p && sn >= p && o[so] === n[sn]) { so--; sn--; }
+  const start = Math.max(0, p - ctx);
+  const oEnd = Math.min(o.length, so + 1 + ctx);
+  const nEnd = Math.min(n.length, sn + 1 + ctx);
+  const lead = start > 0 ? "…" : "";
+  const oOut = (lead + o.slice(start, oEnd) + (oEnd < o.length ? "…" : "")).slice(0, cap);
+  const nOut = (lead + n.slice(start, nEnd) + (nEnd < n.length ? "…" : "")).slice(0, cap);
+  return [oOut, nOut];
+}
 function buildChanges(removed: string[], added: string[]): Change[] {
   const rem = [...removed], usedR = new Set<number>();
   const out: Change[] = [];
   for (const a of added) {
     let best = -1, bestSim = 0;
     rem.forEach((r, i) => { if (usedR.has(i)) return; const s = similarity(a, r); if (s > bestSim) { bestSim = s; best = i; } });
-    if (best >= 0 && bestSim >= 0.35) { usedR.add(best); out.push({ old: rem[best].slice(0, 1500), new: a.slice(0, 1500) }); }
+    if (best >= 0 && bestSim >= 0.35) { usedR.add(best); const [o2, n2] = diffRegion(rem[best], a); out.push({ old: o2, new: n2 }); }
     else out.push({ new: a.slice(0, 1500) });
   }
   rem.forEach((r, i) => { if (!usedR.has(i)) out.push({ old: r.slice(0, 1500) }); });

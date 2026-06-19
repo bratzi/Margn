@@ -14,3 +14,5 @@
 #              (alle Verlage); kein Body-Diff bei reinen Datums-/Meta-Edits. + Paywall-Diagnose-Log.
 # 2026-06-19 — Liveblog/Timeline: bekannte Liveblogs bleiben „extension" (isTimeline erkennt
 #              article_type=liveblog); append-only-Diff (nur Neuzugänge, removed=0) — alle Verlage.
+# 2026-06-19 — buildChanges speichert die tatsächlich geänderte STELLE (diffRegion, Kontext)
+#              statt der ersten 1500 Zeichen → keine scheinbar identischen „stillen Edits" mehr.
