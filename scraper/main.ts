@@ -408,6 +408,11 @@ function cleanBody(body: string, url: string, title: string | null): string {
          .replace(/TTS-Player überspringen/g, " ")
          .replace(/Text to Speech:[^]{0,140}?(?=Artikel weiterlesen|[A-ZÄÖÜ])/g, " ")
          .replace(/Artikel weiterlesen/g, " ");
+    // Bild-Bildunterschriften: ganzer Block "BILD<Caption>Foto: <Fotograf>/<Agentur>" ist kein
+    // Artikeltext und wechselt, sobald Fotos getauscht/nachgetragen werden → sonst Phantom-Edits.
+    b = b.replace(/BILD[\s\S]{0,400}?Foto:\s*[^/]{1,90}\/\s*BILD/g, " ");
+    // Übrige Bild-Credits anderer Agenturen (ohne /BILD-Endung).
+    b = b.replace(/\bFoto:\s*[^/]{1,90}\/\s*(dpa[a-z-]*|AFP|Getty[^,. ]*|Reuters|AP|action ?press|imago|picture alliance|ddp|epd|Bildagentur[^,. ]*)\b\.?/gi, " ");
   }
 
   if (/(^|\.)n-tv\.de$/.test(host) && title) {
@@ -592,6 +597,15 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     changes = buildChanges(oldParas.filter((p) => !newSet.has(fp(p))), addedTexts);
   }
 
+  // Verlagsübergreifender Phantom-Schutz: Fingerprints unterschieden sich (addedFps/removed > 0),
+  // aber es bleibt KEIN sichtbarer Unterschied übrig (nur getauschte Bild-Credits jenseits des
+  // Fensters, Re-Segmentierung o.Ä.) → KEIN Snapshot, Baseline still nachziehen.
+  if (!isTimeline && contentChanged && changes.length === 0 && !titleChanged && !pubChanged && !metaChanged) {
+    await sb.from("articles").update({ content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords }).eq("id", articleId);
+    await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
+    return;
+  }
+
   // Eindeutige Klassifikation (sich gegenseitig ausschließend):
   //  - Liveblog/Timeline: laufendes Wachstum → IMMER Erweiterung (kein "stiller Edit").
   //  - Sonst stille Titeländerung → Edit (das journalistisch interessante Signal).
@@ -674,7 +688,13 @@ function buildChanges(removed: string[], added: string[]): Change[] {
   for (const a of added) {
     let best = -1, bestSim = 0;
     rem.forEach((r, i) => { if (usedR.has(i)) return; const s = similarity(a, r); if (s > bestSim) { bestSim = s; best = i; } });
-    if (best >= 0 && bestSim >= 0.35) { usedR.add(best); const [o2, n2] = diffRegion(rem[best], a); out.push({ old: o2, new: n2 }); }
+    if (best >= 0 && bestSim >= 0.35) {
+      usedR.add(best);
+      const [o2, n2] = diffRegion(rem[best], a);
+      // Identische Region = kein SICHTBARER Unterschied (Differenz lag außerhalb des Fensters
+      // oder nur weggeputztes Chrome) → KEIN „leerer" Edit-Eintrag. Verlagsübergreifend.
+      if (o2 !== n2) out.push({ old: o2, new: n2 });
+    }
     else out.push({ new: a.slice(0, 1500) });
   }
   rem.forEach((r, i) => { if (!usedR.has(i)) out.push({ old: r.slice(0, 1500) }); });
