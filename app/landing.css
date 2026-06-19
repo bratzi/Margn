@@ -760,9 +760,70 @@ html.lenis, html.lenis body { height: auto; }
 }
 @media (max-width: 640px) { .mg-spine { opacity: 0.5; } }
 
+/* ---------- Checkpoints auf der Linie ---------- */
+.mg-cp { --cp: #6e8aff; }
+.mg-cp-ring { fill: none; stroke: var(--cp); stroke-width: 1.4; opacity: 0.22;
+  transition: opacity 0.35s ease, stroke-width 0.35s ease; }
+.mg-cp-dot { fill: #0c0d10; stroke: var(--cp); stroke-width: 1.6;
+  transition: fill 0.35s ease, stroke-width 0.35s ease; }
+.mg-cp-burst { fill: var(--cp); opacity: 0; transform: scale(0.4); transform-box: fill-box; transform-origin: center; }
+.mg-cp-num { display: none; }
+/* erreicht: Checkpoint „zündet" — Ring leuchtet, Punkt füllt sich in Sektionsfarbe */
+.mg-cp.is-hit .mg-cp-ring { opacity: 0.85; stroke-width: 2; }
+.mg-cp.is-hit .mg-cp-dot { fill: var(--cp); stroke-width: 2.4; filter: drop-shadow(0 0 6px var(--cp)); }
+/* Impact-Burst beim Anfahren (Klasse wird pro Treffer neu gesetzt → retriggert) */
+.mg-cp.pulse .mg-cp-burst { animation: mgCpBurst 0.72s cubic-bezier(.2,.7,.3,1) forwards; }
+.mg-cp.pulse .mg-cp-dot { animation: mgCpPop 0.5s cubic-bezier(.2,.8,.2,1); }
+@keyframes mgCpBurst {
+  0% { opacity: 0.55; transform: scale(0.45); }
+  70% { opacity: 0.12; }
+  100% { opacity: 0; transform: scale(2.9); }
+}
+@keyframes mgCpPop { 0% { transform: scale(1); } 38% { transform: scale(1.65); } 100% { transform: scale(1); } }
+
+/* ---------- Evolutions-HUD: erzählt die Artikel-Stationen ---------- */
+.mg-evo {
+  position: fixed; left: 22px; bottom: 22px; width: 286px; z-index: 40;
+  pointer-events: none; opacity: 0; transform: translateY(14px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  background: color-mix(in srgb, #0c0d10 78%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid rgba(159, 178, 255, 0.16); border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+  padding: 13px 15px 15px; overflow: hidden;
+}
+.mg-evo.is-on { opacity: 1; transform: translateY(0); }
+.mg-evo-rail { display: flex; gap: 5px; margin-bottom: 11px; }
+.mg-evo-tick { flex: 1; height: 3px; border-radius: 3px; background: rgba(255,255,255,0.1);
+  transition: background 0.35s ease, box-shadow 0.35s ease; }
+.mg-evo-tick.on { background: #6e8aff; }
+.mg-evo-tick.on[data-k="edit"], .mg-evo-tick.on[data-k="date"] { background: #ff6f61; }
+.mg-evo-tick.on[data-k="ext"], .mg-evo-tick.on[data-k="echo"], .mg-evo-tick.on[data-k="now"] { background: #43d9a3; }
+.mg-evo-tick.on[data-k="paywall"] { background: #e6b450; }
+.mg-evo-tick.on[data-k="meta"] { background: #2bb3a8; }
+.mg-evo-tick.now { box-shadow: 0 0 10px currentColor; filter: brightness(1.25); }
+.mg-evo-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.mg-evo-eyebrow { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8f9e; font-weight: 700; }
+.mg-evo-step { font-size: 11px; color: #c7ccda; font-variant-numeric: tabular-nums; font-weight: 600; }
+.mg-evo-card { animation: mgEvoIn 0.45s cubic-bezier(.2,.7,.3,1); }
+@keyframes mgEvoIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
+.mg-evo-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mg-evo-kind { font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 99px; color: #9fb2ff; background: rgba(110,138,255,0.16); }
+.mg-evo-card[data-k="edit"] .mg-evo-kind, .mg-evo-card[data-k="date"] .mg-evo-kind { color: #ff9c91; background: rgba(255,111,97,0.16); }
+.mg-evo-card[data-k="ext"] .mg-evo-kind, .mg-evo-card[data-k="echo"] .mg-evo-kind, .mg-evo-card[data-k="now"] .mg-evo-kind { color: #6fe3bd; background: rgba(67,217,163,0.16); }
+.mg-evo-card[data-k="paywall"] .mg-evo-kind { color: #f0c878; background: rgba(230,180,80,0.16); }
+.mg-evo-time { font-size: 11px; color: #8a8f9e; font-variant-numeric: tabular-nums; margin-left: auto; }
+.mg-evo-title { font-size: 14px; font-weight: 650; color: #f2f4fb; line-height: 1.3; }
+.mg-evo-detail { font-size: 12px; color: #aeb3c2; line-height: 1.5; margin-top: 4px; }
+.mg-evo-hint { font-size: 12px; color: #aeb3c2; }
+@media (max-width: 760px) { .mg-evo { display: none; } }
+
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   .mg-grain, .mg-marquee-track, .mg-scrollhint i::after, .mg-pair-link .line, .mg-method-note .pulse::after { animation: none !important; }
+  .mg-cp.pulse .mg-cp-burst, .mg-cp.pulse .mg-cp-dot, .mg-evo-card { animation: none !important; }
+  .mg-evo { transition: none !important; }
   .mg *, .mg *::before, .mg *::after { transition-duration: 0.01ms !important; }
   .mg-spine-draw { opacity: 0.6; }
 }
