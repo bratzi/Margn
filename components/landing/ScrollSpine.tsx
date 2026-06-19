@@ -90,9 +90,11 @@ export default function ScrollSpine() {
     let cum = new Float64Array(0);
     // Checkpoints: Position auf der Linie + SVG-<g> (Dot) + HTML-Karte + „gezündet"-Status.
     let checkpoints: { y: number; el: SVGGElement; note: HTMLElement; hit: boolean }[] = [];
-    let snapYs: number[] = []; // Magnet-Ziele: Scroll-Position je Checkpoint (Kopf sitzt dann auf dem Dot)
+    let snapYs: number[] = []; // Magnet-Ziele: Scroll-Position je Checkpoint (Dot dann mittig im Bild)
     let finalBtnEl: HTMLElement | null = null; // Endpunkt: der „Dashboard öffnen"-Button
+    let endYv = 0;             // Dokument-Y, an dem die Linie endet (Button)
     let arrived = false;
+    const HEAD_VP = 0.55;      // Kopf liegt konstant auf dieser Viewporthöhe → Dots erscheinen mittig
 
     const build = () => {
       const W = root.clientWidth, H = root.scrollHeight;
@@ -147,9 +149,12 @@ export default function ScrollSpine() {
       let endY = H, endX: number | null = null;
       if (finalBtnEl) {
         const br = finalBtnEl.getBoundingClientRect();
-        endY = br.top + window.scrollY + br.height / 2;
+        // Endpunkt knapp UNTER der Button-Oberkante → die Linie läuft in den Button hinein und
+        // verschwindet hinter ihm (Button liegt auf z-index 6 über der Spine).
+        endY = br.top + window.scrollY + Math.min(br.height * 0.5, 12);
         endX = br.left + br.width / 2;
       }
+      endYv = endY;
 
       const S = narrow ? 20 : 16;
       // Einlenk-Zone vor dem Endpunkt: x wird über die letzten ~440 px sanft auf die Button-Mitte
@@ -263,15 +268,10 @@ export default function ScrollSpine() {
         return { y, el: g, note, hit: false };
       });
 
-      // Magnet-Ziele: Scroll-Position, an der der Kopf genau auf dem jeweiligen Checkpoint sitzt.
-      snapYs = checkpoints.map((c) => {
-        let lo = 1, hi = polyPts.length - 1;
-        while (lo < hi) { const m = (lo + hi) >> 1; if (polyPts[m].y < c.y) lo = m + 1; else hi = m; }
-        const a = polyPts[lo - 1], b = polyPts[lo];
-        const t = (c.y - a.y) / Math.max(1, b.y - a.y);
-        const lenAt = cum[lo - 1] + (cum[lo] - cum[lo - 1]) * t;
-        return Math.max(0, Math.min(scrollMax, (lenAt / polyLen) * scrollMax));
-      });
+      // Magnet-Ziele: Scroll-Position, an der der Checkpoint auf HEAD_VP (≈ Bildmitte) liegt — dann
+      // sitzt der Kopf genau auf dem Dot UND der Dot ist gut sichtbar.
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      snapYs = checkpoints.map((c) => Math.max(0, Math.min(maxScroll, c.y - window.innerHeight * HEAD_VP)));
 
       if (reduced) {
         draw.style.strokeDashoffset = "0"; head.style.display = "none";
@@ -281,24 +281,23 @@ export default function ScrollSpine() {
 
     const apply = () => {
       raf = 0;
-      const max = scrollMax;
-      const progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
-      draw.style.strokeDashoffset = String(len * (1 - progress));
-      let hx = 0, hy = 0;
-      if (polyPts.length > 1) {
-        const target = polyLen * progress;
-        let lo = 1, hi = polyPts.length - 1;
-        while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < target) lo = m + 1; else hi = m; }
-        const seg = cum[lo] - cum[lo - 1] || 1;
-        const t = (target - cum[lo - 1]) / seg;
-        hx = polyPts[lo - 1].x + (polyPts[lo].x - polyPts[lo - 1].x) * t;
-        hy = polyPts[lo - 1].y + (polyPts[lo].y - polyPts[lo - 1].y) * t;
-        head.setAttribute("cx", hx.toFixed(1));
-        head.setAttribute("cy", hy.toFixed(1));
-        head.style.opacity = progress > 0.002 && progress < 0.999 ? "1" : "0";
-      }
-      // Checkpoints zünden, sobald der Kopf sie (vertikal) passiert; rückwärts wieder lösen.
-      const reach = hy + 26; // etwas Vorlauf, damit es „beim Anfahren" zündet
+      if (polyPts.length < 2) return;
+      // Der Kopf liegt konstant auf HEAD_VP der Viewporthöhe (Dokument-Y) — bis zum Button-Endpunkt.
+      // So „läuft die Linie mit", ein Dot zündet genau dann, wenn er die Bildmitte erreicht.
+      const hy = Math.min(endYv, Math.max(0, window.scrollY + window.innerHeight * HEAD_VP));
+      let lo = 1, hi = polyPts.length - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (polyPts[m].y < hy) lo = m + 1; else hi = m; }
+      const a = polyPts[lo - 1], b = polyPts[lo];
+      const t = (hy - a.y) / Math.max(1, b.y - a.y);
+      const hx = a.x + (b.x - a.x) * t;
+      const drawnLen = cum[lo - 1] + (cum[lo] - cum[lo - 1]) * t;
+      draw.style.strokeDashoffset = String(len * (1 - drawnLen / polyLen));
+      head.setAttribute("cx", hx.toFixed(1));
+      head.setAttribute("cy", hy.toFixed(1));
+      head.style.opacity = hy > 8 && hy < endYv - 4 ? "1" : "0";
+
+      // Checkpoints zünden, sobald der Kopf sie erreicht; rückwärts wieder lösen.
+      const reach = hy + 8;
       for (let i = 0; i < checkpoints.length; i++) {
         const c = checkpoints[i];
         const on = reach >= c.y;
@@ -309,30 +308,33 @@ export default function ScrollSpine() {
           if (on) { c.el.classList.remove("pulse"); void c.el.getBBox(); c.el.classList.add("pulse"); }
         }
       }
-      // Finale: Kopf dockt am Button an → einmalige Impact-Animation + Dauerpuls.
+      // Finale: Kopf am Button-Endpunkt → einmalige Impact-Animation + Dauerpuls.
       if (finalBtnEl) {
-        const on = progress > 0.992;
+        const on = hy >= endYv - 5;
         if (on !== arrived) { arrived = on; finalBtnEl.classList.toggle("is-arrived", on); }
       }
     };
 
     const onScroll = () => { if (!reduced && !raf) raf = requestAnimationFrame(apply); };
 
-    // Leichte Magnetik: nach dem Scrollen sanft zum nächsten Checkpoint einrasten — aber nur, wenn
-    // man ohnehin schon dicht dran ist (kleines Fenster), damit es sich „leicht" anfühlt, nicht zwingt.
+    // Punkt-zu-Punkt-Magnetik: nach dem Scrollen zum NÄCHSTEN Checkpoint einrasten. Reichweite bis
+    // ~60 % Viewporthöhe (nicht nur die letzten cm) — und je näher man ist, desto stärker/snappiger
+    // (kürzere Einrast-Dauer). So bekommt man jeden Checkpoint sauber zu sehen.
     let snapT = 0;
     const trySnap = () => {
-      if (reduced) return;
+      if (reduced || !snapYs.length) return;
       const sy = window.scrollY;
       let target = -1, bestD = 1e9;
       for (const ty of snapYs) { const d = Math.abs(ty - sy); if (d < bestD) { bestD = d; target = ty; } }
-      if (target >= 0 && bestD > 5 && bestD < 86) {
+      const range = window.innerHeight * 0.6;
+      if (target >= 0 && bestD > 4 && bestD < range) {
+        const dur = Math.max(0.26, Math.min(0.8, bestD / 720)); // näher = kürzer = stärker
         const lenis = (window as unknown as { __mgLenis?: { scrollTo: (t: number, o?: unknown) => void } }).__mgLenis;
-        if (lenis?.scrollTo) lenis.scrollTo(target, { duration: 0.55 });
+        if (lenis?.scrollTo) lenis.scrollTo(target, { duration: dur });
         else window.scrollTo({ top: target, behavior: "smooth" });
       }
     };
-    const onScrollSnap = () => { clearTimeout(snapT); snapT = window.setTimeout(trySnap, 165); };
+    const onScrollSnap = () => { clearTimeout(snapT); snapT = window.setTimeout(trySnap, 150); };
 
     let rebuildT = 0;
     const scheduleBuild = () => { clearTimeout(rebuildT); rebuildT = window.setTimeout(build, 120); };
