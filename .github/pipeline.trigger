@@ -16,3 +16,5 @@
 #              article_type=liveblog); append-only-Diff (nur Neuzugänge, removed=0) — alle Verlage.
 # 2026-06-19 — buildChanges speichert die tatsächlich geänderte STELLE (diffRegion, Kontext)
 #              statt der ersten 1500 Zeichen → keine scheinbar identischen „stillen Edits" mehr.
+# 2026-06-19 — Re-Run: Lauf #83 (push, c63a7e2) war von der Concurrency gecancelt; manueller
+#              Neustart der Pipeline auf demselben diffRegion-Stand.
