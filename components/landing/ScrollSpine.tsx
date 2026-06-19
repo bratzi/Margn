@@ -238,6 +238,7 @@ export default function ScrollSpine() {
         // --- dramatischer Dot: zwei Schockwellen + Flash + Ring + Kern ---
         const g = document.createElementNS(NS, "g") as SVGGElement;
         g.setAttribute("class", "mg-cp");
+        g.setAttribute("data-k", beat.k); // Variation je Änderungstyp (Wellenweite/Charakter)
         g.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
         g.style.setProperty("--cp", f.color);
         g.append(

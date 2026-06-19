@@ -208,15 +208,15 @@ export default function Anatomy() {
             Gecachter Blur + reine Transform-Animation (GPU) → flüssig. Die Wärme
             wächst mit dem Scroll-Fortschritt (--ana-p). */}
         <div className="mg-ana-bg" aria-hidden>
-          <i className="mg-ana-orb a" />
-          <i className="mg-ana-orb b" />
-          <i className="mg-ana-orb c" />
+          {/* Volumetrisches Licht: zwei langsam gegenläufig rotierende Strahlenfächer (god rays)
+              + eine driftende Lichtquelle. Gecachter Blur + reine Rotation/Transform → GPU-flüssig. */}
+          <span className="mg-ana-rays" />
+          <span className="mg-ana-rays two" />
+          <i className="mg-ana-glow" />
           <svg className="mg-ana-lines" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice">
             <g>
-              <path d="M-50 180 Q 300 90 600 200 T 1250 170" />
-              <path d="M-50 330 Q 320 250 600 350 T 1250 320" />
-              <path d="M-50 470 Q 300 560 600 440 T 1250 470" />
-              <path d="M-50 620 Q 320 540 600 650 T 1250 610" />
+              <path d="M-50 300 Q 300 220 600 320 T 1250 300" />
+              <path d="M-50 500 Q 320 580 600 470 T 1250 500" />
             </g>
           </svg>
           <span className="mg-ana-warm" />
