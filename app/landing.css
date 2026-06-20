@@ -108,15 +108,42 @@ html.lenis, html.lenis body { height: auto; }
   background-size: 100% 100%, 112px 112px, 112px 112px, 112px 112px, 28px 28px, 28px 28px;
   background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0;
 }
+/* --- Pro Sektion ein eigenes Motiv (gleiche Familie: blaue Linien, vertikale Maske, Glow oben) --- */
+
+/* Funktionen → diagonale Linien */
+#funktionen.mg-section::before {
+  background-image:
+    radial-gradient(72% 40% at 50% -6%, rgba(110, 138, 255, 0.10), transparent 62%),
+    repeating-linear-gradient(45deg, rgba(159, 178, 255, 0.05) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(45deg, rgba(159, 178, 255, 0.022) 0 1px, transparent 1px 12px);
+  background-size: 100% 100%, auto, auto;
+}
+
+/* Methodik → horizontale Linien (Schichten, passend zum waagerechten Draht) */
+.mg-method .mg-section::before {
+  background-image:
+    radial-gradient(64% 80% at 50% -8%, rgba(110, 138, 255, 0.12), transparent 70%),
+    linear-gradient(rgba(159, 178, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(rgba(159, 178, 255, 0.026) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 64px, 100% 22px;
+}
+
+/* Abdeckung → Wellen (Sprachen, die zusammenfließen) */
+#abdeckung.mg-section::before {
+  background-image:
+    radial-gradient(72% 40% at 50% -6%, rgba(110, 138, 255, 0.10), transparent 62%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='40'%3E%3Cpath d='M0 20 Q30 6 60 20 T120 20' fill='none' stroke='%239fb2ff' stroke-opacity='0.12' stroke-width='1.1'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='28'%3E%3Cpath d='M0 14 Q20 5 40 14 T80 14' fill='none' stroke='%239fb2ff' stroke-opacity='0.05' stroke-width='1'/%3E%3C/svg%3E");
+  background-size: 100% 100%, 120px 40px, 80px 28px;
+}
+
+/* Transparenz → Zickzack / Chevron */
 #transparenz.mg-section::before {
   background-image:
     radial-gradient(82% 46% at 50% -10%, rgba(110, 138, 255, 0.12), transparent 60%),
-    radial-gradient(rgba(159, 178, 255, 0.26) 1.3px, transparent 1.5px),
-    linear-gradient(rgba(159, 178, 255, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(159, 178, 255, 0.06) 1px, transparent 1px),
-    linear-gradient(rgba(159, 178, 255, 0.028) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(159, 178, 255, 0.028) 1px, transparent 1px);
-  background-size: 100% 100%, 112px 112px, 112px 112px, 112px 112px, 28px 28px, 28px 28px;
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='24'%3E%3Cpath d='M0 18 L20 6 L40 18' fill='none' stroke='%239fb2ff' stroke-opacity='0.12' stroke-width='1.1'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='16'%3E%3Cpath d='M0 12 L13 4 L26 12' fill='none' stroke='%239fb2ff' stroke-opacity='0.05' stroke-width='1'/%3E%3C/svg%3E");
+  background-size: 100% 100%, 40px 24px, 26px 16px;
 }
 
 /* Interaktiver Schein: helle Rasterlinien, nur in einem Kreis um den Cursor sichtbar
@@ -397,17 +424,14 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------- Bühne: dasselbe Blueprint-Raster wie die anderen Sektionen, hinter der Karte ---------- */
 .mg-ana-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .mg-anatomy-stage { position: relative; z-index: 1; }
-/* Observatorium-Blueprint: Minor- + Major-Grid + leuchtende Knoten (vgl. .mg-section::before),
-   vertikal maskiert. Liegt unter Vignette/Karte → rahmt die Bühne, ohne den Text zu stören. */
+/* Anatomie → vertikale Linien (Zeitungsspalten), vertikal maskiert. Liegt unter Vignette/Karte
+   → rahmt die Bühne, ohne den Text zu stören. */
 .mg-ana-bg::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image:
-    radial-gradient(rgba(159, 178, 255, 0.20) 1.3px, transparent 1.5px),                 /* Knoten */
-    linear-gradient(rgba(159, 178, 255, 0.055) 1px, transparent 1px),                    /* Major H */
-    linear-gradient(90deg, rgba(159, 178, 255, 0.055) 1px, transparent 1px),             /* Major V */
-    linear-gradient(rgba(159, 178, 255, 0.025) 1px, transparent 1px),                    /* Minor H */
-    linear-gradient(90deg, rgba(159, 178, 255, 0.025) 1px, transparent 1px);             /* Minor V */
-  background-size: 112px 112px, 112px 112px, 112px 112px, 28px 28px, 28px 28px;
+    linear-gradient(90deg, rgba(159, 178, 255, 0.06) 1px, transparent 1px),    /* Major V */
+    linear-gradient(90deg, rgba(159, 178, 255, 0.026) 1px, transparent 1px);   /* Minor V */
+  background-size: 96px 100%, 32px 100%;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
 }
@@ -579,10 +603,12 @@ html.lenis, html.lenis body { height: auto; }
 .mg-stats {
   position: relative; isolation: isolate;
   border-top: 1px solid var(--mg-line); border-bottom: 1px solid var(--mg-line);
+  /* Dreiecks-Mesh: drei Linienscharen (60° / -60° / horizontal) */
   background:
     radial-gradient(90% 150% at 50% -20%, rgba(110, 138, 255, 0.15), transparent 66%),
-    linear-gradient(rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
-    linear-gradient(90deg, rgba(242, 240, 233, 0.05) 1px, transparent 1px) 0 0 / 64px 64px,
+    repeating-linear-gradient(60deg, rgba(159, 178, 255, 0.05) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(-60deg, rgba(159, 178, 255, 0.05) 0 1px, transparent 1px 42px),
+    repeating-linear-gradient(0deg, rgba(159, 178, 255, 0.04) 0 1px, transparent 1px 36px),
     var(--mg-bg);
 }
 .mg-stats-in {
