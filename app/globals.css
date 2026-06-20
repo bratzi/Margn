@@ -571,19 +571,26 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 
 /* 2-spaltiges Detail-Layout: links Analytik/Infos, rechts der Änderungsverlauf.
    Der Verlauf bleibt beim Scrollen oben kleben (sticky), solange die Infospalte länger ist. */
-.d-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: 18px; align-items: start; margin-top: 4px; }
-/* Info-Spalte läuft mit (sticky), Verlauf rechts fließt natürlich in der Seite. */
-.d-grid .d-main { min-width: 0; position: sticky; top: 14px; align-self: start; max-height: calc(100vh - 28px); overflow: auto; padding-right: 4px; }
+/* Verlauf LINKS (breit, 2/3), Infos RECHTS (1/3). Reihenfolge per Grid-Platzierung — DOM bleibt. */
+.d-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 4px; }
+.d-grid .d-aside { grid-column: 1; grid-row: 1; min-width: 0; }
+.d-grid .d-aside .dl-section { margin-top: 0; }
+/* Info-Spalte rechts läuft mit (sticky, eigener Scroll falls höher als der Viewport). */
+.d-grid .d-main { grid-column: 2; grid-row: 1; min-width: 0; position: sticky; top: 14px; align-self: start; max-height: calc(100vh - 28px); overflow: auto; padding-right: 4px; }
 .d-grid .d-main::-webkit-scrollbar { width: 8px; }
 .d-grid .d-main::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 7px; }
-.d-grid .d-aside { min-width: 0; }
-.d-grid .d-aside .dl-section { margin-top: 0; }
-@media (max-width: 980px) { .d-grid { grid-template-columns: 1fr; } .d-grid .d-main { position: static; max-height: none; overflow: visible; } }
+@media (max-width: 980px) {
+  .d-grid { grid-template-columns: 1fr; }
+  .d-grid .d-aside, .d-grid .d-main { grid-column: 1; }
+  .d-grid .d-main { grid-row: 1; position: static; max-height: none; overflow: visible; }
+  .d-grid .d-aside { grid-row: 2; }
+}
 
 /* Radar / Fingerabdruck */
-.radar { display: grid; grid-template-columns: 260px 1fr; gap: 18px; align-items: center; }
-@media (max-width: 560px) { .radar { grid-template-columns: 1fr; } }
-.radar-svg { width: 100%; height: auto; overflow: visible; }
+/* Radar gestapelt (passt in die schmale 1/3-Info-Spalte): Diagramm oben, Legende darunter. */
+.radar { display: grid; grid-template-columns: 1fr; justify-items: center; gap: 14px; }
+.radar-svg { width: 100%; max-width: 230px; height: auto; overflow: visible; }
+.radar-legend { width: 100%; }
 .radar-grid { fill: none; stroke: var(--line); stroke-width: 1; }
 .radar-spoke { stroke: var(--line); stroke-width: 1; }
 .radar-area { fill: color-mix(in srgb, var(--accent) 24%, transparent); stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
