@@ -17,3 +17,6 @@ CLAUDE.md
 schema.sql
 views.sql
 subcategory_rpc.sql
+
+# TypeScript incremental build cache (generated)
+tsconfig.tsbuildinfo
