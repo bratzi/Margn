@@ -385,9 +385,7 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Anatomie (Pin) */
 .mg-anatomy {
-  /* z-index 5 > Spine (4): die wandernde Linie läuft HINTER dieser Section durch
-     (oben rein, unten raus) statt die Editorial-Karte zu zerschneiden. */
-  position: relative; isolation: isolate; z-index: 5; border-bottom: 1px solid var(--mg-line);
+  position: relative; isolation: isolate; border-bottom: 1px solid var(--mg-line);
   /* Statt Foto: tiefer Grund, die Atmosphäre macht der animierte Aurora-Layer (.mg-ana-bg). */
   background-color: #07080b;
   background-image:
