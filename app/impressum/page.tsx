@@ -15,31 +15,25 @@ export default function Impressum() {
       <h1>Impressum</h1>
       <p className="legal-updated">Angaben gemäß § 5 TMG und § 18 Abs. 2 MStV</p>
 
-      <div className="legal-note">
-        <b>Vor Veröffentlichung ausfüllen:</b> Es fehlt noch die <b>ladungsfähige Anschrift</b>
-        (Straße/Hausnr., PLZ, Ort) — ohne sie ist das Impressum nicht vollständig. Telefon ist optional,
-        aber empfohlen. Name und E-Mail sind eingetragen; bitte prüfen.
-      </div>
-
       <h2>Diensteanbieter</h2>
       <address className="legal-addr">
         Waldemar Helwich<br />
-        [Straße und Hausnummer]<br />
-        [PLZ und Ort]<br />
+        Kraepelinstraße 43<br />
+        80804 München<br />
         Deutschland
       </address>
 
       <h2>Kontakt</h2>
       <p>
-        E-Mail: <a href="mailto:w.helwich@googlemail.com">w.helwich@googlemail.com</a><br />
-        Telefon: [optional — eine schnelle elektronische Kontaktmöglichkeit (E-Mail) ist gegeben]
+        E-Mail: <a href="mailto:w.helwich@googlemail.com">w.helwich@googlemail.com</a>
       </p>
 
       <h2>Verantwortlich für den Inhalt</h2>
       <p>Verantwortlich im Sinne des § 18 Abs. 2 MStV:</p>
       <address className="legal-addr">
         Waldemar Helwich<br />
-        [Anschrift wie oben]
+        Kraepelinstraße 43<br />
+        80804 München
       </address>
 
       <h2>Haftung für Inhalte</h2>

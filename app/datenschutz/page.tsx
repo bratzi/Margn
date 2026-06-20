@@ -15,17 +15,12 @@ export default function Datenschutz() {
       <h1>Datenschutzerklärung</h1>
       <p className="legal-updated">Stand: Juni 2026</p>
 
-      <div className="legal-note">
-        <b>Vor Veröffentlichung ausfüllen:</b> Es fehlt noch die <b>Anschrift</b> des Verantwortlichen
-        (identisch zum Impressum). Name und E-Mail sind eingetragen.
-      </div>
-
       <h2>1. Verantwortlicher</h2>
       <p>Verantwortlicher im Sinne der Datenschutz-Grundverordnung (DSGVO) ist:</p>
       <address className="legal-addr">
         Waldemar Helwich<br />
-        [Straße und Hausnummer]<br />
-        [PLZ und Ort]<br />
+        Kraepelinstraße 43<br />
+        80804 München<br />
         E-Mail: <a href="mailto:w.helwich@googlemail.com">w.helwich@googlemail.com</a>
       </address>
 
