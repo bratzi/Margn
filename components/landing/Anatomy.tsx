@@ -7,111 +7,62 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 gsap.registerPlugin(ScrollTrigger);
 
 // „Anatomie einer stillen Änderung" — gepinnte Scroll-Strecke (Desktop):
-// eine nachgestellte Meldung durchläuft vier Versionen, Wort-Diffs werden
-// sichtbar, die Zeitleiste links läuft mit. Auf Mobile entfällt das Pinning,
-// die Versionen stehen als Feed untereinander (gleiches DOM, nur CSS/GSAP).
+// EIN Artikel, eine riesige Schlagzeile. Beim Scrollen passiert der Edit live —
+// „streicht" wird durchgestrichen und „baut … ab" schiebt sich rein, „4.000" kippt
+// auf „3.200", das kritische Zitat wird zugeschwärzt, am Ende sinkt die Paywall herab.
+// Keine Hintergrund-Deko: die Verwandlung des Inhalts IST die Sektion. Auf Mobile
+// kein Pin — der End-Diff steht fest, der Verlauf als Liste darunter (gleiches DOM).
 
-type Version = {
+type Step = {
   v: string;
   t: string;
-  chips: Array<{ cls: string; label: string }>;
-  head: React.ReactNode;
-  teaser: React.ReactNode;
+  status: { cls: string; label: string };
   anno: React.ReactNode;
 };
 
-const VERSIONS: Version[] = [
+const STEPS: Step[] = [
   {
     v: "v1",
     t: "07:14",
-    chips: [{ cls: "", label: "frei zugänglich" }],
-    head: <>Konzern streicht 4.000 Stellen in Europa</>,
-    teaser: (
-      <>
-        Der Vorstand bestätigte die Pläne am Morgen. Betriebsratschefin Weber:
-        „Das ist ein schwarzer Tag für die Beschäftigten.“
-      </>
-    ),
+    status: { cls: "ok", label: "frei lesbar" },
     anno: (
-      <span>
-        <b>Erstmeldung, 07:14 Uhr.</b> Klares Verb, konkrete Zahl, ein
-        kritisches Zitat.
-      </span>
+      <>
+        <b>Erstmeldung, 07:14 Uhr.</b> Klares Verb, konkrete Zahl, ein kritisches
+        Zitat. So ging die Geschichte online.
+      </>
     ),
   },
   {
     v: "v2",
     t: "09:32",
-    chips: [
-      { cls: "diff-add", label: "+2" },
-      { cls: "diff-del", label: "−1" },
-    ],
-    head: (
-      <>
-        Konzern <del>streicht</del> <ins>baut</ins> 4.000 Stellen in Europa{" "}
-        <ins>ab</ins>
-      </>
-    ),
-    teaser: (
-      <>
-        Der Vorstand bestätigte die Pläne am Morgen. Betriebsratschefin Weber:
-        „Das ist ein schwarzer Tag für die Beschäftigten.“
-      </>
-    ),
+    status: { cls: "edit", label: "Titel editiert" },
     anno: (
-      <span>
-        Zwei Stunden später: aus <b>„streicht“</b> wird <b>„baut ab“</b>.
-        Gleiche Nachricht, weicheres Verb. Die URL bleibt dieselbe.
-      </span>
+      <>
+        Zwei Stunden später: aus <b>„streicht“</b> wird <b>„baut ab“</b>. Gleiche
+        Nachricht, weicheres Verb — die URL bleibt dieselbe.
+      </>
     ),
   },
   {
     v: "v3",
     t: "11:05",
-    chips: [
-      { cls: "diff-add", label: "+1" },
-      { cls: "diff-del", label: "−1" },
-    ],
-    head: (
-      <>
-        Konzern baut <del>4.000</del> <ins>3.200</ins> Stellen in Europa ab
-      </>
-    ),
-    teaser: (
-      <>
-        Der Vorstand bestätigte die Pläne am Morgen. Betriebsratschefin Weber:
-        „Das ist ein schwarzer Tag für die Beschäftigten.“
-      </>
-    ),
+    status: { cls: "edit", label: "Zahl editiert" },
     anno: (
-      <span>
-        Die Zahl schrumpft still um 800. <b>Kein Korrekturhinweis, keine
-        Fußnote.</b>
-      </span>
+      <>
+        Die Zahl schrumpft still um <b>800 Stellen</b>. Kein Korrekturhinweis,
+        keine Fußnote.
+      </>
     ),
   },
   {
     v: "v4",
     t: "14:48",
-    chips: [
-      { cls: "pay", label: "paywall" },
-      { cls: "diff-del", label: "−14" },
-    ],
-    head: <>Konzern baut 3.200 Stellen in Europa ab</>,
-    teaser: (
-      <>
-        Der Vorstand bestätigte die Pläne am Morgen.{" "}
-        <del>
-          Betriebsratschefin Weber: „Das ist ein schwarzer Tag für die
-          Beschäftigten.“
-        </del>
-      </>
-    ),
+    status: { cls: "pay", label: "Paywall" },
     anno: (
-      <span>
-        Am Nachmittag ist das Zitat verschwunden — und der Artikel steht{" "}
-        <b>hinter der Paywall</b>.
-      </span>
+      <>
+        Am Nachmittag ist das kritische Zitat <b>geschwärzt</b> — und der Artikel
+        verschwindet <b>hinter der Paywall</b>.
+      </>
     ),
   },
 ];
@@ -124,78 +75,88 @@ export default function Anatomy() {
     if (!root) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+    const doc = root.querySelector<HTMLElement>(".mg-doc");
+    const verEl = root.querySelector<HTMLElement>(".mg-doc-ver");
+    const timeEl = root.querySelector<HTMLElement>(".mg-doc-time");
+    const chipEl = root.querySelector<HTMLElement>(".mg-doc-status");
+    const annos = gsap.utils.toArray<HTMLElement>(".mg-doc-anno", root);
+    const railSteps = gsap.utils.toArray<HTMLElement>(".mg-rail-step", root);
+    const prog = root.querySelector<HTMLElement>(".mg-rail .prog");
+    if (!doc) return;
+
+    // einen Schritt anwenden: kumulative Edit-Klassen + Meta + Verlauf + Rail + Wärme
+    const applyStep = (idx: number, p: number) => {
+      doc.classList.toggle("ed-verb", idx >= 1);
+      doc.classList.toggle("ed-num", idx >= 2);
+      doc.classList.toggle("ed-quote", idx >= 3);
+      const s = STEPS[idx];
+      if (verEl) verEl.textContent = s.v;
+      if (timeEl) timeEl.textContent = s.t;
+      if (chipEl) {
+        chipEl.textContent = s.status.label;
+        chipEl.className = `mg-doc-status ${s.status.cls}`;
+      }
+      annos.forEach((a, i) => a.classList.toggle("on", i === idx));
+      railSteps.forEach((r, i) => r.classList.toggle("on", i <= idx));
+      root.style.setProperty("--ana-p", p.toFixed(3));
+    };
+
     const mm = gsap.matchMedia();
 
     mm.add("(min-width: 861px)", () => {
-      const cards = gsap.utils.toArray<HTMLElement>(".mg-vcard", root);
-      const railSteps = gsap.utils.toArray<HTMLElement>(".mg-rail-step", root);
-      const prog = root.querySelector<HTMLElement>(".mg-rail .prog");
-      const end = root.querySelector<HTMLElement>(".mg-anatomy-end");
       const pinEl = root.querySelector<HTMLElement>(".mg-anatomy-pin");
-      if (!pinEl || cards.length < 4) return;
-
-      gsap.set(cards.slice(1), { autoAlpha: 0, y: 70, rotate: 1.4, scale: 0.975 });
-      if (end) gsap.set(end, { autoAlpha: 0, y: 16 });
-      railSteps[0]?.classList.add("on");
+      if (!pinEl) return;
+      doc.classList.remove("is-static");
 
       if (reduced) {
-        // Ohne Motion: letzte Version + Schlusszeile zeigen, kein Pin
-        gsap.set(cards[0], { autoAlpha: 0 });
-        gsap.set(cards[3], { autoAlpha: 1, y: 0, rotate: 0, scale: 1 });
-        if (end) gsap.set(end, { autoAlpha: 1, y: 0 });
-        railSteps.forEach((s) => s.classList.add("on"));
+        applyStep(3, 1);
         if (prog) gsap.set(prog, { scaleY: 1 });
         return;
       }
 
+      applyStep(0, 0);
       const tl = gsap.timeline({
-        defaults: { ease: "power2.inOut" },
         scrollTrigger: {
           trigger: pinEl,
           start: "top top",
-          end: "+=320%",
+          end: "+=340%",
           pin: true,
-          scrub: 0.65,
+          scrub: 0.6,
           anticipatePin: 1,
-          snap: { snapTo: "labels", duration: { min: 0.15, max: 0.5 }, ease: "power1.inOut" },
+          snap: { snapTo: "labels", duration: { min: 0.2, max: 0.6 }, ease: "power1.inOut" },
           onUpdate(self) {
-            const idx = Math.min(3, Math.floor(self.progress * 3.999));
-            railSteps.forEach((s, i) => s.classList.toggle("on", i <= idx));
-            // Hintergrund-Stimmung an den Fortschritt koppeln: kühl/blau (Erstfassung) →
-            // warm/rot (stiller Edit bis Paywall). Treibt --ana-p im CSS.
-            root.style.setProperty("--ana-p", self.progress.toFixed(3));
+            const idx = Math.max(0, Math.min(3, Math.round(self.progress * 3)));
+            applyStep(idx, self.progress);
           },
         },
       });
-
-      tl.addLabel("s0", 0).to({}, { duration: 0.5 });
-      for (let i = 0; i < 3; i++) {
-        tl.to(cards[i], { autoAlpha: 0, y: -60, rotate: -1.4, scale: 0.975, duration: 0.45 })
-          .to(prog, { scaleY: (i + 1) / 3, duration: 0.5, ease: "none" }, "<")
-          .to(cards[i + 1], { autoAlpha: 1, y: 0, rotate: 0, scale: 1, duration: 0.5 }, "<0.12")
-          .addLabel(`s${i + 1}`)
-          .to({}, { duration: 0.5 });
-      }
-      if (end) tl.to(end, { autoAlpha: 1, y: 0, duration: 0.4 }, "-=0.35");
+      // vier gleich lange Halte-Phasen → vier Snap-Labels
+      tl.addLabel("s0", 0).to({}, { duration: 1 })
+        .addLabel("s1").to({}, { duration: 1 })
+        .addLabel("s2").to({}, { duration: 1 })
+        .addLabel("s3").to({}, { duration: 1 })
+        .addLabel("end");
+      if (prog) tl.fromTo(prog, { scaleY: 0 }, { scaleY: 1, ease: "none", duration: 3 }, 0);
 
       return () => {
-        railSteps.forEach((s) => s.classList.remove("on"));
+        doc.classList.remove("ed-verb", "ed-num", "ed-quote");
+        railSteps.forEach((r) => r.classList.remove("on"));
       };
     });
 
     mm.add("(max-width: 860px)", () => {
-      const cards = gsap.utils.toArray<HTMLElement>(".mg-vcard", root);
-      gsap.set(cards, { clearProps: "all" });
+      // kein Pin: End-Diff fest zeigen, Verlauf als Liste; reveal beim Reinscrollen
+      doc.classList.add("is-static", "ed-verb", "ed-num", "ed-quote");
+      annos.forEach((a) => a.classList.add("on"));
+      railSteps.forEach((r) => r.classList.add("on"));
+      if (prog) gsap.set(prog, { scaleY: 1 });
+      root.style.setProperty("--ana-p", "1");
       if (reduced) return;
-      cards.forEach((card) => {
-        gsap.from(card, {
-          y: 50,
-          autoAlpha: 0,
-          duration: 0.8,
-          ease: "power3.out",
-          scrollTrigger: { trigger: card, start: "top 86%" },
-        });
+      gsap.from(doc, {
+        y: 48, autoAlpha: 0, duration: 0.85, ease: "power3.out",
+        scrollTrigger: { trigger: doc, start: "top 86%" },
       });
+      return () => doc.classList.remove("is-static", "ed-verb", "ed-num", "ed-quote");
     });
 
     return () => mm.revert();
@@ -204,24 +165,10 @@ export default function Anatomy() {
   return (
     <section className="mg-anatomy" id="anatomie" ref={rootRef}>
       <div className="mg-anatomy-pin">
-        {/* Abstrakter, langsam morphender Hintergrund über die gesamte Pin-Strecke.
-            Gecachter Blur + reine Transform-Animation (GPU) → flüssig. Die Wärme
-            wächst mit dem Scroll-Fortschritt (--ana-p). */}
         <div className="mg-ana-bg" aria-hidden>
-          {/* Volumetrisches Licht: zwei langsam gegenläufig rotierende Strahlenfächer (god rays)
-              + eine driftende Lichtquelle. Gecachter Blur + reine Rotation/Transform → GPU-flüssig. */}
-          <span className="mg-ana-rays" />
-          <span className="mg-ana-rays two" />
-          <i className="mg-ana-glow" />
-          <svg className="mg-ana-lines" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice">
-            <g>
-              <path d="M-50 300 Q 300 220 600 320 T 1250 300" />
-              <path d="M-50 500 Q 320 580 600 470 T 1250 500" />
-            </g>
-          </svg>
-          <span className="mg-ana-warm" />
           <span className="mg-ana-vignette" />
         </div>
+
         <div className="mg-anatomy-stage">
           <div className="mg-head">
             <p className="mg-overline">Fallbeispiel · nachgestellt</p>
@@ -229,45 +176,78 @@ export default function Anatomy() {
               Anatomie einer <em>stillen</em> Änderung
             </h2>
             <p className="mg-lede">
-              Eine Meldung, ein Tag, vier Versionen. So sieht es aus, wenn ein
-              Artikel sich verändert, ohne dass es jemand erfährt.
+              Eine Meldung, ein Tag, vier stille Eingriffe. Scrolle — und sieh zu,
+              wie sich der Artikel verändert, ohne dass es jemand erfährt.
             </p>
           </div>
 
           <div className="mg-rail" aria-hidden>
             <span className="prog" />
-            {VERSIONS.map((ver) => (
-              <span key={ver.v} className="mg-rail-step">
+            {STEPS.map((s) => (
+              <span key={s.v} className="mg-rail-step">
                 <span>
-                  {ver.t}
-                  <small>{ver.v}</small>
+                  {s.t}
+                  <small>{s.v}</small>
                 </span>
               </span>
             ))}
           </div>
 
-          <div className="mg-vstack">
-            {VERSIONS.map((ver) => (
-              <article key={ver.v} className="mg-vcard">
-                <div className="kick">
-                  <span>Wirtschaft · Agenturmeldung</span>
-                  <span className="chips">
-                    <span className="mg-chip v">
-                      {ver.v} · {ver.t}
-                    </span>
-                    {ver.chips.map((c) => (
-                      <span key={c.label} className={`mg-chip ${c.cls}`}>
-                        {c.label}
-                      </span>
-                    ))}
-                  </span>
-                </div>
-                <h3>{ver.head}</h3>
-                <p className="teaser">{ver.teaser}</p>
-                <p className="anno">{ver.anno}</p>
-              </article>
-            ))}
-          </div>
+          {/* DAS Dokument — verwandelt sich live beim Scrollen */}
+          <article className="mg-doc">
+            <div className="mg-doc-kick">
+              <span className="mg-doc-cat">Wirtschaft · Agenturmeldung</span>
+              <span className="mg-doc-meta">
+                <span className="mg-doc-ver">v1</span>
+                <span className="mg-doc-time">07:14</span>
+                <span className="mg-doc-status ok">frei lesbar</span>
+              </span>
+            </div>
+
+            <h3 className="mg-doc-head">
+              Konzern{" "}
+              <span className="ana-w verb">
+                <span className="old">streicht</span>
+                <span className="new">baut</span>
+              </span>{" "}
+              <span className="ana-w num">
+                <span className="old">4.000</span>
+                <span className="new">3.200</span>
+              </span>{" "}
+              Stellen in Europa{" "}
+              <span className="ana-add">ab</span>
+            </h3>
+
+            <p className="mg-doc-teaser">
+              Der Vorstand bestätigte die Pläne am Morgen.
+            </p>
+            <p className="mg-doc-quote">
+              <span className="ana-redact">
+                Betriebsratschefin Weber: „Das ist ein schwarzer Tag für die
+                Beschäftigten.“
+              </span>
+            </p>
+
+            {/* Paywall-Schleier senkt sich am Ende herab */}
+            <div className="ana-paywall" aria-hidden>
+              <span className="lock" aria-hidden>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none">
+                  <rect x="4.5" y="10.5" width="15" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                  <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" stroke="currentColor" strokeWidth="1.6" />
+                </svg>
+              </span>
+              Weiterlesen nur mit Abo
+            </div>
+
+            <div className="mg-doc-annos">
+              {STEPS.map((s, i) => (
+                <p className={`mg-doc-anno${i === 0 ? " on" : ""}`} key={s.v}>
+                  <span className="mg-doc-anno-tag">{s.v}</span>
+                  <span>{s.anno}</span>
+                </p>
+              ))}
+            </div>
+          </article>
 
           <p className="mg-anatomy-end">
             Kein Hinweis. Keine Fußnote. —{" "}

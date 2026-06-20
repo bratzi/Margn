@@ -385,7 +385,9 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Anatomie (Pin) */
 .mg-anatomy {
-  position: relative; isolation: isolate; border-bottom: 1px solid var(--mg-line);
+  /* z-index 5 > Spine (4): die wandernde Linie läuft HINTER dieser Section durch
+     (oben rein, unten raus) statt die Editorial-Karte zu zerschneiden. */
+  position: relative; isolation: isolate; z-index: 5; border-bottom: 1px solid var(--mg-line);
   /* Statt Foto: tiefer Grund, die Atmosphäre macht der animierte Aurora-Layer (.mg-ana-bg). */
   background-color: #07080b;
   background-image:
@@ -394,52 +396,35 @@ html.lenis, html.lenis body { height: auto; }
 }
 .mg-anatomy-pin { position: relative; overflow: hidden; }
 
-/* ---------- Abstrakter, morphender Aurora-Hintergrund ---------- */
+/* ---------- Bühne: dasselbe Blueprint-Raster wie die anderen Sektionen, hinter der Karte ---------- */
 .mg-ana-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .mg-anatomy-stage { position: relative; z-index: 1; }
-/* Strahlenfächer (god rays): ein blurter, rotierender repeating-conic-gradient. Zwei Lagen
-   gegenläufig + unterschiedlich schnell → volumetrische, lebendige Lichtstreifen. */
-.mg-ana-rays {
-  position: absolute; left: 50%; top: 34%; width: 150vmax; height: 150vmax;
-  transform: translate(-50%, -50%); transform-origin: center; will-change: transform;
-  background: repeating-conic-gradient(from 0deg at 50% 50%,
-    transparent 0deg, rgba(159, 178, 255, 0.085) 3deg, rgba(159, 178, 255, 0.02) 6deg, transparent 9deg, transparent 21deg);
-  filter: blur(11px); opacity: 0.85;
-  -webkit-mask-image: radial-gradient(closest-side, #000 22%, rgba(0,0,0,0.5) 52%, transparent 80%);
-  mask-image: radial-gradient(closest-side, #000 22%, rgba(0,0,0,0.5) 52%, transparent 80%);
-  animation: mgAnaRays 72s linear infinite;
+/* Observatorium-Blueprint: Minor- + Major-Grid + leuchtende Knoten (vgl. .mg-section::before),
+   vertikal maskiert. Liegt unter Vignette/Karte → rahmt die Bühne, ohne den Text zu stören. */
+.mg-ana-bg::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    radial-gradient(rgba(159, 178, 255, 0.20) 1.3px, transparent 1.5px),                 /* Knoten */
+    linear-gradient(rgba(159, 178, 255, 0.055) 1px, transparent 1px),                    /* Major H */
+    linear-gradient(90deg, rgba(159, 178, 255, 0.055) 1px, transparent 1px),             /* Major V */
+    linear-gradient(rgba(159, 178, 255, 0.025) 1px, transparent 1px),                    /* Minor H */
+    linear-gradient(90deg, rgba(159, 178, 255, 0.025) 1px, transparent 1px);             /* Minor V */
+  background-size: 112px 112px, 112px 112px, 112px 112px, 28px 28px, 28px 28px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
 }
-.mg-ana-rays.two {
-  top: 30%; opacity: 0.5; filter: blur(20px); animation-duration: 110s; animation-direction: reverse;
-  background: repeating-conic-gradient(from 8deg at 50% 50%,
-    transparent 0deg, rgba(110, 138, 255, 0.07) 4deg, transparent 9deg, transparent 27deg);
-}
-@keyframes mgAnaRays { to { transform: translate(-50%, -50%) rotate(360deg); } }
-/* driftende Lichtquelle, die den Strahlen Tiefe gibt */
-.mg-ana-glow {
-  position: absolute; width: 56vw; height: 56vw; max-width: 760px; max-height: 760px; border-radius: 50%;
-  left: 24%; top: 14%; filter: blur(68px); opacity: 0.7; will-change: transform;
-  background: radial-gradient(circle, rgba(120, 150, 255, 0.5), transparent 66%);
-  animation: mgAnaGlow 32s ease-in-out infinite;
-}
-@keyframes mgAnaGlow { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(22%, 14%) scale(1.2); } }
-
-/* Fließendes Linienfeld (abstraktes SVG) — langsam vertikal wogend. */
-.mg-ana-lines { position: absolute; inset: -6%; width: 112%; height: 112%; opacity: 0.16; }
-.mg-ana-lines path { fill: none; stroke: rgba(159, 178, 255, 0.55); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
-.mg-ana-lines g { transform-origin: center; animation: mgAnaLines 30s ease-in-out infinite; }
-@keyframes mgAnaLines { 0%,100% { transform: translateY(-16px) scaleY(1); } 50% { transform: translateY(20px) scaleY(1.05); } }
-
-/* Wärme wächst mit dem Scroll-Fortschritt: aus kühl-blau wird rot (still editiert → Paywall). */
-.mg-ana-warm { position: absolute; inset: 0; opacity: calc(var(--ana-p, 0) * 0.6); transition: opacity 0.25s ease;
-  background: radial-gradient(120% 95% at 78% 112%, rgba(229, 103, 92, 0.55), transparent 58%); }
+/* Vignette + dezente Wärme, die mit dem Edit-Fortschritt erwacht (kühl → rot). */
 .mg-ana-vignette { position: absolute; inset: 0;
-  background: radial-gradient(120% 80% at 50% 50%, transparent 52%, rgba(5, 6, 9, 0.72) 100%); }
+  background:
+    radial-gradient(120% 70% at 78% 116%, rgba(229, 103, 92, calc(0.05 + var(--ana-p, 0) * 0.16)), transparent 56%),
+    radial-gradient(120% 80% at 50% 46%, transparent 50%, rgba(4, 5, 8, 0.82) 100%);
+  transition: background 0.3s ease;
+}
 .mg-anatomy-stage {
   min-height: 100svh; display: grid; align-content: center;
-  grid-template-columns: minmax(60px, 130px) minmax(0, 720px);
-  justify-content: center; gap: clamp(20px, 4vw, 64px);
-  max-width: var(--mg-max); margin: 0 auto; padding: 110px var(--mg-pad) 80px;
+  grid-template-columns: minmax(56px, 116px) minmax(0, 880px);
+  justify-content: center; gap: clamp(20px, 4vw, 72px);
+  max-width: var(--mg-max); margin: 0 auto; padding: 112px var(--mg-pad) 84px;
 }
 .mg-anatomy .mg-head { grid-column: 1 / -1; text-align: center; margin-bottom: clamp(28px, 4vh, 56px); }
 .mg-anatomy .mg-head .mg-overline { justify-content: center; }
@@ -459,59 +444,137 @@ html.lenis, html.lenis body { height: auto; }
 .mg-rail-step.on::before { background: var(--mg-accent); border-color: var(--mg-accent); box-shadow: 0 0 0 4px var(--mg-accent-sub); }
 .mg-rail-step small { display: block; font-size: 10px; letter-spacing: 0.08em; color: inherit; opacity: 0.65; }
 
-/* Artikelkarte(n) */
-.mg-vstack { position: relative; min-height: 420px; }
-.mg-vcard {
-  position: absolute; inset: 0; display: flex; flex-direction: column; gap: 18px;
-  background: var(--mg-panel); border: 1px solid var(--mg-line-2); border-radius: 14px;
-  padding: clamp(22px, 3.2vw, 40px);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
-  will-change: transform, opacity;
+/* ---------- DAS Dokument: verwandelt sich live beim Scrollen ---------- */
+.mg-doc {
+  position: relative; isolation: isolate; overflow: hidden;
+  display: flex; flex-direction: column; gap: clamp(18px, 2.4vw, 28px);
+  padding: clamp(26px, 3.4vw, 48px) clamp(24px, 3.4vw, 52px) clamp(24px, 3vw, 40px);
+  border-radius: 18px;
+  /* Rand wärmt sich mit dem Edit-Fortschritt (kühl → rot) */
+  border: 1px solid color-mix(in oklab, var(--mg-line-2), var(--mg-red) calc(var(--ana-p, 0) * 55%));
+  background:
+    linear-gradient(180deg, rgba(20, 22, 28, 0.72), rgba(12, 13, 17, 0.72));
+  box-shadow: 0 40px 120px -30px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(2px);
+  transition: border-color 0.35s ease;
 }
-.mg-vcard .kick {
+/* dünne Fortschrittskante oben — füllt sich mit der Story */
+.mg-doc::before {
+  content: ""; position: absolute; top: 0; left: 0; height: 2px;
+  width: calc(var(--ana-p, 0) * 100%);
+  background: linear-gradient(90deg, var(--mg-accent), var(--mg-red));
+  transition: width 0.35s ease; z-index: 3;
+}
+
+.mg-doc-kick {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   font-family: var(--mg-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mg-faint);
 }
-.mg-vcard .kick .chips { display: inline-flex; gap: 8px; }
-.mg-chip {
-  font-family: var(--mg-mono); font-size: 10px; letter-spacing: 0.1em;
-  padding: 4px 9px; border-radius: 999px; border: 1px solid var(--mg-line-2); color: var(--mg-muted);
-  white-space: nowrap;
+.mg-doc-meta { display: inline-flex; align-items: center; gap: 12px; }
+.mg-doc-ver { color: var(--mg-accent-2); }
+.mg-doc-time { color: var(--mg-faint); font-variant-numeric: tabular-nums; }
+.mg-doc-status {
+  font-size: 10px; letter-spacing: 0.1em; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--mg-line-2); color: var(--mg-muted);
+  transition: color 0.3s, border-color 0.3s, background 0.3s;
 }
-.mg-chip.v { color: var(--mg-accent-2); border-color: rgba(110, 138, 255, 0.4); }
-.mg-chip.pay { color: #ffc86e; border-color: rgba(255, 200, 110, 0.4); }
-.mg-chip.diff-add { color: var(--mg-green); border-color: rgba(67, 217, 163, 0.4); }
-.mg-chip.diff-del { color: var(--mg-red); border-color: rgba(255, 111, 97, 0.4); }
+.mg-doc-status.ok { color: var(--mg-green); border-color: rgba(67, 217, 163, 0.4); }
+.mg-doc-status.edit { color: var(--mg-red); border-color: rgba(255, 111, 97, 0.45); background: var(--mg-red-sub); }
+.mg-doc-status.pay { color: #ffc86e; border-color: rgba(255, 200, 110, 0.45); background: rgba(255, 200, 110, 0.08); }
 
-.mg-vcard h3 {
-  font-family: var(--mg-display); font-weight: 400; letter-spacing: -0.01em;
-  font-size: clamp(23px, 3vw, 34px); line-height: 1.22; margin: 0; text-wrap: balance;
+/* Die Schlagzeile — groß, editorial, der Star der Sektion */
+.mg-doc-head {
+  font-family: var(--mg-display); font-weight: 400; letter-spacing: -0.018em;
+  font-size: clamp(30px, 4.6vw, 60px); line-height: 1.08; margin: 0; text-wrap: balance;
+  color: var(--mg-ink);
 }
-.mg-vcard .teaser { color: var(--mg-muted); font-size: 15px; line-height: 1.7; margin: 0; }
-.mg-vcard .teaser del { text-decoration-color: var(--mg-red); }
-.mg-vcard del { color: var(--mg-red); text-decoration: line-through; text-decoration-thickness: 2px; background: var(--mg-red-sub); border-radius: 3px; padding: 0 0.08em; }
-.mg-vcard ins { color: var(--mg-green); text-decoration: none; background: var(--mg-green-sub); border-radius: 3px; padding: 0 0.08em; }
-.mg-vcard .anno {
-  margin-top: auto; padding-top: 16px; border-top: 1px dashed var(--mg-line-2);
-  display: flex; gap: 10px; align-items: baseline;
-  font-size: 14px; color: var(--mg-muted); line-height: 1.6;
+
+/* Ein Wort, das ausgetauscht wird: altes (durchgestrichen) + neues (schiebt sich rein) */
+.ana-w { position: relative; white-space: nowrap; }
+.ana-w .old { position: relative; transition: color 0.45s ease, opacity 0.45s ease; }
+.ana-w .old::after {
+  content: ""; position: absolute; left: -0.04em; right: -0.04em; top: 0.54em; height: 0.07em;
+  background: var(--mg-red); border-radius: 2px;
+  transform: scaleX(0); transform-origin: left; transition: transform 0.5s cubic-bezier(0.65, 0, 0.35, 1);
 }
-.mg-vcard .anno::before { content: "→"; color: var(--mg-accent); flex-shrink: 0; }
-.mg-vcard .anno b { color: var(--mg-ink); font-weight: 550; }
+.ana-w .new {
+  display: inline-block; max-width: 0; margin-left: 0; opacity: 0; overflow: hidden;
+  color: var(--mg-green); vertical-align: bottom; white-space: nowrap;
+  transform: translateY(0.18em);
+  transition: max-width 0.55s cubic-bezier(0.65, 0, 0.35, 1), opacity 0.45s ease 0.12s,
+              margin-left 0.55s cubic-bezier(0.65, 0, 0.35, 1), transform 0.45s ease 0.12s;
+}
+/* Zusatzwort am Satzende („… ab") */
+.ana-add {
+  display: inline-block; max-width: 0; opacity: 0; overflow: hidden; color: var(--mg-green);
+  white-space: nowrap; vertical-align: bottom; transform: translateY(0.18em);
+  transition: max-width 0.55s cubic-bezier(0.65, 0, 0.35, 1) 0.1s, opacity 0.45s ease 0.2s, transform 0.45s ease 0.2s;
+}
+/* gezündete Edits */
+.mg-doc.ed-verb .verb .old, .mg-doc.ed-num .num .old { color: var(--mg-faint); opacity: 0.65; }
+.mg-doc.ed-verb .verb .old::after, .mg-doc.ed-num .num .old::after { transform: scaleX(1); }
+.mg-doc.ed-verb .verb .new, .mg-doc.ed-num .num .new { max-width: 6em; margin-left: 0.34em; opacity: 1; transform: translateY(0); }
+.mg-doc.ed-verb .ana-add { max-width: 3em; opacity: 1; transform: translateY(0); }
+
+/* Teaser + zugeschwärztes Zitat */
+.mg-doc-teaser { color: var(--mg-muted); font-size: clamp(15px, 1.4vw, 17px); line-height: 1.74; margin: 0; max-width: 62ch; }
+.mg-doc-quote { margin: -6px 0 0; max-width: 62ch; font-size: clamp(15px, 1.4vw, 17px); line-height: 1.74; color: var(--mg-muted); }
+.mg-doc-quote .ana-redact { display: inline-block; max-width: 100%; }
+.ana-redact { position: relative; transition: color 0.5s ease 0.05s; border-radius: 3px; }
+/* sichtbarer Zensur-Balken: schwarzer „Marker" mit feiner Kante, hebt sich von der Karte ab */
+.ana-redact::after {
+  content: ""; position: absolute; left: -0.24em; right: -0.24em; top: -0.16em; bottom: -0.16em;
+  background: linear-gradient(180deg, #262a35, #0c0e14); border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 4px 16px rgba(0, 0, 0, 0.7);
+  transform: scaleX(0); transform-origin: left; transition: transform 0.6s cubic-bezier(0.7, 0, 0.3, 1);
+}
+.mg-doc.ed-quote .ana-redact { color: transparent; }
+.mg-doc.ed-quote .ana-redact::after { transform: scaleX(1); }
+
+/* Paywall-Schleier senkt sich über den unteren Teil */
+.ana-paywall {
+  /* deckt nur den Artikel-Body (Teaser/Zitat) ab — die Schlagzeile bleibt scharf */
+  position: absolute; left: 0; right: 0; bottom: 0; height: 30%; z-index: 2;
+  display: flex; align-items: flex-end; justify-content: center; gap: 9px;
+  padding-bottom: clamp(16px, 2vw, 26px);
+  font-family: var(--mg-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #ffd9a0;
+  background: linear-gradient(180deg, transparent, rgba(9, 10, 13, 0.78) 52%, rgba(8, 9, 12, 0.96));
+  -webkit-backdrop-filter: blur(0px); backdrop-filter: blur(0px);
+  opacity: 0; transform: translateY(14px); pointer-events: none;
+  transition: opacity 0.55s ease 0.25s, transform 0.55s cubic-bezier(0.65, 0, 0.35, 1) 0.25s, backdrop-filter 0.55s ease 0.25s;
+}
+.ana-paywall .lock { display: inline-flex; color: #ffd9a0; }
+.mg-doc.ed-quote .ana-paywall {
+  opacity: 1; transform: translateY(0);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+}
+
+/* Verlaufs-Notiz: vier Zeilen, je Schritt blendet die aktive ein */
+.mg-doc-annos { position: relative; z-index: 4; min-height: 3.6em; margin-top: 2px; padding-top: 16px; border-top: 1px dashed var(--mg-line-2); }
+.mg-doc-anno {
+  position: absolute; inset: 16px 0 0; margin: 0; display: flex; gap: 12px; align-items: baseline;
+  font-size: clamp(14px, 1.3vw, 15.5px); color: var(--mg-muted); line-height: 1.6;
+  opacity: 0; transform: translateY(6px); transition: opacity 0.4s ease, transform 0.4s ease; pointer-events: none;
+}
+.mg-doc-anno.on { opacity: 1; transform: translateY(0); }
+.mg-doc-anno-tag { font-family: var(--mg-mono); font-size: 10.5px; letter-spacing: 0.1em; color: var(--mg-accent); flex-shrink: 0; padding-top: 0.15em; }
+.mg-doc-anno b { color: var(--mg-ink); font-weight: 550; }
 
 .mg-anatomy-end {
   grid-column: 1 / -1; text-align: center; margin-top: clamp(26px, 4vh, 48px);
   font-family: var(--mg-display); font-style: italic; font-weight: 300;
   font-size: clamp(17px, 2vw, 22px); color: var(--mg-muted);
 }
-.mg-anatomy-end b { color: var(--mg-ink); font-weight: 400; }
+.mg-anatomy-end b { color: var(--mg-ink); font-weight: 400; font-style: normal; }
 
-/* Mobile: keine Pin-Bühne — alle Versionen als Feed */
+/* Mobile: kein Pin — End-Diff fest, Verlauf als Liste */
 @media (max-width: 860px) {
-  .mg-anatomy-stage { grid-template-columns: 1fr; min-height: 0; padding-top: 90px; }
+  .mg-anatomy-stage { grid-template-columns: 1fr; min-height: 0; padding-top: 92px; }
   .mg-rail { display: none; }
-  .mg-vstack { min-height: 0; display: flex; flex-direction: column; gap: 18px; }
-  .mg-vcard { position: relative; inset: auto; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35); }
+  .mg-doc-head { font-size: clamp(27px, 8vw, 40px); }
+  .mg-doc.is-static .ana-paywall { display: none; }
+  .mg-doc-annos.is-static, .mg-doc.is-static .mg-doc-annos { position: static; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+  .mg-doc.is-static .mg-doc-anno { position: relative; inset: auto; opacity: 1; transform: none; }
 }
 
 /* ---------------------------------------------------------------- Stats */
@@ -892,7 +955,7 @@ html.lenis, html.lenis body { height: auto; }
 @media (prefers-reduced-motion: reduce) {
   .mg-grain, .mg-marquee-track, .mg-scrollhint i::after, .mg-pair-link .line, .mg-method-note .pulse::after { animation: none !important; }
   .mg-cp.pulse .mg-cp-wave, .mg-cp.pulse .mg-cp-wave2, .mg-cp.pulse .mg-cp-flash, .mg-cp.pulse .mg-cp-core, .mg-cp.is-hit .mg-cp-core { animation: none !important; }
-  .mg-section::before, .mg-ana-rays, .mg-ana-glow, .mg-ana-lines g { animation: none !important; }
+  .mg-section::before { animation: none !important; }
   .mg-final .mg-btn.is-arrived, .mg-final .mg-btn.is-arrived::before, .mg-final .mg-btn.is-arrived::after { animation: none !important; }
   .mg *, .mg *::before, .mg *::after { transition-duration: 0.01ms !important; }
   .mg-spine-draw { opacity: 0.6; }
