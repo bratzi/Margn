@@ -16,33 +16,29 @@ export default function Impressum() {
       <p className="legal-updated">Angaben gemäß § 5 TMG und § 18 Abs. 2 MStV</p>
 
       <div className="legal-note">
-        <b>Vor Veröffentlichung ausfüllen:</b> Die unten in <b>[eckigen Klammern]</b> markierten
-        Felder (Name/Firma, vollständige Anschrift, ggf. Telefon, Vertretungsberechtigte) müssen mit
-        den echten Daten des Betreibers ersetzt werden. Ohne ladungsfähige Anschrift ist das
-        Impressum nicht vollständig. Bei einem rein privaten, nichtkommerziellen Angebot ist ggf.
-        kein Impressum nötig — sobald es journalistisch-redaktionell oder geschäftsmäßig wird, schon.
+        <b>Vor Veröffentlichung ausfüllen:</b> Es fehlt noch die <b>ladungsfähige Anschrift</b>
+        (Straße/Hausnr., PLZ, Ort) — ohne sie ist das Impressum nicht vollständig. Telefon ist optional,
+        aber empfohlen. Name und E-Mail sind eingetragen; bitte prüfen.
       </div>
 
       <h2>Diensteanbieter</h2>
       <address className="legal-addr">
-        [Vollständiger Name bzw. Firma inkl. Rechtsform]<br />
+        Waldemar Helwich<br />
         [Straße und Hausnummer]<br />
         [PLZ und Ort]<br />
-        [Land]
+        Deutschland
       </address>
 
       <h2>Kontakt</h2>
       <p>
         E-Mail: <a href="mailto:w.helwich@googlemail.com">w.helwich@googlemail.com</a><br />
-        Telefon: [optional, aber empfohlen — eine schnelle elektronische Kontaktmöglichkeit ist Pflicht]
+        Telefon: [optional — eine schnelle elektronische Kontaktmöglichkeit (E-Mail) ist gegeben]
       </p>
 
-      <h2>Vertretungsberechtigte / Verantwortlich für den Inhalt</h2>
-      <p>
-        Verantwortlich im Sinne des § 18 Abs. 2 MStV:
-      </p>
+      <h2>Verantwortlich für den Inhalt</h2>
+      <p>Verantwortlich im Sinne des § 18 Abs. 2 MStV:</p>
       <address className="legal-addr">
-        [Vor- und Nachname]<br />
+        Waldemar Helwich<br />
         [Anschrift wie oben]
       </address>
 
