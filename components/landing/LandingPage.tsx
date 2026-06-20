@@ -555,6 +555,10 @@ export default function LandingPage() {
             <span>© 2026 margn — offenes Medienobservatorium</span>
             <span>Offenes Dashboard · nachvollziehbare Methodik</span>
           </div>
+          <div className="mg-foot-legal">
+            <Link href="/impressum">Impressum</Link>
+            <Link href="/datenschutz">Datenschutz</Link>
+          </div>
         </div>
       </footer>
     </div>

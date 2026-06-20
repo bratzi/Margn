@@ -61,7 +61,7 @@ export default function Sidebar() {
 
   // Landingpage + Login sind full-bleed ohne App-Chrome.
   // WICHTIG: erst NACH allen Hooks returnen (Rules of Hooks — Layout persistiert über Routen).
-  if (path === "/" || path === "/login") return null;
+  if (path === "/" || path === "/login" || path === "/impressum" || path === "/datenschutz") return null;
 
   return (
     <aside className={`sidebar ${drawer ? "drawer-open" : ""} ${collapsed ? "is-collapsed" : ""}`}>

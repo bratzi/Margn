@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Fraunces } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
 import FilterProvider from "@/components/FilterProvider";
+import CookieNotice from "@/components/CookieNotice";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-jb", display: "swap" });
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </FilterProvider>
         </Suspense>
+        <CookieNotice />
       </body>
     </html>
   );

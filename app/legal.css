@@ -1,0 +1,46 @@
+/* Schlichte, gut lesbare Rechtstexte — eigenständig (ohne Dashboard-Chrome). */
+.legal {
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 520px at 50% -10%, var(--accent-sub), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+}
+.legal-nav {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 18px;
+  padding: 0 clamp(20px, 5vw, 64px); height: 58px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.legal-brand { display: inline-flex; align-items: center; gap: 9px; }
+.legal-brand .m { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; font-family: var(--font-mono); font-weight: 600; font-size: 15px; }
+.legal-brand b { font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.legal-nav a.legal-link { margin-left: auto; font-size: 13px; color: var(--muted); }
+.legal-nav a.legal-link + a.legal-link { margin-left: 18px; }
+.legal-nav a.legal-link:hover, .legal-nav a.legal-link.on { color: var(--accent); }
+
+.legal-main { max-width: 760px; margin: 0 auto; padding: clamp(40px, 6vw, 72px) clamp(20px, 5vw, 40px) 120px; }
+.legal-main h1 { font-size: clamp(26px, 4vw, 36px); font-weight: 700; letter-spacing: -0.02em; margin: 0 0 8px; }
+.legal-updated { font-size: 13px; color: var(--faint); margin: 0 0 36px; }
+.legal-main h2 { font-size: 17px; font-weight: 650; margin: 36px 0 10px; color: var(--ink); }
+.legal-main h3 { font-size: 14.5px; font-weight: 600; margin: 22px 0 6px; color: var(--ink); }
+.legal-main p, .legal-main li { font-size: 14.5px; line-height: 1.75; color: var(--muted); }
+.legal-main p { margin: 0 0 12px; }
+.legal-main ul { margin: 0 0 14px; padding-left: 20px; }
+.legal-main li { margin: 0 0 5px; }
+.legal-main a { color: var(--accent); }
+.legal-main a:hover { text-decoration: underline; }
+.legal-main strong { color: var(--ink); font-weight: 600; }
+.legal-addr { font-style: normal; line-height: 1.8; color: var(--ink); }
+.legal-note {
+  margin: 8px 0 18px; padding: 12px 15px; border-radius: 10px;
+  background: var(--amber-sub); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+  font-size: 13px; line-height: 1.6; color: var(--ink);
+}
+.legal-note b { color: var(--ink); }
+.legal-foot { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--faint); display: flex; gap: 16px; flex-wrap: wrap; }
+.legal-foot a { color: var(--muted); }
+.legal-foot a:hover { color: var(--accent); }
+/* (Cookie-Hinweis-Styles liegen in globals.css, da der Hinweis seitenübergreifend erscheint.) */

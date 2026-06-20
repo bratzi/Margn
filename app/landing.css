@@ -686,6 +686,9 @@ html.lenis, html.lenis body { height: auto; }
   max-width: var(--mg-max); margin: 0 auto; padding: 13px var(--mg-pad);
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
 }
+.mg-foot-base > .mg-foot-legal { justify-content: flex-start; gap: 24px; padding-top: 0; }
+.mg-foot-legal a { color: var(--mg-muted); transition: color 0.15s; }
+.mg-foot-legal a:hover { color: var(--mg-accent); }
 @media (max-width: 860px) { .mg-foot-in { grid-template-columns: 1fr; } }
 
 /* ---------------------------------------------------------------- Cursor */
