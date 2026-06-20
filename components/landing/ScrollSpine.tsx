@@ -90,11 +90,9 @@ export default function ScrollSpine() {
     let cum = new Float64Array(0);
     // Checkpoints: Position auf der Linie + SVG-<g> (Dot) + HTML-Karte + „gezündet"-Status.
     let checkpoints: { y: number; el: SVGGElement; note: HTMLElement; hit: boolean }[] = [];
-    let snapYs: number[] = []; // Magnet-Ziele: Scroll-Position je Checkpoint (Dot dann mittig im Bild)
     let finalBtnEl: HTMLElement | null = null; // Endpunkt: der „Dashboard öffnen"-Button
     let endYv = 0;             // Dokument-Y, an dem die Linie endet (Button)
     let firstEnd = 0;          // Dokument-Y, an dem die erste Sektion endet (für die Beschleunigung)
-    let anaRange: [number, number] | null = null; // Scroll-Bereich der gepinnten Anatomie-Sektion (Magnetik dort aus)
     let arrived = false;
     const HEAD_VP = 0.55;      // Kopf liegt konstant auf dieser Viewporthöhe → Dots erscheinen mittig
 
@@ -131,12 +129,6 @@ export default function ScrollSpine() {
       if (found.length < 2) return;
       firstEnd = found[1].top; // Ende der ersten Sektion (Beginn der zweiten)
 
-      // Scroll-Bereich der gepinnten Anatomie-Sektion ermitteln → dort Magnetik aus (sehr lang).
-      const pinEl = root.querySelector<HTMLElement>(".mg-anatomy-pin");
-      const spacer = pinEl?.closest<HTMLElement>(".pin-spacer") ?? root.querySelector<HTMLElement>("#anatomie");
-      if (spacer) { const sr = spacer.getBoundingClientRect(); anaRange = [sr.top + window.scrollY, sr.bottom + window.scrollY]; }
-      else anaRange = null;
-
       const anchors = [
         { y: 0, lane: found[0].lane },
         ...found.map((f) => ({ y: f.mid, lane: f.lane })),
@@ -168,8 +160,9 @@ export default function ScrollSpine() {
       let endY = H, endX: number | null = null;
       if (finalBtnEl) {
         const br = finalBtnEl.getBoundingClientRect();
-        // Endpunkt an der OBERKANTE des Buttons (mittig) — die Linie läuft genau bis dort und endet.
-        endY = br.top + window.scrollY + 1;
+        // Endpunkt etwas IN den Button hinein (mittig, von der Oberkante) → die Linie läuft an der
+        // Oberkante in den Button und verschwindet dahinter (Button liegt z-index 6 über der Spine 4).
+        endY = br.top + window.scrollY + Math.min(br.height * 0.5, 18);
         endX = br.left + br.width / 2;
       }
       endYv = endY;
@@ -286,18 +279,6 @@ export default function ScrollSpine() {
         return { y, el: g, note, hit: false };
       });
 
-      // Magnet-Ziele: Scroll-Position, an der der Kopf auf dem Dot sitzt (Dot ≈ Bildmitte). Per
-      // Inversion von headYat (wegen Beschleunigung in der 1. Sektion). Der LETZTE Magnetpunkt
-      // ist der Button-Endpunkt.
-      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-      const invHead = (targetY: number) => {
-        let lo = 0, hi = maxScroll;
-        for (let k = 0; k < 22; k++) { const m = (lo + hi) / 2; if (headYat(m) < targetY) lo = m; else hi = m; }
-        return Math.max(0, Math.min(maxScroll, lo));
-      };
-      snapYs = checkpoints.map((c) => invHead(c.y));
-      if (finalBtnEl) snapYs.push(invHead(endYv));
-
       if (reduced) {
         draw.style.strokeDashoffset = "0"; head.style.display = "none";
         checkpoints.forEach((c) => { c.el.classList.add("is-hit"); c.note.classList.add("show"); c.hit = true; });
@@ -319,7 +300,9 @@ export default function ScrollSpine() {
       draw.style.strokeDashoffset = String(len * (1 - drawnLen / polyLen));
       head.setAttribute("cx", hx.toFixed(1));
       head.setAttribute("cy", hy.toFixed(1));
-      head.style.opacity = hy > 8 && hy < endYv - 4 ? "1" : "0";
+      // Kopf (mit Glow) rechtzeitig ausblenden, BEVOR er den Button erreicht — sonst leuchtet sein
+      // Schein über den Button. Die dünne Linie selbst läuft hinter dem Button aus.
+      head.style.opacity = hy > 8 && hy < endYv - 40 ? "1" : "0";
 
       // Checkpoints zünden, sobald der Kopf sie erreicht; rückwärts wieder lösen.
       const reach = hy + 8;
@@ -342,31 +325,6 @@ export default function ScrollSpine() {
 
     const onScroll = () => { if (!reduced && !raf) raf = requestAnimationFrame(apply); };
 
-    // Punkt-zu-Punkt-Magnetik: nach dem Scrollen zum NÄCHSTEN Checkpoint einrasten. Reichweite bis
-    // ~60 % Viewporthöhe (nicht nur die letzten cm) — und je näher man ist, desto stärker/snappiger
-    // (kürzere Einrast-Dauer). So bekommt man jeden Checkpoint sauber zu sehen.
-    let snapT = 0;
-    const trySnap = () => {
-      if (reduced || !snapYs.length) return;
-      const sy = window.scrollY;
-      // Hero-Sektion (ganz oben) frei lassen — sonst zieht es beim Laden sofort zum 1. Punkt.
-      if (sy < firstEnd) return;
-      // In der gepinnten Anatomie-Sektion (sehr lang) KEINE Magnetik.
-      if (anaRange && sy >= anaRange[0] - 30 && sy <= anaRange[1] + 30) return;
-      let target = -1, bestD = 1e9;
-      for (const ty of snapYs) { const d = Math.abs(ty - sy); if (d < bestD) { bestD = d; target = ty; } }
-      const range = window.innerHeight * 0.6;
-      if (target >= 0 && bestD > 6 && bestD < range) {
-        // glatt & elegant: spürbare Mindestdauer + sanfte Deceleration; näher = nur etwas schneller.
-        const dur = Math.max(0.55, Math.min(1.15, 0.5 + bestD / 1100));
-        const ease = (t: number) => 1 - Math.pow(1 - t, 3); // easeOutCubic
-        const lenis = (window as unknown as { __mgLenis?: { scrollTo: (t: number, o?: unknown) => void } }).__mgLenis;
-        if (lenis?.scrollTo) lenis.scrollTo(target, { duration: dur, easing: ease });
-        else window.scrollTo({ top: target, behavior: "smooth" });
-      }
-    };
-    const onScrollSnap = () => { clearTimeout(snapT); snapT = window.setTimeout(trySnap, 180); };
-
     let rebuildT = 0;
     const scheduleBuild = () => { clearTimeout(rebuildT); rebuildT = window.setTimeout(build, 120); };
     const ro = new ResizeObserver(scheduleBuild);
@@ -374,7 +332,6 @@ export default function ScrollSpine() {
 
     build();
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("scroll", onScrollSnap, { passive: true });
     window.addEventListener("resize", scheduleBuild);
     document.fonts?.ready?.then(scheduleBuild).catch(() => {});
     const t1 = window.setTimeout(build, 400);
@@ -382,10 +339,9 @@ export default function ScrollSpine() {
 
     return () => {
       window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("scroll", onScrollSnap);
       window.removeEventListener("resize", scheduleBuild);
       ro.disconnect();
-      clearTimeout(rebuildT); clearTimeout(t1); clearTimeout(t2); clearTimeout(snapT);
+      clearTimeout(rebuildT); clearTimeout(t1); clearTimeout(t2);
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
