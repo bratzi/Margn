@@ -217,6 +217,17 @@ export default function ArticleDetail({ id }: { id: number }) {
     return { axes, area };
   }, [a, pctls, keywords.length, neighbors]);
 
+  // Verlauf aufbereiten: erst konsekutive Duplikate falten, dann Oszillation erkennen (die ganze
+  // Historie fällt auf ≤2 wiederkehrende Fassungen zusammen → Quelle pendelt; nur einmal zeigen).
+  const history = (() => {
+    const groups = groupSnaps(snaps);
+    const distinct: SnapGroup[] = [];
+    const seen = new Set<string>();
+    for (const g of groups) { const sig = snapSig(g.first); if (!seen.has(sig)) { seen.add(sig); distinct.push(g); } }
+    const oscillating = groups.length >= 3 && distinct.length <= 2;
+    return { groups, distinct, oscillating, switches: groups.length, from: snaps[0]?.captured_at ?? null, to: snaps[snaps.length - 1]?.captured_at ?? null };
+  })();
+
   if (loading) return <div className="page detail"><p className="faint">Lade…</p></div>;
   if (!a) return <div className="page detail"><p className="faint">Artikel nicht gefunden.</p></div>;
 
@@ -244,11 +255,13 @@ export default function ArticleDetail({ id }: { id: number }) {
           <div className="cat-chips">{categories.map((x) => <span key={x} className="cat-chip">{x}</span>)}</div>
         </div>
       )}
-      {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
-
-      {/* 2-spaltig: links Analytik/Infos, rechts der Änderungsverlauf */}
+      {/* 2-spaltig: links (2/3) Bild + Änderungsverlauf, rechts (1/3) Link (immer sichtbar) + Infos */}
       <div className="d-grid">
         <div className="d-main">
+          <div className="d-cta-bar">
+            <ExtLink href={a.url} className="cta d-cta">Originalartikel öffnen <External size={15} /></ExtLink>
+          </div>
+          <div className="d-info">
           <div className="panel statbar">
             {a.published_at ? (
               <Stat k="Veröffentlicht" v={fmtDate(a.published_at)}
@@ -380,10 +393,12 @@ export default function ArticleDetail({ id }: { id: number }) {
               {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
             </DL>
           )}
+          </div>
         </div>
 
-        {/* Rechte Spalte: Änderungsverlauf neben den Infos */}
+        {/* Linke Spalte (2/3): Bild + Änderungsverlauf, gleich breit */}
         <aside className="d-aside">
+          {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
           <DL h="Änderungsverlauf">
             <div className="chist">
               <ChistAnchor kind="pub"
@@ -396,18 +411,29 @@ export default function ArticleDetail({ id }: { id: number }) {
                   Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
                   erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
                 </div>
+              ) : history.oscillating ? (
+                <>
+                  <div className="chist-osc">
+                    <span className="chist-osc-h">↻ Quelle pendelt</span>
+                    <span>Diese Stelle wechselte zwischen {fmtDate(history.from)} und {fmtDate(history.to)} <b>{history.switches}×</b> hin und her. Hier {history.distinct.length === 2 ? "beide Fassungen" : "die betroffene Fassung"} — die Wiederholungen sind zusammengefasst.</span>
+                  </div>
+                  {history.distinct.map((g, gi, arr) => (
+                    <ChangeCard key={g.first.id} s={g.first} v={g.v}
+                      prev={gi > 0 ? arr[gi - 1].first : undefined} prevV={gi > 0 ? arr[gi - 1].v : undefined} />
+                  ))}
+                </>
               ) : (
-                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
+                history.groups.map((g, gi, arr) => (
+                  <ChangeCard key={g.first.id} s={g.first} v={g.v}
+                    prev={gi > 0 ? arr[gi - 1].first : undefined} prevV={gi > 0 ? arr[gi - 1].v : undefined}
+                    repeat={g.count > 1 ? { count: g.count, from: g.from, to: g.to } : undefined} />
+                ))
               )}
               <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
                 sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
             </div>
           </DL>
         </aside>
-      </div>
-
-      <div style={{ marginTop: 28 }}>
-        <ExtLink href={a.url} className="cta">Originalartikel öffnen <External size={15} /></ExtLink>
       </div>
     </div>
   );
@@ -477,27 +503,62 @@ function inlineOps(oldS: string, newS: string): Op[] {
   for (let x = 1; x < segs.length; x++) if (segs[x].op === "ins" && segs[x - 1].op === "del") segs[x].op = "repl";
   return segs;
 }
-function SideOld({ ops }: { ops: Op[] }) {
-  return <>{ops.map((s, x) =>
-    s.op === "del" ? <del key={x} className="hl-rm">{s.t}</del>
-    : s.op === "ins" || s.op === "repl" ? null
-    : <span key={x}>{s.t}</span>)}</>;
-}
-function SideNew({ ops }: { ops: Op[] }) {
-  return <>{ops.map((s, x) =>
-    s.op === "ins" || s.op === "repl" ? <mark key={x} className="hl-add">{s.t}</mark>
-    : s.op === "del" ? null
-    : <span key={x}>{s.t}</span>)}</>;
-}
-function Juxta({ oldS, newS, label }: { oldS: string; newS: string; label: string }) {
+// Lange unveränderte Passagen zusammenfalten: nur wenige Wörter Kontext um jede Änderung herum,
+// der Rest wird zu einem Platzhalter „⋯" (n Wörter unverändert). So bleibt nur das Wesentliche im
+// Blick — statt denselben Absatz in jeder Version komplett zu wiederholen.
+type Tok = { op: "eq" | "del" | "ins" | "repl" | "gap"; t: string; n?: number };
+function headWords(words: string[], n: number) { let c = 0, r = ""; for (const w of words) { r += w; if (w.trim() && ++c >= n) break; } return r; }
+function tailWords(words: string[], n: number) { let c = 0, r = ""; for (let i = words.length - 1; i >= 0; i--) { r = words[i] + r; if (words[i].trim() && ++c >= n) break; } return r; }
+function compactDiff(oldS: string, newS: string, ctx = 7): Tok[] {
   const ops = inlineOps(oldS, newS);
+  const idx = ops.map((o, i) => (o.op !== "eq" ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length) return [];
+  const out: Tok[] = [];
+  ops.forEach((o, i) => {
+    if (o.op !== "eq") {
+      // auch lange Einfügungen/Löschungen kappen — nur der Anfang + Platzhalter (Boilerplate raus)
+      const w = o.t.split(/(\s+)/).filter((x) => x !== "");
+      const wl = w.filter((x) => x.trim()).length;
+      if (wl > 42) out.push({ op: o.op, t: headWords(w, 34) }, { op: "gap", t: "", n: wl - 34 });
+      else out.push({ op: o.op, t: o.t });
+      return;
+    }
+    const before = idx.some((c) => c < i), after = idx.some((c) => c > i);
+    const words = o.t.split(/(\s+)/).filter((w) => w !== "");
+    const wlen = words.filter((w) => w.trim()).length;
+    if (before && after) {
+      if (wlen > 2 * ctx) { out.push({ op: "eq", t: headWords(words, ctx) }, { op: "gap", t: "", n: wlen - 2 * ctx }, { op: "eq", t: tailWords(words, ctx) }); }
+      else out.push({ op: "eq", t: o.t });
+    } else if (after) { // führender Kontext: nur die letzten ctx Wörter vor der ersten Änderung
+      if (wlen > ctx) out.push({ op: "gap", t: "", n: wlen - ctx }, { op: "eq", t: tailWords(words, ctx) });
+      else out.push({ op: "eq", t: o.t });
+    } else { // abschließender Kontext: nur die ersten ctx Wörter nach der letzten Änderung
+      if (wlen > ctx) out.push({ op: "eq", t: headWords(words, ctx) }, { op: "gap", t: "", n: wlen - ctx });
+      else out.push({ op: "eq", t: o.t });
+    }
+  });
+  return out;
+}
+// Ein zusammenhängender Inline-Diff: ~~entfernt~~ (rot) + ergänzt (grün), Platzhalter schraffiert.
+function DiffText({ oldS, newS }: { oldS: string; newS: string }) {
+  const toks = compactDiff(oldS, newS);
+  if (!toks.length) return <span className="faint" style={{ fontSize: 12.5 }}>nur Whitespace/Formatierung geändert</span>;
   return (
-    <div className="chist-block">
-      <div className="lbl">{label}</div>
-      <div className="chist-2">
-        <div className="chist-ver old"><span className="vlbl">Vorher</span><span><SideOld ops={ops} /></span></div>
-        <div className="chist-ver new"><span className="vlbl">Jetzt</span><span><SideNew ops={ops} /></span></div>
-      </div>
+    <span className="dq-text">
+      {toks.map((t, i) =>
+        t.op === "gap" ? <span key={i} className="dq-gap" title={`${t.n} Wörter unverändert`} aria-label={`${t.n} Wörter unverändert`}>⋯</span>
+        : t.op === "del" ? <del key={i} className="dq-del">{t.t}</del>
+        : t.op === "ins" || t.op === "repl" ? <ins key={i} className="dq-ins">{t.t}</ins>
+        : <span key={i}>{t.t}</span>
+      )}
+    </span>
+  );
+}
+function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta" }) {
+  return (
+    <div className={`dq ${kind}`}>
+      <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
+      <div className="dq-body"><DiffText oldS={oldS} newS={newS} /></div>
     </div>
   );
 }
@@ -506,7 +567,7 @@ function MetaLine({ icon, children }: { icon: React.ReactNode; children: React.R
   return <div className="chist-meta">{icon}<span>{children}</span></div>;
 }
 function MetaEditView({ m }: { m: MetaEdit }) {
-  if (m.field === "description" && m.old && m.new) return <Juxta oldS={m.old} newS={m.new} label="Teaser geändert" />;
+  if (m.field === "description" && m.old && m.new) return <DiffBlock oldS={m.old} newS={m.new} label="Teaser geändert" kind="meta" />;
   if (m.field === "og_image") return (
     <div className="chist-block">
       <div className="lbl">Vorschaubild getauscht</div>
@@ -539,23 +600,54 @@ function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: s
   );
 }
 
-function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
+// Signatur einer Änderung (Inhalt, nicht Zeit) — um aufeinanderfolgende IDENTISCHE Snapshots zu
+// erkennen. Manche Quellen lassen dieselbe Stelle stündlich hin- und herspringen; der Scraper
+// speichert dann denselben Diff mehrfach. Solche Wiederholungen fassen wir zu EINER Karte zusammen.
+function snapSig(s: Snapshot): string {
+  const ch = (s.changes ?? []).map((c) => `${c.old ?? ""}»${c.new ?? ""}`).join("¦");
+  const me = (s.meta_edits ?? []).map((m) => `${m.field}:${m.old}»${m.new}`).join("¦");
+  return [s.change_kind, s.title_old, s.title_new, s.pubdate_old, s.pubdate_new, s.added, ch, me].join("∣");
+}
+type SnapGroup = { first: Snapshot; v: number; count: number; from: string; to: string };
+function groupSnaps(snaps: Snapshot[]): SnapGroup[] {
+  const groups: SnapGroup[] = [];
+  snaps.forEach((s, i) => {
+    const last = groups[groups.length - 1];
+    if (last && snapSig(last.first) === snapSig(s)) { last.count++; last.to = s.captured_at; }
+    else groups.push({ first: s, v: i + 1, count: 1, from: s.captured_at, to: s.captured_at });
+  });
+  return groups;
+}
+
+function ChangeCard({ s, v, prev, prevV, repeat }: { s: Snapshot; v: number; prev?: Snapshot; prevV?: number; repeat?: { count: number; from: string; to: string } }) {
   const isEdit = s.change_kind === "edit";
   const isExt = s.change_kind === "extension";
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : isEdit ? "Stille Änderung" : "Geändert & erweitert";
   const Icon = isEdit ? Pencil : Plus;
   const cls = s.change_kind === "extension" ? "ok" : isEdit ? "lock" : "wait";
-  const changes = (s.changes ?? []).filter((c) => c.old || c.new);
+  const allChanges = (s.changes ?? []).filter((c) => c.old || c.new);
+  // Nur die größten Passagen zeigen (Länge der Änderung), der Rest als Hinweis — nicht jeder Absatz.
+  const changes = [...allChanges].sort((a, b) => ((b.old?.length ?? 0) + (b.new?.length ?? 0)) - ((a.old?.length ?? 0) + (a.new?.length ?? 0))).slice(0, 3);
+  const moreChanges = allChanges.length - changes.length;
   const titleChanged = !!(s.title_old && s.title_new);
   const dateChanged = !!(s.pubdate_old && s.pubdate_new);
   const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field);
+  // Oszillation erkennen: nimmt dieser Snapshot exakt den vorigen zurück? (Quelle springt hin und her.)
+  const c0 = allChanges.find((c) => c.old && c.new);
+  const p0 = prev?.changes?.find((c) => c.old && c.new);
+  const isRevert = !!(
+    (c0 && p0 && c0.old === p0.new && c0.new === p0.old) ||
+    (s.title_old && s.title_new && prev?.title_old === s.title_new && prev?.title_new === s.title_old)
+  );
   return (
-    <div className={`chist-card ${s.change_kind}`}>
+    <div className={`chist-card ${s.change_kind}${isRevert ? " revert" : ""}`}>
       <div className="chist-head">
-        <span className="chist-v">V{v}</span>
+        <span className="chist-v">{repeat ? `V${v}–V${v + repeat.count - 1}` : `V${v}`}</span>
         <span className={`badge ${cls}`}><Icon /> {kindLabel}</span>
         <span className="chist-when">{fmtDate(s.captured_at)}</span>
         <span className="chist-chips">
+          {repeat && <span className="chist-chip repeat">↻&nbsp;{repeat.count}×</span>}
+          {isRevert && <span className="chist-chip revert">↩ Rücknahme</span>}
           {titleChanged && <span className="chist-chip">Überschrift</span>}
           {dateChanged && <span className="chist-chip date">Datum</span>}
           {metaEdits.map((m) => <span key={m.field} className="chist-chip meta">{META_LABEL[m.field] ?? m.field}</span>)}
@@ -564,39 +656,47 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
           {s.word_delta ? <span className="chist-chip">{s.word_delta > 0 ? "+" : ""}{s.word_delta}&nbsp;W</span> : null}
         </span>
       </div>
+      {repeat ? (
+        <div className="chist-revert-note"><span>↻</span> Dieselbe Änderung <b>{repeat.count}×</b> erfasst ({fmtDate(repeat.from)} – {fmtDate(repeat.to)}) — die Quelle ließ den Text mehrfach hin- und herspringen.</div>
+      ) : isRevert ? (
+        <div className="chist-revert-note"><span>↩</span> Setzt <b>V{prevV}</b> wieder zurück — dieselbe Stelle pendelt bei der Quelle hin und her.</div>
+      ) : null}
       {dateChanged && (
         <div className="chist-date"><Clock size={14} /><span>Veröffentlichungsdatum still geändert — <b>vorher</b> {fmtDate(s.pubdate_old)} · <b>jetzt</b> {fmtDate(s.pubdate_new)}</span></div>
       )}
       {metaEdits.map((m, i) => <MetaEditView key={`${m.field}-${i}`} m={m} />)}
-      {titleChanged && <Juxta oldS={s.title_old!} newS={s.title_new!} label="Überschrift" />}
+      {titleChanged && <DiffBlock oldS={s.title_old!} newS={s.title_new!} label="Überschrift geändert" kind="title" />}
       {isExt ? (() => {
         const newText = s.added || changes.filter((c) => c.new).map((c) => c.new).join("\n\n");
         return newText ? (
-          <div className="chist-block">
-            <div className="lbl add-l">Neu hinzugekommen</div>
-            <div className="chist-ver new">{newText.length > 1400 ? newText.slice(0, 1400) + "…" : newText}</div>
+          <div className="dq ext">
+            <div className="dq-lbl"><span className="dq-pm add">+</span>Neu hinzugekommen</div>
+            <div className="dq-body dq-add-body">{newText.length > 520 ? newText.slice(0, 520) + " …" : newText}</div>
           </div>
         ) : null;
       })() : (
         <>
           {changes.map((c, i) =>
-            c.old && c.new ? <Juxta key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />
+            c.old && c.new ? <DiffBlock key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />
             : c.new ? (
-              <div className="chist-block" key={i}>
-                <div className="lbl add-l">Neu hinzugekommen</div>
-                <div className="chist-ver new">{c.new}</div>
+              <div className="dq ext" key={i}>
+                <div className="dq-lbl"><span className="dq-pm add">+</span>Neu hinzugekommen</div>
+                <div className="dq-body dq-add-body">{c.new!.length > 420 ? c.new!.slice(0, 420) + " …" : c.new}</div>
               </div>
             ) : (
-              <div className="chist-block" key={i}>
-                <div className="lbl del-l">Entfernt</div>
-                <div className="chist-ver old">{c.old}</div>
+              <div className="dq del-only" key={i}>
+                <div className="dq-lbl"><span className="dq-pm del">−</span>Entfernt</div>
+                <div className="dq-body dq-del-body">{c.old!.length > 420 ? c.old!.slice(0, 420) + " …" : c.old}</div>
               </div>
             )
           )}
+          {moreChanges > 0 && (
+            <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>+ {moreChanges} weitere, kleinere Passage{moreChanges > 1 ? "n" : ""} geändert</p>
+          )}
           {changes.length === 0 && !titleChanged && s.added && (
-            <div className="chist-block">
-              <div className={`lbl ${isEdit ? "del-l" : "add-l"}`}>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
-              <div className={`chist-ver ${isEdit ? "old" : "new"}`}>{s.added.length > 700 ? s.added.slice(0, 700) + "…" : s.added}</div>
+            <div className={`dq ${isEdit ? "del-only" : "ext"}`}>
+              <div className="dq-lbl"><span className={`dq-pm ${isEdit ? "del" : "add"}`}>{isEdit ? "±" : "+"}</span>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
+              <div className={`dq-body ${isEdit ? "dq-del-body" : "dq-add-body"}`}>{s.added.length > 420 ? s.added.slice(0, 420) + " …" : s.added}</div>
             </div>
           )}
           {changes.length === 0 && !titleChanged && !s.added && !dateChanged && s.removed_count > 0 && (
