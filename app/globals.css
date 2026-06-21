@@ -623,6 +623,8 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .cat-chip { font-size: 13.5px; font-weight: 600; padding: 5px 13px; border-radius: 99px; background: var(--surface); color: var(--ink); border: 1px solid var(--line-2); }
 .d-hero { border-radius: var(--r); overflow: hidden; margin-bottom: 20px; border: 1px solid var(--line); }
 .d-hero img { width: 100%; display: block; object-fit: cover; max-height: 360px; }
+/* In der Detail-Spalte dient das Bild nur der Orientierung → schmaler Banner, der Verlauf ist der Fokus. */
+.d-grid .d-aside .d-hero img { max-height: 168px; }
 .statbar { display: flex; gap: 28px; flex-wrap: wrap; padding: 16px 20px; }
 .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin-bottom: 3px; }
 .stat .v { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -792,7 +794,7 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .chist-imgs figure.old img { border-left: 3px solid var(--red); }
 .chist-imgs figure.new img { border-left: 3px solid var(--green); }
 
-/* ---------- Kompakter Inline-Diff (gute-Difftool-Optik) ---------- */
+/* ---------- Diff je Version: Vorher | Jetzt nebeneinander, kompakt mit Platzhaltern ---------- */
 .dq { margin-top: 13px; border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 9px; overflow: hidden; background: var(--surface); }
 .dq.title { border-left-color: var(--accent); }
 .dq.meta { border-left-color: var(--teal); }
@@ -804,28 +806,24 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .dq-pm.add { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
 .dq-pm.del { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 .dq-body { padding: 11px 13px; font-size: 13px; line-height: 1.8; color: var(--ink); }
+/* zwei Spalten Vorher/Jetzt */
+.dq-2 { display: grid; grid-template-columns: 1fr 1fr; }
+.dq-col { padding: 10px 13px; font-size: 13px; line-height: 1.75; color: var(--ink); min-width: 0; }
+.dq-col.old { background: color-mix(in srgb, var(--red) 5%, transparent); border-right: 1px solid var(--line); }
+.dq-col.new { background: color-mix(in srgb, var(--green) 5%, transparent); }
+.dq-side-tag { display: block; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px; }
+.dq-col.old .dq-side-tag { color: var(--red); }
+.dq-col.new .dq-side-tag { color: var(--green); }
+.dq-side-body { overflow-wrap: anywhere; }
+@media (max-width: 720px) { .dq-2 { grid-template-columns: 1fr; } .dq-col.old { border-right: 0; border-bottom: 1px solid var(--line); } }
 .dq-text del.dq-del { color: var(--red); text-decoration: line-through; text-decoration-thickness: 2px; background: var(--red-sub); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .dq-text ins.dq-ins { color: var(--green); text-decoration: none; background: var(--green-sub); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 /* Platzhalter für unveränderte Passagen: schraffierter Pill mit ⋯ */
-.dq-gap { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 15px; margin: 0 5px; padding: 0 5px;
+.dq-gap { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 15px; margin: 0 4px; padding: 0 5px;
   vertical-align: middle; color: var(--faint); font-size: 13px; line-height: 1; letter-spacing: 1px; border-radius: 99px; border: 1px solid var(--line-2);
   background-image: repeating-linear-gradient(45deg, var(--line-2) 0 1.5px, transparent 1.5px 5px); cursor: help; user-select: none; }
 .dq-add-body { color: var(--green); background: color-mix(in srgb, var(--green) 6%, transparent); white-space: pre-wrap; }
 .dq-del-body { color: var(--red); background: color-mix(in srgb, var(--red) 6%, transparent); white-space: pre-wrap; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 50%, transparent); }
-
-/* Rücknahme / Oszillation der Quelle */
-.chist-card.revert { opacity: .94; }
-.chist-chip.revert { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
-.chist-chip.repeat { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 42%, transparent); font-weight: 700; }
-.chist-revert-note { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.5;
-  color: var(--muted); background: var(--accent-sub); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
-.chist-revert-note span { color: var(--accent-2); font-weight: 700; }
-.chist-revert-note b { color: var(--ink); font-weight: 650; }
-/* Oszillations-Banner: Quelle pendelt zwischen wenigen Fassungen */
-.chist-osc { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 14px; padding: 11px 14px; border-radius: 9px;
-  background: var(--accent-sub); border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent); font-size: 13px; line-height: 1.55; color: var(--muted); }
-.chist-osc-h { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--accent-2); }
-.chist-osc b { color: var(--ink); font-weight: 700; }
 
 .empty { color: var(--faint); font-size: 13px; padding: 16px; background: var(--surface-2); border-radius: 7px; border-left: 3px solid var(--line-2); line-height: 1.6; }
 
