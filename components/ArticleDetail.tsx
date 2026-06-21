@@ -244,26 +244,90 @@ export default function ArticleDetail({ id }: { id: number }) {
           <div className="cat-chips">{categories.map((x) => <span key={x} className="cat-chip">{x}</span>)}</div>
         </div>
       )}
-      {/* 2-spaltig: links (2/3) Bild + Änderungsverlauf, rechts (1/3) Link (immer sichtbar) + Infos */}
+      {/* 2-spaltig: LINKS (2/3) der Artikel selbst — Bild, Verlauf, Eckdaten, Scan, Schlagwörter,
+          Autoren, Seitenbaum. RECHTS (1/3) margns Analyse — Link, Radar, Einordnung, Profil, Echo. */}
       <div className="d-grid">
+        {/* Linke Spalte (breit): das Stück + seine Fakten */}
+        <aside className="d-aside">
+          {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
+
+          {/* Kernstück: der Änderungsverlauf */}
+          <DL h="Änderungsverlauf">
+            <div className="chist">
+              <ChistAnchor kind="pub"
+                label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
+                time={a.published_at ?? a.first_seen}
+                sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
+              {snaps.length === 0 ? (
+                <div className="chist-none">
+                  Seither <strong>keine Änderung erfasst</strong> — Überschrift, Text, Datum, Teaser,
+                  Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
+                  erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
+                </div>
+              ) : (
+                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
+              )}
+              <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
+                sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
+            </div>
+          </DL>
+
+          {/* Eckdaten (Zeit/Umfang/Sprache) */}
+          <DL h="Eckdaten">
+            <div className="statrow">
+              {a.published_at ? (
+                <Stat k="Veröffentlicht" v={fmtDate(a.published_at)}
+                  sub={a.first_seen ? `Erfasst ${timeDelta(a.published_at, a.first_seen)} später` : undefined} />
+              ) : (
+                <Stat k="Veröffentlicht" v="Kein Datum vom Verlag" sub={a.first_seen ? `Erster Scan: ${fmtDate(a.first_seen)}` : undefined} />
+              )}
+              {a.modified_at && a.modified_at !== a.published_at && <Stat k="Aktualisiert" v={fmtDate(a.modified_at)} />}
+              {a.word_count ? <Stat k="Umfang" v={`${a.word_count.toLocaleString("de-DE")} Wörter`} /> : null}
+              {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
+              <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
+            </div>
+          </DL>
+
+          <DL h="Scan-Verlauf">
+            <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
+              changeTimes={snaps.map((s) => s.captured_at)} />
+          </DL>
+
+          <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>
+            {keywords.length > 0
+              ? <div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div>
+              : <span className="faint" style={{ fontSize: 13 }}>Keine Schlagwörter im Quelltext gefunden (oder noch nicht erfasst).</span>}
+          </DL>
+
+          <DL h="Autoren">
+            {a.author_status === "named" && authors.length > 0
+              ? <div className="row">{authors.map((x) => <span key={x} className="tag a">{x}</span>)}</div>
+              : a.author_status === "anonymous"
+              ? <span className="badge wait">Redaktion / Agentur{authors.length ? ` · ${authors.join(", ")}` : ""}</span>
+              : <span className="badge neutral">Kein Autor genannt</span>}
+          </DL>
+
+          {segs.length > 0 && (
+            <DL h="Position im Seitenbaum">
+              <div className="crumb">
+                <span className="seg">{a.base_url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                {segs.map((s, i) => (
+                  <span key={i} style={{ display: "inline-flex", alignItems: "center" }}>
+                    <span className="sep">/</span><span className={`seg ${i === segs.length - 1 ? "last" : ""}`}>{s}</span>
+                  </span>
+                ))}
+              </div>
+              {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
+            </DL>
+          )}
+        </aside>
+
+        {/* Rechte Spalte (schmal): Link + margns Analyse */}
         <div className="d-main">
           <div className="d-cta-bar">
             <ExtLink href={a.url} className="cta d-cta">Originalartikel öffnen <External size={15} /></ExtLink>
           </div>
           <div className="d-info">
-          <div className="panel statbar">
-            {a.published_at ? (
-              <Stat k="Veröffentlicht" v={fmtDate(a.published_at)}
-                sub={a.first_seen ? `Erfasst ${timeDelta(a.published_at, a.first_seen)} später` : undefined} />
-            ) : (
-              <Stat k="Veröffentlicht" v="Kein Datum vom Verlag" sub={a.first_seen ? `Erster Scan: ${fmtDate(a.first_seen)}` : undefined} />
-            )}
-            {a.modified_at && a.modified_at !== a.published_at && <Stat k="Aktualisiert" v={fmtDate(a.modified_at)} />}
-            {a.word_count ? <Stat k="Umfang" v={`${a.word_count.toLocaleString("de-DE")} Wörter`} /> : null}
-            {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
-            <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
-          </div>
-
           {/* Fingerabdruck-Radar */}
           {radar && (
             <DL h="Profil auf einen Blick">
@@ -328,24 +392,6 @@ export default function ArticleDetail({ id }: { id: number }) {
             </DL>
           )}
 
-          <DL h="Scan-Verlauf">
-            <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
-              changeTimes={snaps.map((s) => s.captured_at)} />
-          </DL>
-
-          <DL h="Autoren">
-            {a.author_status === "named" && authors.length > 0
-              ? <div className="row">{authors.map((x) => <span key={x} className="tag a">{x}</span>)}</div>
-              : a.author_status === "anonymous"
-              ? <span className="badge wait">Redaktion / Agentur{authors.length ? ` · ${authors.join(", ")}` : ""}</span>
-              : <span className="badge neutral">Kein Autor genannt</span>}
-          </DL>
-          <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>
-            {keywords.length > 0
-              ? <div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div>
-              : <span className="faint" style={{ fontSize: 13 }}>Keine Schlagwörter im Quelltext gefunden (oder noch nicht erfasst).</span>}
-          </DL>
-
           {neighbors && neighbors.length > 0 && (
             <DL h="Thematische Nachbarn">
               <p className="neigh-intro">
@@ -368,46 +414,8 @@ export default function ArticleDetail({ id }: { id: number }) {
               </div>
             </DL>
           )}
-
-          {segs.length > 0 && (
-            <DL h="Position im Seitenbaum">
-              <div className="crumb">
-                <span className="seg">{a.base_url.replace(/^https?:\/\/(www\.)?/, "")}</span>
-                {segs.map((s, i) => (
-                  <span key={i} style={{ display: "inline-flex", alignItems: "center" }}>
-                    <span className="sep">/</span><span className={`seg ${i === segs.length - 1 ? "last" : ""}`}>{s}</span>
-                  </span>
-                ))}
-              </div>
-              {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
-            </DL>
-          )}
           </div>
         </div>
-
-        {/* Linke Spalte (2/3): Bild + Änderungsverlauf, gleich breit */}
-        <aside className="d-aside">
-          {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
-          <DL h="Änderungsverlauf">
-            <div className="chist">
-              <ChistAnchor kind="pub"
-                label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
-                time={a.published_at ?? a.first_seen}
-                sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
-              {snaps.length === 0 ? (
-                <div className="chist-none">
-                  Seither <strong>keine Änderung erfasst</strong> — Überschrift, Text, Datum, Teaser,
-                  Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
-                  erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
-                </div>
-              ) : (
-                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
-              )}
-              <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
-                sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
-            </div>
-          </DL>
-        </aside>
       </div>
     </div>
   );
@@ -491,10 +499,28 @@ function DiffSide({ ops, side }: { ops: Op[]; side: "old" | "new" }) {
     </span>
   );
 }
+// Sehr lange Absätze (z.B. n-tv: Body = EIN Riesenabsatz): unveränderte Strecken zusammenfalten,
+// damit nicht zweimal die komplette Textwand erscheint. Nur die geänderten Stellen + etwas Kontext
+// bleiben; lange „eq"-Läufe werden auf Kopf … Schwanz gekürzt. Kurze Diffs (Titel/Teaser) bleiben
+// unangetastet — dort ist Volltext gewollt.
+function elideOps(ops: Op[], ctx = 60): Op[] {
+  const firstChange = ops.findIndex((o) => o.op !== "eq");
+  if (firstChange === -1) return ops;
+  let lastChange = firstChange;
+  for (let i = ops.length - 1; i >= 0; i--) if (ops[i].op !== "eq") { lastChange = i; break; }
+  return ops.map((o, i) => {
+    if (o.op !== "eq" || o.t.length <= ctx * 2 + 5) return o;
+    if (i < firstChange) return { ...o, t: "… " + o.t.slice(-ctx) };          // vor der ersten Änderung
+    if (i > lastChange) return { ...o, t: o.t.slice(0, ctx) + " …" };          // nach der letzten Änderung
+    return { ...o, t: o.t.slice(0, ctx) + " … " + o.t.slice(-ctx) };          // zwischen zwei Änderungen
+  });
+}
 // Side-by-Side: Vorher links, Jetzt rechts — voller Text je Version, Unterschiede schraffiert.
 function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta" }) {
   const ops = inlineOps(oldS, newS);
   const changed = ops.some((o) => o.op !== "eq");
+  // Nur bei echten Textwänden falten — Überschriften/Teaser bleiben Volltext.
+  const shown = oldS.length + newS.length > 1500 ? elideOps(ops) : ops;
   return (
     <div className={`dq ${kind}`}>
       <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
@@ -502,12 +528,48 @@ function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: s
         <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>nur Whitespace/Formatierung geändert</span></div>
       ) : (
         <div className="dq-2">
-          <div className="dq-col old"><span className="dq-side-tag">Vorher</span><div className="dq-side-body"><DiffSide ops={ops} side="old" /></div></div>
-          <div className="dq-col new"><span className="dq-side-tag">Jetzt</span><div className="dq-side-body"><DiffSide ops={ops} side="new" /></div></div>
+          <div className="dq-col old"><span className="dq-side-tag">Vorher</span><div className="dq-side-body"><DiffSide ops={shown} side="old" /></div></div>
+          <div className="dq-col new"><span className="dq-side-tag">Jetzt</span><div className="dq-side-body"><DiffSide ops={shown} side="new" /></div></div>
         </div>
       )}
     </div>
   );
+}
+
+// Roh-Changes „aussöhnen": Manche Snapshots liefern eine geänderte Passage als getrenntes {new}
+// + {old} mit (im erfassten Fenster) identischem Text → roh gerendert ZWEI gleiche Textwände
+// („neu" + „entfernt"), was keinen Sinn ergibt. Hier: ungepaarte Zu-/Abgänge nach Wort-
+// Ähnlichkeit paaren, echte Paare als Wort-Diff führen, sichtbar identische no-op-Paare verwerfen.
+function normTxt(s: string): string { return s.replace(/\s+/g, " ").trim(); }
+function jaccard(a: string, b: string): number {
+  const A = new Set(a.toLowerCase().match(/\p{L}+|\p{N}+/gu) ?? []);
+  const B = new Set(b.toLowerCase().match(/\p{L}+|\p{N}+/gu) ?? []);
+  if (!A.size || !B.size) return 0;
+  let inter = 0; for (const t of A) if (B.has(t)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+function reconcileChanges(raw: Change[]): { items: Change[]; noopDropped: boolean } {
+  const paired: Change[] = [], adds: string[] = [], rems: string[] = [];
+  for (const c of raw) {
+    if (c.old && c.new) paired.push(c);
+    else if (c.new) adds.push(c.new);
+    else if (c.old) rems.push(c.old);
+  }
+  const items: Change[] = [];
+  let noopDropped = false;
+  for (const p of paired) { if (normTxt(p.old!) === normTxt(p.new!)) noopDropped = true; else items.push(p); }
+  const usedR = new Set<number>();
+  for (const a of adds) {
+    let best = -1, bestSim = 0;
+    rems.forEach((r, i) => { if (usedR.has(i)) return; const s = jaccard(a, r); if (s > bestSim) { bestSim = s; best = i; } });
+    if (best >= 0 && bestSim >= 0.4) {
+      usedR.add(best);
+      if (normTxt(rems[best]) === normTxt(a)) noopDropped = true;   // sichtbar identisch → kein Sinn, weg
+      else items.push({ old: rems[best], new: a });                 // echte Änderung → Wort-Diff
+    } else items.push({ new: a });
+  }
+  rems.forEach((r, i) => { if (!usedR.has(i)) items.push({ old: r }); });
+  return { items, noopDropped };
 }
 
 function MetaLine({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
@@ -553,7 +615,7 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : isEdit ? "Stille Änderung" : "Geändert & erweitert";
   const Icon = isEdit ? Pencil : Plus;
   const cls = s.change_kind === "extension" ? "ok" : isEdit ? "lock" : "wait";
-  const allChanges = (s.changes ?? []).filter((c) => c.old || c.new);
+  const { items: allChanges, noopDropped } = reconcileChanges((s.changes ?? []).filter((c) => c.old || c.new));
   // Nur die größten Passagen zeigen (Länge der Änderung), der Rest als Hinweis — nicht jeder Absatz.
   const changes = [...allChanges].sort((a, b) => ((b.old?.length ?? 0) + (b.new?.length ?? 0)) - ((a.old?.length ?? 0) + (a.new?.length ?? 0))).slice(0, 3);
   const moreChanges = allChanges.length - changes.length;
@@ -607,13 +669,17 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
           {moreChanges > 0 && (
             <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>+ {moreChanges} weitere, kleinere Passage{moreChanges > 1 ? "n" : ""} geändert</p>
           )}
-          {changes.length === 0 && !titleChanged && s.added && (
+          {changes.length === 0 && !titleChanged && s.added && !noopDropped && (
             <div className={`dq ${isEdit ? "del-only" : "ext"}`}>
               <div className="dq-lbl"><span className={`dq-pm ${isEdit ? "del" : "add"}`}>{isEdit ? "±" : "+"}</span>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
               <div className={`dq-body ${isEdit ? "dq-del-body" : "dq-add-body"}`}>{s.added.length > 420 ? s.added.slice(0, 420) + " …" : s.added}</div>
             </div>
           )}
-          {changes.length === 0 && !titleChanged && !s.added && !dateChanged && s.removed_count > 0 && (
+          {/* no-op-Paar verworfen (Differenz lag außerhalb des erfassten Ausschnitts) → ehrlicher Hinweis statt zwei gleicher Textwände */}
+          {changes.length === 0 && noopDropped && !titleChanged && (
+            <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>Text minimal überarbeitet — der Unterschied liegt außerhalb des erfassten Ausschnitts.</p>
+          )}
+          {changes.length === 0 && !titleChanged && !s.added && !dateChanged && !noopDropped && s.removed_count > 0 && (
             <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>− {s.removed_count} Passage(n) entfernt</p>
           )}
         </>
