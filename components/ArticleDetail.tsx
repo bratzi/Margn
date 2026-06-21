@@ -477,68 +477,33 @@ function inlineOps(oldS: string, newS: string): Op[] {
   for (let x = 1; x < segs.length; x++) if (segs[x].op === "ins" && segs[x - 1].op === "del") segs[x].op = "repl";
   return segs;
 }
-// Lange unveränderte Passagen zusammenfalten: nur wenige Wörter Kontext um jede Änderung herum,
-// der Rest wird zu einem Platzhalter „⋯" (n Wörter unverändert). So bleibt nur das Wesentliche im
-// Blick — statt denselben Absatz in jeder Version komplett zu wiederholen.
-type Tok = { op: "eq" | "del" | "ins" | "repl" | "gap"; t: string; n?: number };
-function headWords(words: string[], n: number) { let c = 0, r = ""; for (const w of words) { r += w; if (w.trim() && ++c >= n) break; } return r; }
-function tailWords(words: string[], n: number) { let c = 0, r = ""; for (let i = words.length - 1; i >= 0; i--) { r = words[i] + r; if (words[i].trim() && ++c >= n) break; } return r; }
-function compactDiff(oldS: string, newS: string, ctx = 7): Tok[] {
-  const ops = inlineOps(oldS, newS);
-  const idx = ops.map((o, i) => (o.op !== "eq" ? i : -1)).filter((i) => i >= 0);
-  if (!idx.length) return [];
-  const out: Tok[] = [];
-  ops.forEach((o, i) => {
-    if (o.op !== "eq") {
-      // auch lange Einfügungen/Löschungen kappen — nur der Anfang + Platzhalter (Boilerplate raus)
-      const w = o.t.split(/(\s+)/).filter((x) => x !== "");
-      const wl = w.filter((x) => x.trim()).length;
-      if (wl > 42) out.push({ op: o.op, t: headWords(w, 34) }, { op: "gap", t: "", n: wl - 34 });
-      else out.push({ op: o.op, t: o.t });
-      return;
-    }
-    const before = idx.some((c) => c < i), after = idx.some((c) => c > i);
-    const words = o.t.split(/(\s+)/).filter((w) => w !== "");
-    const wlen = words.filter((w) => w.trim()).length;
-    if (before && after) {
-      if (wlen > 2 * ctx) { out.push({ op: "eq", t: headWords(words, ctx) }, { op: "gap", t: "", n: wlen - 2 * ctx }, { op: "eq", t: tailWords(words, ctx) }); }
-      else out.push({ op: "eq", t: o.t });
-    } else if (after) { // führender Kontext: nur die letzten ctx Wörter vor der ersten Änderung
-      if (wlen > ctx) out.push({ op: "gap", t: "", n: wlen - ctx }, { op: "eq", t: tailWords(words, ctx) });
-      else out.push({ op: "eq", t: o.t });
-    } else { // abschließender Kontext: nur die ersten ctx Wörter nach der letzten Änderung
-      if (wlen > ctx) out.push({ op: "eq", t: headWords(words, ctx) }, { op: "gap", t: "", n: wlen - ctx });
-      else out.push({ op: "eq", t: o.t });
-    }
-  });
-  return out;
-}
-// Eine Seite des Diffs: „Vorher" zeigt eq + Entfernungen (rot), „Jetzt" eq + Ergänzungen (grün).
-// Platzhalter (gap) erscheinen auf beiden Seiten → der unveränderte Kontext bleibt ausgeblendet.
-function DiffSide({ toks, side }: { toks: Tok[]; side: "old" | "new" }) {
+// Eine Seite des Diffs: VOLLER Text. „Vorher" zeigt unverändert + Entfernungen (rot schraffiert),
+// „Jetzt" unverändert + Ergänzungen (grün schraffiert). Gleicher Text wird NICHT gekürzt — nur der
+// Unterschied wird per Schraffur hervorgehoben, wie in einem Diff-Tool.
+function DiffSide({ ops, side }: { ops: Op[]; side: "old" | "new" }) {
   return (
     <span className="dq-text">
-      {toks.map((t, i) => {
-        if (t.op === "gap") return <span key={i} className="dq-gap" title={`${t.n} Wörter unverändert`} aria-label={`${t.n} Wörter unverändert`}>⋯</span>;
-        if (t.op === "del") return side === "old" ? <del key={i} className="dq-del">{t.t}</del> : null;
-        if (t.op === "ins" || t.op === "repl") return side === "new" ? <ins key={i} className="dq-ins">{t.t}</ins> : null;
-        return <span key={i}>{t.t}</span>;
+      {ops.map((o, i) => {
+        if (o.op === "del") return side === "old" ? <del key={i} className="dq-del">{o.t}</del> : null;
+        if (o.op === "ins" || o.op === "repl") return side === "new" ? <ins key={i} className="dq-ins">{o.t}</ins> : null;
+        return <span key={i}>{o.t}</span>;
       })}
     </span>
   );
 }
-// Side-by-Side: Vorher links, Jetzt rechts — pro Version sichtbar, kompakt (nur Kontext um die Änderung).
+// Side-by-Side: Vorher links, Jetzt rechts — voller Text je Version, Unterschiede schraffiert.
 function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta" }) {
-  const toks = compactDiff(oldS, newS);
+  const ops = inlineOps(oldS, newS);
+  const changed = ops.some((o) => o.op !== "eq");
   return (
     <div className={`dq ${kind}`}>
       <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
-      {toks.length === 0 ? (
+      {!changed ? (
         <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>nur Whitespace/Formatierung geändert</span></div>
       ) : (
         <div className="dq-2">
-          <div className="dq-col old"><span className="dq-side-tag">Vorher</span><div className="dq-side-body"><DiffSide toks={toks} side="old" /></div></div>
-          <div className="dq-col new"><span className="dq-side-tag">Jetzt</span><div className="dq-side-body"><DiffSide toks={toks} side="new" /></div></div>
+          <div className="dq-col old"><span className="dq-side-tag">Vorher</span><div className="dq-side-body"><DiffSide ops={ops} side="old" /></div></div>
+          <div className="dq-col new"><span className="dq-side-tag">Jetzt</span><div className="dq-side-body"><DiffSide ops={ops} side="new" /></div></div>
         </div>
       )}
     </div>

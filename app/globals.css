@@ -816,12 +816,19 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .dq-col.new .dq-side-tag { color: var(--green); }
 .dq-side-body { overflow-wrap: anywhere; }
 @media (max-width: 720px) { .dq-2 { grid-template-columns: 1fr; } .dq-col.old { border-right: 0; border-bottom: 1px solid var(--line); } }
-.dq-text del.dq-del { color: var(--red); text-decoration: line-through; text-decoration-thickness: 2px; background: var(--red-sub); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-.dq-text ins.dq-ins { color: var(--green); text-decoration: none; background: var(--green-sub); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-/* Platzhalter für unveränderte Passagen: schraffierter Pill mit ⋯ */
-.dq-gap { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 15px; margin: 0 4px; padding: 0 5px;
-  vertical-align: middle; color: var(--faint); font-size: 13px; line-height: 1; letter-spacing: 1px; border-radius: 99px; border: 1px solid var(--line-2);
-  background-image: repeating-linear-gradient(45deg, var(--line-2) 0 1.5px, transparent 1.5px 5px); cursor: help; user-select: none; }
+/* Unterschiede schraffiert hervorheben (wie ein Diff-Tool): Entfernung rot, Einfügung grün. */
+.dq-text del.dq-del {
+  color: var(--red); text-decoration: line-through; text-decoration-thickness: 2px;
+  background-color: color-mix(in srgb, var(--red) 10%, transparent);
+  background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--red) 34%, transparent) 0 2px, transparent 2px 6px);
+  border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+.dq-text ins.dq-ins {
+  color: var(--green); text-decoration: none;
+  background-color: color-mix(in srgb, var(--green) 10%, transparent);
+  background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--green) 34%, transparent) 0 2px, transparent 2px 6px);
+  border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
 .dq-add-body { color: var(--green); background: color-mix(in srgb, var(--green) 6%, transparent); white-space: pre-wrap; }
 .dq-del-body { color: var(--red); background: color-mix(in srgb, var(--red) 6%, transparent); white-space: pre-wrap; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 50%, transparent); }
 
