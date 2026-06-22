@@ -951,6 +951,12 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------- Finale: die Linie verschwindet HINTER dem Button (z-index 6 > Spine 4),
    dann zündet ein langer, schriller Eyecatcher. ::before ist die Button-Füllung —
    nicht anfassen; Impact läuft am Element (box-shadow + brightness) + ::after (Schockwelle→Puls). */
+/* WICHTIG: Der CTA-Wrapper trägt data-reveal → will-change:transform (Zeile ~855)
+   bildet einen EIGENEN Stacking-Context und sperrt den Button (z-index 6) darin ein.
+   Ohne explizites z-index lag der ganze Wrapper bei z-index auto (0) UNTER der Spine
+   (4) → die Linie lief über den Button. Wrapper über Spine (4) + Notes (5) heben,
+   erst dadurch greift der Button-z-index überhaupt → Button liegt über der Linie. */
+.mg-final .mg-hero-cta { position: relative; z-index: 7; }
 .mg-final .mg-btn { position: relative; z-index: 6; }
 .mg-final .mg-btn.is-arrived { animation: mgCtaArrive 1.45s cubic-bezier(.2,.8,.2,1); }
 .mg-final .mg-btn.is-arrived::after {
