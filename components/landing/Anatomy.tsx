@@ -84,39 +84,57 @@ export default function Anatomy() {
     const prog = root.querySelector<HTMLElement>(".mg-rail .prog");
     if (!doc) return;
 
-    // einen Schritt anwenden: kumulative Edit-Klassen + Meta + Verlauf + Rail + Wärme
-    const applyStep = (idx: number, p: number) => {
-      doc.classList.toggle("ed-verb", idx >= 1);
-      doc.classList.toggle("ed-num", idx >= 2);
-      doc.classList.toggle("ed-quote", idx >= 3);
-      const s = STEPS[idx];
-      if (verEl) verEl.textContent = s.v;
-      if (timeEl) timeEl.textContent = s.t;
-      if (chipEl) {
-        chipEl.textContent = s.status.label;
-        chipEl.className = `mg-doc-status ${s.status.cls}`;
-      }
-      annos.forEach((a, i) => a.classList.toggle("on", i === idx));
-      railSteps.forEach((r, i) => r.classList.toggle("on", i <= idx));
-      root.style.setProperty("--ana-p", p.toFixed(3));
-      // Per-Layer-Enthüllung: Druckpresse wischt zwischen p 0.16–0.50 herein,
-      // der dunkle Schwärz-/Rauch-Layer zwischen 0.52–0.92 → der BG wird „überschrieben".
-      const c01 = (x: number) => Math.max(0, Math.min(1, x));
-      root.style.setProperty("--ana-pB", c01((p - 0.16) / 0.34).toFixed(3));
-      root.style.setProperty("--ana-pC", c01((p - 0.52) / 0.40).toFixed(3));
-    };
-
     // Hintergrund-Videos (nur Desktop/Pin): Quelle erst hier setzen → kein Mobile-Download.
-    const vids = gsap.utils.toArray<HTMLVideoElement>(".mg-ana-vid", root);
+    const vids = gsap.utils.toArray<HTMLVideoElement>(".mg-ana-vid", root); // [base, b, c]
     const VID_SRC = ["/landing/ana/ink.mp4", "/landing/ana/press.mp4", "/landing/ana/dark.mp4"];
     const startVideos = (play: boolean) => {
       vids.forEach((v, i) => {
         if (!v.getAttribute("src")) v.setAttribute("src", VID_SRC[i]);
-        if (play) v.play?.().catch(() => {});
+        if (play && i === 0) v.play?.().catch(() => {}); // nur die Basis dauerhaft; b/c steuert applyStep
         else { try { v.load(); } catch {} }
       });
     };
     const stopVideos = () => vids.forEach((v) => v.pause?.());
+    // Nur abspielen, wenn der Layer auch sichtbar ist → höchstens 2 Decodes gleichzeitig
+    // (sonst dekodieren 3 Vollbild-Videos permanent und würgen den Main-Thread ab).
+    const setPlay = (v: HTMLVideoElement | undefined, want: boolean) => {
+      if (!v) return;
+      if (want && v.paused) v.play?.().catch(() => {});
+      else if (!want && !v.paused) v.pause?.();
+    };
+
+    const c01 = (x: number) => Math.max(0, Math.min(1, x));
+    const smooth = (t: number) => t * t * (3 - 2 * t); // smoothstep → weicheres Auf-/Abblenden
+    let lastIdx = -1;
+
+    // teure DOM-Arbeit (Klassen/Text) NUR bei Schrittwechsel; pro Frame nur die billigen
+    // CSS-Variablen (opacity/transform = Compositor) + Video play/pause.
+    const applyStep = (idx: number, p: number) => {
+      if (idx !== lastIdx) {
+        doc.classList.toggle("ed-verb", idx >= 1);
+        doc.classList.toggle("ed-num", idx >= 2);
+        doc.classList.toggle("ed-quote", idx >= 3);
+        const s = STEPS[idx];
+        if (verEl) verEl.textContent = s.v;
+        if (timeEl) timeEl.textContent = s.t;
+        if (chipEl) {
+          chipEl.textContent = s.status.label;
+          chipEl.className = `mg-doc-status ${s.status.cls}`;
+        }
+        annos.forEach((a, i) => a.classList.toggle("on", i === idx));
+        railSteps.forEach((r, i) => r.classList.toggle("on", i <= idx));
+        lastIdx = idx;
+      }
+      // Per-Layer-Crossfade (gesmootht): Druckpresse blendet 0.14–0.48 ein,
+      // der Schwärz-/Rauch-Layer 0.50–0.90 → der BG wird „überschrieben".
+      const pB = smooth(c01((p - 0.14) / 0.34));
+      const pC = smooth(c01((p - 0.50) / 0.40));
+      root.style.setProperty("--ana-p", p.toFixed(3));
+      root.style.setProperty("--ana-pB", pB.toFixed(3));
+      root.style.setProperty("--ana-pC", pC.toFixed(3));
+      setPlay(vids[1], pB > 0.02);
+      setPlay(vids[2], pC > 0.02);
+    };
 
     const mm = gsap.matchMedia();
 
@@ -193,6 +211,7 @@ export default function Anatomy() {
           <video className="mg-ana-vid b" muted loop playsInline preload="none" />
           <video className="mg-ana-vid c" muted loop playsInline preload="none" />
           <span className="mg-ana-tint" />
+          <span className="mg-ana-warm" />
           <span className="mg-ana-vignette" />
         </div>
 

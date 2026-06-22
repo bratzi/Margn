@@ -428,43 +428,43 @@ html.lenis, html.lenis body { height: auto; }
    Beim Scrollen (--ana-p 0→1) wischt jede folgende Ebene per weicher Diagonal-Maske über
    die vorige. Stark abgedunkelt/entsättigt → atmosphärisch, ohne den Text zu stören. */
 .mg-ana-vid {
-  position: absolute; inset: -2%; width: 104%; height: 104%; object-fit: cover;
-  filter: saturate(0.6) contrast(1.05) brightness(0.46);
-  will-change: transform, opacity; pointer-events: none;
+  position: absolute; inset: -3%; width: 106%; height: 106%; object-fit: cover;
+  filter: saturate(0.62) contrast(1.06) brightness(0.46);
+  opacity: 0; will-change: opacity, transform; pointer-events: none;
+  backface-visibility: hidden; transform: translateZ(0);
 }
 @media (max-width: 860px) { .mg-ana-vid { display: none; } }
-/* Basis (Tinte) immer sichtbar, driftet/zoomt sanft mit dem Fortschritt → der BG „lebt". */
-.mg-ana-vid.base { transform: scale(calc(1.05 + var(--ana-p, 0) * 0.07)) translateY(calc(var(--ana-p, 0) * -1.6%)); }
-/* Druckpresse wischt diagonal herein (Maske fährt von rechts nach links auf, weiche Kante). */
+/* Crossfade NUR über opacity + sanfte Parallaxe/Zoom (beides Compositor-only — keine
+   Maskenanimation pro Frame, das war der Main-Thread-Killer). Statische Radial-Masken geben
+   den Ebenen eine organische, „eingepasste" Kante, sodass das Einblenden wie hereinblutende
+   Footage wirkt statt eines flachen Dissolves. */
+.mg-ana-vid.base {
+  opacity: 1;
+  transform: scale(calc(1.04 + var(--ana-p, 0) * 0.06)) translateY(calc(var(--ana-p, 0) * -1.4%));
+}
 .mg-ana-vid.b {
-  transform: scale(calc(1.09 - var(--ana-pB, 0) * 0.04));
-  -webkit-mask-image: linear-gradient(108deg, #000 40%, transparent 64%);
-          mask-image: linear-gradient(108deg, #000 40%, transparent 64%);
-  -webkit-mask-size: 260% 100%; mask-size: 260% 100%;
-  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-  -webkit-mask-position: calc((1 - var(--ana-pB, 0)) * 100%) 0; mask-position: calc((1 - var(--ana-pB, 0)) * 100%) 0;
+  opacity: var(--ana-pB, 0);
+  transform: scale(calc(1.12 - var(--ana-pB, 0) * 0.08)) translateX(calc((1 - var(--ana-pB, 0)) * 3.5%));
+  -webkit-mask-image: radial-gradient(145% 130% at 26% 42%, #000 50%, transparent 100%);
+          mask-image: radial-gradient(145% 130% at 26% 42%, #000 50%, transparent 100%);
 }
-/* Schwärzung/Rauch wischt aus dem anderen Winkel herein (zum Paywall-/Redaktions-Schluss). */
 .mg-ana-vid.c {
-  transform: scale(calc(1.11 - var(--ana-pC, 0) * 0.05));
-  -webkit-mask-image: linear-gradient(72deg, #000 36%, transparent 66%);
-          mask-image: linear-gradient(72deg, #000 36%, transparent 66%);
-  -webkit-mask-size: 260% 100%; mask-size: 260% 100%;
-  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-  -webkit-mask-position: calc((1 - var(--ana-pC, 0)) * 100%) 0; mask-position: calc((1 - var(--ana-pC, 0)) * 100%) 0;
+  opacity: var(--ana-pC, 0);
+  transform: scale(calc(1.12 - var(--ana-pC, 0) * 0.08)) translateX(calc((1 - var(--ana-pC, 0)) * -3.5%));
+  -webkit-mask-image: radial-gradient(150% 135% at 74% 60%, #000 48%, transparent 100%);
+          mask-image: radial-gradient(150% 135% at 74% 60%, #000 48%, transparent 100%);
 }
-/* Farbtönung: kühles Blau, das mit dem Edit-Fortschritt rot durchglüht (soft-light auf das Graubild). */
-.mg-ana-tint { position: absolute; inset: 0; mix-blend-mode: soft-light;
-  background:
-    radial-gradient(120% 90% at 40% 22%, rgba(110, 138, 255, 0.55), transparent 60%),
-    radial-gradient(130% 95% at 72% 116%, rgba(229, 103, 92, calc(0.12 + var(--ana-p, 0) * 0.7)), transparent 62%);
+/* Statische kühle Grundtönung (normaler Blend — kein mix-blend-mode pro Frame). */
+.mg-ana-tint { position: absolute; inset: 0;
+  background: radial-gradient(120% 95% at 38% 18%, rgba(96, 124, 255, 0.20), transparent 62%);
 }
-/* Vignette + Lesbarkeits-Abdunklung (Mitte frei für die Schlagzeile, Ränder/Unten dunkel). */
+/* Warmer Rot-Layer: NUR opacity wandert mit dem Edit-Fortschritt → Compositor-Crossfade. */
+.mg-ana-warm { position: absolute; inset: 0; opacity: var(--ana-p, 0); will-change: opacity;
+  background: radial-gradient(135% 100% at 70% 116%, rgba(229, 103, 92, 0.6), transparent 60%);
+}
+/* Statische Vignette/Abdunklung für Lesbarkeit (Mitte frei für die Schlagzeile). */
 .mg-ana-vignette { position: absolute; inset: 0;
-  background:
-    radial-gradient(120% 70% at 78% 118%, rgba(229, 103, 92, calc(0.05 + var(--ana-p, 0) * 0.2)), transparent 56%),
-    radial-gradient(135% 92% at 50% 40%, transparent 40%, rgba(4, 5, 8, 0.88) 100%);
-  transition: background 0.3s ease;
+  background: radial-gradient(135% 92% at 50% 40%, transparent 40%, rgba(4, 5, 8, 0.9) 100%);
 }
 .mg-anatomy-stage {
   min-height: 100svh; display: grid; align-content: center;
@@ -498,10 +498,11 @@ html.lenis, html.lenis body { height: auto; }
   border-radius: 18px;
   /* Rand wärmt sich mit dem Edit-Fortschritt (kühl → rot) */
   border: 1px solid color-mix(in oklab, var(--mg-line-2), var(--mg-red) calc(var(--ana-p, 0) * 55%));
+  /* etwas deckender statt backdrop-filter: blur — Letzteres rasterte bei laufendem Video
+     jeden Frame die ganze Karte neu (Main-Thread-Killer, Cursor-Lag/Freeze). */
   background:
-    linear-gradient(180deg, rgba(20, 22, 28, 0.72), rgba(12, 13, 17, 0.72));
+    linear-gradient(180deg, rgba(19, 21, 27, 0.86), rgba(11, 12, 16, 0.88));
   box-shadow: 0 40px 120px -30px rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(2px);
   transition: border-color 0.35s ease;
 }
 /* dünne Fortschrittskante oben — füllt sich mit der Story */
