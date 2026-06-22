@@ -1102,7 +1102,7 @@ function extractBodyFallback(html: string, url: string): { body: string } | null
 }
 
 // === Klassifikation der Seiten (Knoten im Baum) ===
-type Kind = "article" | "section" | "media" | "interactive" | "sponsored" | "service" | "unknown";
+type Kind = "article" | "section" | "media" | "interactive" | "sponsored" | "service" | "error" | "unknown";
 
 // Pfad in Segmente; das letzte Segment ist der Headline-Slug (enthält beliebige Wörter
 // wie "be-werbung", "advertorials", "fame-fighting-international") und darf NICHT die
@@ -1156,6 +1156,25 @@ function isVideoPage(html: string): boolean {
     if (wordCount < 200) return true;
   }
   return false;
+}
+
+// Fehler-/Statusseiten erkennen, die wie Artikel AUSSEHEN (URL passt aufs Artikel-Muster,
+// Titel + etwas Body vorhanden), aber keine sind: echte 404/410/5xx-Seiten (z.B. Tagesschau
+// „Ein Fehler ist aufgetreten (#404)" unter einer alten, umgezogenen URL) und Soft-404s
+// (Server liefert HTTP 200, der Inhalt ist aber eine Fehlerseite). VERLAGSÜBERGREIFEND:
+//  - Primär & autoritativ: der echte HTTP-Status (>=400 ⇒ kein Artikel, sprachunabhängig).
+//  - Sekundär: ein eng am Titelanfang verankertes Fehler-Muster für Soft-404s. Bewusst
+//    auf den <title>-ANFANG verankert, damit echte Schlagzeilen, die ein Fehler-Wort nur
+//    enthalten („…wäre ein Fehler", „…verweigert"), NICHT fälschlich rausfliegen.
+const ERROR_TITLE_RX = /^\s*(ein fehler ist aufgetreten|entschuldigung,? es ist ein fehler|fehler\s*[:#(]|404\b|410\b|error\s*\d{3}|seite (nicht|leider nicht|wurde nicht|konnte nicht) (gefunden|geladen|aufgerufen)|seite nicht verf[üu]gbar|diese seite (gibt es|existiert) nicht|page (not found|introuvable|non[\s-]?trouv)|not found|page indisponible|cette page n.?existe|zugriff verweigert|access denied|forbidden|just a moment|attention required)/i;
+function pageTitleTag(html: string): string | null {
+  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return m ? decodeEntities(m[1].replace(/\s+/g, " ").trim()) : null;
+}
+function isErrorPage(status: number, html: string): boolean {
+  if (status >= 400) return true;                  // echter 404/410/5xx → niemals Artikel
+  const t = pageTitleTag(html);
+  return !!t && ERROR_TITLE_RX.test(t);            // Soft-404 (HTTP 200 + Fehler-Titel)
 }
 
 // Sichere Klassifikation nach dem Rendern (zieht den Inhalt hinzu).
@@ -1290,26 +1309,32 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
     // markiert → der analyze-Job rendert sie nach.
     let html: string | null = null;
     let didRender = false;
+    let renderStatus = 0; // HTTP-Status des Renders (0 = nicht gerendert/HTTP-Fetch) → Fehlerseiten-Filter
     if (predicted === "article" || live) {
       // Discovery-Modus (kein Browser) ODER Render-Budget weg → Artikel bleibt
       // als Knoten (existiert bereits via ensureNodes/Sitemap/Feed); analyze rendert.
       if (!RENDER || !ctx || renders >= MAX_PAGES) return;
-      html = (await renderPage(ctx, s.url, live)).html;
+      const rr = await renderPage(ctx, s.url, live);
+      html = rr.html; renderStatus = rr.status;
       if (html) { renders++; didRender = true; }
     } else {
       html = await fetchHtml(s.url);
       if (html) fetches++;
       // Notnagel: link-arme JS-Seite → einmal rendern (nur wenn Browser + Budget da).
       if (RENDER && ctx && (!html || (s.depth < MAX_DEPTH && sameDomainLinks(html, src.base_url, s.url).length < 5)) && renders < MAX_PAGES) {
-        const r = (await renderPage(ctx, s.url)).html;
-        if (r) { html = r; renders++; didRender = true; }
+        const rr = await renderPage(ctx, s.url);
+        if (rr.html) { html = rr.html; renderStatus = rr.status; renders++; didRender = true; }
       }
     }
     if (!html) return;
     pages++;
 
     const links = s.depth < MAX_DEPTH ? sameDomainLinks(html, src.base_url, s.url) : [];
-    const { kind, article } = classifyRendered(s.url, html);
+    let { kind, article } = classifyRendered(s.url, html);
+    // Fehler-/Statusseite (echter 404/410/5xx oder Soft-404 mit Fehler-Titel) NIE als Artikel
+    // führen — verlagsübergreifend. Knoten als 'error' markieren, damit analyze ihn nicht
+    // erneut als Artikel rendert. Nur wenn wirklich gerendert (HTTP-Status ist sonst aussagelos).
+    if (didRender && isErrorPage(renderStatus, html)) { kind = "error"; article = null; }
     counts[kind] = (counts[kind] ?? 0) + 1;
 
     if (!DRY_RUN) {
@@ -1511,13 +1536,18 @@ async function analyzeBacklog() {
         const item = queue.shift();
         if (!item) break;
         try {
-          const { html } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
+          const { status, html } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
           if (html) {
-            // Selbst-Korrektur: stellt sich eine entdeckte „Artikel"-URL als Hub/Video heraus,
-            // nicht als Artikel führen.
-            const cls = classifyRendered(item.url, html);
-            if (cls.kind === "article") { await saveArticleFull(item.sid, item.url, html); ok++; }
-            else { await sb.from("pages").update({ kind: cls.kind }).eq("url", item.url); }
+            // Selbst-Korrektur: stellt sich eine entdeckte „Artikel"-URL als Fehlerseite/Hub/Video
+            // heraus, nicht als Artikel führen. Fehlerseiten (404/410/5xx, Soft-404) zuerst prüfen:
+            // sie sehen wie Artikel aus (Titel/Body da), liefern aber HTTP-Fehler → kein Speichern,
+            // Knoten als 'error' markieren → fällt aus dem Render-Pool (kein erneutes Re-Scannen).
+            if (isErrorPage(status, html)) { await sb.from("pages").update({ kind: "error" }).eq("url", item.url); }
+            else {
+              const cls = classifyRendered(item.url, html);
+              if (cls.kind === "article") { await saveArticleFull(item.sid, item.url, html); ok++; }
+              else { await sb.from("pages").update({ kind: cls.kind }).eq("url", item.url); }
+            }
           }
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
         if (++done2 % 50 === 0) console.log(`  ${done2}/${total} gerendert (${ok} Artikel)…`);
