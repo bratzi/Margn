@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-// Bei jeder Änderung der Default-Spaltenreihenfolge im Code erhöhen — invalidiert die
-// in localStorage gespeicherte (alte) Reihenfolge, sodass alle Clients den neuen
-// Default sehen. v2: „Änderungen" direkt hinter „Erfassung".
-const LAYOUT_VERSION = 2;
+// Bei jeder Änderung der Default-Spaltenreihenfolge ODER der Default-Breiten im Code
+// erhöhen — invalidiert die in localStorage gespeicherte (alte) Reihenfolge UND Breiten,
+// sodass alle Clients den neuen Default sehen. v3: Erfassung/Änderung + Datumswerte nach
+// vorn, Spaltenbreiten an die Werte angepasst (fit-Layout).
+const LAYOUT_VERSION = 3;
 
 export type Col<T> = {
   key: string;
@@ -36,12 +37,15 @@ function cmpTyped(a: unknown, b: unknown): number {
   return as.localeCompare(bs, "de", { numeric: true, sensitivity: "base" });
 }
 
-export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass, tableId, onSortChange, onRowClick }: {
+export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, rowClass, tableId, onSortChange, onRowClick, fit }: {
   columns: Col<T>[]; rows: T[]; rowKey: (r: T) => string | number; minWidth?: number; rowClass?: (r: T) => string; tableId?: string;
   // Wenn gesetzt: Sort-State wird nach oben delegiert (Server-Sort) — kein client-seitiges Umsortieren.
   onSortChange?: (s: { key: string; dir: "asc" | "desc" } | null) => void;
   // Klick auf eine Datenzeile (außerhalb von Links/Buttons/Inputs) — z.B. zur Detailseite.
   onRowClick?: (r: T) => void;
+  // fit: Spalten an ihre (Default-)Breiten anpassen statt auf 100 % zu strecken → kompakte
+  // Tabelle, horizontaler Scroll im Container statt auf der Seite. (minWidth wird ignoriert.)
+  fit?: boolean;
 }) {
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
@@ -68,10 +72,12 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
       // Bei Versionssprung (Default-Spaltenreihenfolge im Code geändert) die GESPEICHERTE
       // Reihenfolge verwerfen → neue Default-Anordnung greift. Breiten/versteckt/gepinnt
       // bleiben erhalten, sie hängen nicht an der Reihenfolge.
+      // Reihenfolge UND Breiten nur bei gleicher Version übernehmen — bei einem
+      // Versionssprung greift sonst der neue Default nicht (alte px-Breiten klebten).
       if (s.v === LAYOUT_VERSION && Array.isArray(s.order)) setOrder(s.order);
+      if (s.v === LAYOUT_VERSION && s.widths) setWidths(s.widths);
       if (Array.isArray(s.hidden)) setHidden(new Set(s.hidden));
       if (Array.isArray(s.pinned)) setPinned(new Set(s.pinned));
-      if (s.widths) setWidths(s.widths);
     } catch {}
   }, [lsKey]);
   useEffect(() => {
@@ -224,7 +230,7 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
         <span className="dt-count">{view.length} Zeilen{groups ? ` · ${groups.length} Gruppen` : ""}{hasFooter ? " · Σ aggregiert diese Seite" : ""}</span>
       </div>
       <div className="dt-scroll">
-        <table className="dt" style={{ minWidth }}>
+        <table className={`dt${fit ? " dt-fit" : ""}`} style={fit ? undefined : { minWidth }}>
           <thead>
             <tr>
               <th className="dt-num">#</th>
