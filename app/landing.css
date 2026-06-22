@@ -428,31 +428,32 @@ html.lenis, html.lenis body { height: auto; }
    Beim Scrollen (--ana-p 0→1) wischt jede folgende Ebene per weicher Diagonal-Maske über
    die vorige. Stark abgedunkelt/entsättigt → atmosphärisch, ohne den Text zu stören. */
 .mg-ana-vid {
-  position: absolute; inset: -3%; width: 106%; height: 106%; object-fit: cover;
+  /* großzügige Überdeckung (144 %), damit das kräftige Driften die Ränder nie freilegt */
+  position: absolute; inset: -22%; width: 144%; height: 144%; object-fit: cover;
   filter: saturate(0.62) contrast(1.06) brightness(0.46);
   opacity: 0; will-change: opacity, transform; pointer-events: none;
-  backface-visibility: hidden; transform: translateZ(0);
+  backface-visibility: hidden;
 }
 @media (max-width: 860px) { .mg-ana-vid { display: none; } }
-/* Crossfade NUR über opacity + sanfte Parallaxe/Zoom (beides Compositor-only — keine
-   Maskenanimation pro Frame, das war der Main-Thread-Killer). Statische Radial-Masken geben
-   den Ebenen eine organische, „eingepasste" Kante, sodass das Einblenden wie hereinblutende
-   Footage wirkt statt eines flachen Dissolves. */
+/* Crossfade NUR über opacity + Parallaxe/Zoom über transform (beides Compositor-only — keine
+   Maskenanimation pro Frame). Die Ebenen driften STARK und GEGENLÄUFIG über den ganzen Scroll
+   (--ana-p): Basis nach rechts, Mittel-Layer nach links, Schluss wieder nach rechts → spürbare
+   Tiefe/Bewegung. Statische Radial-Masken geben eine organische, „eingepasste" Kante. */
 .mg-ana-vid.base {
   opacity: 1;
-  transform: scale(calc(1.04 + var(--ana-p, 0) * 0.06)) translateY(calc(var(--ana-p, 0) * -1.4%));
+  transform: translate3d(calc(var(--ana-p, 0) * 13%), calc(var(--ana-p, 0) * 4%), 0) scale(calc(1.02 + var(--ana-p, 0) * 0.06));
 }
 .mg-ana-vid.b {
   opacity: var(--ana-pB, 0);
-  transform: scale(calc(1.12 - var(--ana-pB, 0) * 0.08)) translateX(calc((1 - var(--ana-pB, 0)) * 3.5%));
-  -webkit-mask-image: radial-gradient(145% 130% at 26% 42%, #000 50%, transparent 100%);
-          mask-image: radial-gradient(145% 130% at 26% 42%, #000 50%, transparent 100%);
+  transform: translate3d(calc(var(--ana-p, 0) * -16%), calc(var(--ana-p, 0) * -6%), 0) scale(calc(1.06 + var(--ana-p, 0) * 0.05));
+  -webkit-mask-image: radial-gradient(150% 135% at 26% 42%, #000 50%, transparent 100%);
+          mask-image: radial-gradient(150% 135% at 26% 42%, #000 50%, transparent 100%);
 }
 .mg-ana-vid.c {
   opacity: var(--ana-pC, 0);
-  transform: scale(calc(1.12 - var(--ana-pC, 0) * 0.08)) translateX(calc((1 - var(--ana-pC, 0)) * -3.5%));
-  -webkit-mask-image: radial-gradient(150% 135% at 74% 60%, #000 48%, transparent 100%);
-          mask-image: radial-gradient(150% 135% at 74% 60%, #000 48%, transparent 100%);
+  transform: translate3d(calc(var(--ana-p, 0) * 14%), calc(var(--ana-p, 0) * 7%), 0) scale(calc(1.06 + var(--ana-p, 0) * 0.05));
+  -webkit-mask-image: radial-gradient(155% 140% at 74% 60%, #000 48%, transparent 100%);
+          mask-image: radial-gradient(155% 140% at 74% 60%, #000 48%, transparent 100%);
 }
 /* Statische kühle Grundtönung (normaler Blend — kein mix-blend-mode pro Frame). */
 .mg-ana-tint { position: absolute; inset: 0;

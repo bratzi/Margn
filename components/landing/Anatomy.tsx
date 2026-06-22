@@ -86,7 +86,7 @@ export default function Anatomy() {
 
     // Hintergrund-Videos (nur Desktop/Pin): Quelle erst hier setzen → kein Mobile-Download.
     const vids = gsap.utils.toArray<HTMLVideoElement>(".mg-ana-vid", root); // [base, b, c]
-    const VID_SRC = ["/landing/ana/ink.mp4", "/landing/ana/press.mp4", "/landing/ana/dark.mp4"];
+    const VID_SRC = ["/landing/ana/ink.mp4", "/landing/ana/mid.mp4", "/landing/ana/dark.mp4"];
     const startVideos = (play: boolean) => {
       vids.forEach((v, i) => {
         if (!v.getAttribute("src")) v.setAttribute("src", VID_SRC[i]);
@@ -204,7 +204,7 @@ export default function Anatomy() {
     <section className="mg-anatomy" id="anatomie" ref={rootRef}>
       <div className="mg-anatomy-pin">
         <div className="mg-ana-bg" aria-hidden>
-          {/* Drei getönte Clips (Tinte → Druckpresse → Schwärzung/Rauch). Quelle wird erst auf
+          {/* Drei getönte Clips (Tinte → marmorierte Tinte → Schwärzung/Rauch). Quelle wird erst auf
               dem Desktop per JS gesetzt; beim Scrollen wischt jeder folgende per weicher Maske
               über den vorigen — der Hintergrund wird „überschrieben" wie der Artikel. */}
           <video className="mg-ana-vid base" muted loop playsInline preload="none" />
