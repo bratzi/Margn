@@ -567,7 +567,7 @@ table.dt { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .pager button:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ---------- Detail ---------- */
-.detail { max-width: 1240px; }
+.detail { max-width: none; }
 
 /* 2-spaltiges Detail-Layout: LINKS (breit, 2/3) das Stück selbst — Bild, Änderungsverlauf,
    Eckdaten, Scan-Verlauf, Schlagwörter, Autoren, Seitenbaum. RECHTS (schmal, 1/3) margns Analyse —

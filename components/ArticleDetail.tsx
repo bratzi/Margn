@@ -244,33 +244,13 @@ export default function ArticleDetail({ id }: { id: number }) {
           <div className="cat-chips">{categories.map((x) => <span key={x} className="cat-chip">{x}</span>)}</div>
         </div>
       )}
-      {/* 2-spaltig: LINKS (2/3) der Artikel selbst — Bild, Verlauf, Eckdaten, Scan, Schlagwörter,
-          Autoren, Seitenbaum. RECHTS (1/3) margns Analyse — Link, Radar, Einordnung, Profil, Echo. */}
+      {/* 2-spaltig: LINKS (2/3) der Artikel selbst — Bild, Eckdaten, Scan, Schlagwörter, Autoren,
+          Seitenbaum, dann GANZ UNTEN der Änderungsverlauf. RECHTS (1/3) margns Analyse — Link,
+          Radar, Einordnung, Profil, Echo. */}
       <div className="d-grid">
         {/* Linke Spalte (breit): das Stück + seine Fakten */}
         <aside className="d-aside">
           {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
-
-          {/* Kernstück: der Änderungsverlauf */}
-          <DL h="Änderungsverlauf">
-            <div className="chist">
-              <ChistAnchor kind="pub"
-                label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
-                time={a.published_at ?? a.first_seen}
-                sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
-              {snaps.length === 0 ? (
-                <div className="chist-none">
-                  Seither <strong>keine Änderung erfasst</strong> — Überschrift, Text, Datum, Teaser,
-                  Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
-                  erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
-                </div>
-              ) : (
-                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
-              )}
-              <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
-                sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
-            </div>
-          </DL>
 
           {/* Eckdaten (Zeit/Umfang/Sprache) */}
           <DL h="Eckdaten">
@@ -320,6 +300,27 @@ export default function ArticleDetail({ id }: { id: number }) {
               {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
             </DL>
           )}
+
+          {/* Änderungsverlauf — ganz unten links */}
+          <DL h="Änderungsverlauf">
+            <div className="chist">
+              <ChistAnchor kind="pub"
+                label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
+                time={a.published_at ?? a.first_seen}
+                sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
+              {snaps.length === 0 ? (
+                <div className="chist-none">
+                  Seither <strong>keine Änderung erfasst</strong> — Überschrift, Text, Datum, Teaser,
+                  Ressort, Paywall-Status und Autor sind unverändert. Sobald margn etwas Stilles entdeckt,
+                  erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
+                </div>
+              ) : (
+                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
+              )}
+              <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
+                sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
+            </div>
+          </DL>
         </aside>
 
         {/* Rechte Spalte (schmal): Link + margns Analyse */}
