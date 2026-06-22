@@ -390,6 +390,8 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 /* Abs/Rel Schalter */
 .trf-mode-seg { margin-left: 4px; }
 .seg-xs button { padding: 2px 8px; font-size: 11px; }
+/* Zeitachsen-Umschalter (Veröffentlicht ↔ Zuletzt gesehen) — längere Labels nicht umbrechen. */
+.trf-axissel button { white-space: nowrap; }
 
 /* ---------- Themen vertikal (gestapelte Säulen) ---------- */
 .topic-vchart { display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; padding: 8px 0 4px; min-height: 280px; }

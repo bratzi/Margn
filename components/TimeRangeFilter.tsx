@@ -165,7 +165,7 @@ export default function TimeRangeFilter() {
       <div className="trf-resize" onPointerDown={(e) => start("resize", e)} title="Höhe ziehen"><span /></div>
       <div className="trf-head">
         <div className="trf-title">{f.timeAxis === "seen" ? "Zeitraum · Zuletzt gesehen" : "Veröffentlichungs-Zeitraum"} <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
-        <div className="seg seg-xs trf-axis">
+        <div className="seg seg-xs trf-axissel">
           <button className={f.timeAxis === "published" ? "on" : ""} onClick={() => f.setTimeAxis("published")} title="Nach Veröffentlichungsdatum des Verlags">Veröffentlicht</button>
           <button className={f.timeAxis === "seen" ? "on" : ""} onClick={() => f.setTimeAxis("seen")} title="Nach letztem Scan — zeigt alles, was im Zeitraum online/gescannt war (auch früher veröffentlicht)">Zuletzt gesehen</button>
         </div>
