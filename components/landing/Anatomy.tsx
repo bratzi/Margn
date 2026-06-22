@@ -99,7 +99,24 @@ export default function Anatomy() {
       annos.forEach((a, i) => a.classList.toggle("on", i === idx));
       railSteps.forEach((r, i) => r.classList.toggle("on", i <= idx));
       root.style.setProperty("--ana-p", p.toFixed(3));
+      // Per-Layer-Enthüllung: Druckpresse wischt zwischen p 0.16–0.50 herein,
+      // der dunkle Schwärz-/Rauch-Layer zwischen 0.52–0.92 → der BG wird „überschrieben".
+      const c01 = (x: number) => Math.max(0, Math.min(1, x));
+      root.style.setProperty("--ana-pB", c01((p - 0.16) / 0.34).toFixed(3));
+      root.style.setProperty("--ana-pC", c01((p - 0.52) / 0.40).toFixed(3));
     };
+
+    // Hintergrund-Videos (nur Desktop/Pin): Quelle erst hier setzen → kein Mobile-Download.
+    const vids = gsap.utils.toArray<HTMLVideoElement>(".mg-ana-vid", root);
+    const VID_SRC = ["/landing/ana/ink.mp4", "/landing/ana/press.mp4", "/landing/ana/dark.mp4"];
+    const startVideos = (play: boolean) => {
+      vids.forEach((v, i) => {
+        if (!v.getAttribute("src")) v.setAttribute("src", VID_SRC[i]);
+        if (play) v.play?.().catch(() => {});
+        else { try { v.load(); } catch {} }
+      });
+    };
+    const stopVideos = () => vids.forEach((v) => v.pause?.());
 
     const mm = gsap.matchMedia();
 
@@ -109,11 +126,13 @@ export default function Anatomy() {
       doc.classList.remove("is-static");
 
       if (reduced) {
+        startVideos(false); // erstes Bild zeigen, nicht abspielen
         applyStep(3, 1);
         if (prog) gsap.set(prog, { scaleY: 1 });
         return;
       }
 
+      startVideos(true);
       applyStep(0, 0);
       const tl = gsap.timeline({
         scrollTrigger: {
@@ -139,6 +158,7 @@ export default function Anatomy() {
       if (prog) tl.fromTo(prog, { scaleY: 0 }, { scaleY: 1, ease: "none", duration: 3 }, 0);
 
       return () => {
+        stopVideos();
         doc.classList.remove("ed-verb", "ed-num", "ed-quote");
         railSteps.forEach((r) => r.classList.remove("on"));
       };
@@ -166,6 +186,13 @@ export default function Anatomy() {
     <section className="mg-anatomy" id="anatomie" ref={rootRef}>
       <div className="mg-anatomy-pin">
         <div className="mg-ana-bg" aria-hidden>
+          {/* Drei getönte Clips (Tinte → Druckpresse → Schwärzung/Rauch). Quelle wird erst auf
+              dem Desktop per JS gesetzt; beim Scrollen wischt jeder folgende per weicher Maske
+              über den vorigen — der Hintergrund wird „überschrieben" wie der Artikel. */}
+          <video className="mg-ana-vid base" muted loop playsInline preload="none" />
+          <video className="mg-ana-vid b" muted loop playsInline preload="none" />
+          <video className="mg-ana-vid c" muted loop playsInline preload="none" />
+          <span className="mg-ana-tint" />
           <span className="mg-ana-vignette" />
         </div>
 

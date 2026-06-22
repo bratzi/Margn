@@ -424,22 +424,46 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------- Bühne: dasselbe Blueprint-Raster wie die anderen Sektionen, hinter der Karte ---------- */
 .mg-ana-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .mg-anatomy-stage { position: relative; z-index: 1; }
-/* Anatomie → vertikale Linien (Zeitungsspalten), vertikal maskiert. Liegt unter Vignette/Karte
-   → rahmt die Bühne, ohne den Text zu stören. */
-.mg-ana-bg::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background-image:
-    linear-gradient(90deg, rgba(159, 178, 255, 0.06) 1px, transparent 1px),    /* Major V */
-    linear-gradient(90deg, rgba(159, 178, 255, 0.026) 1px, transparent 1px);   /* Minor V */
-  background-size: 96px 100%, 32px 100%;
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
+/* ---------- Drei getönte Video-Ebenen: Tinte → Druckpresse → Schwärzung ----------
+   Beim Scrollen (--ana-p 0→1) wischt jede folgende Ebene per weicher Diagonal-Maske über
+   die vorige. Stark abgedunkelt/entsättigt → atmosphärisch, ohne den Text zu stören. */
+.mg-ana-vid {
+  position: absolute; inset: -2%; width: 104%; height: 104%; object-fit: cover;
+  filter: saturate(0.6) contrast(1.05) brightness(0.46);
+  will-change: transform, opacity; pointer-events: none;
 }
-/* Vignette + dezente Wärme, die mit dem Edit-Fortschritt erwacht (kühl → rot). */
+@media (max-width: 860px) { .mg-ana-vid { display: none; } }
+/* Basis (Tinte) immer sichtbar, driftet/zoomt sanft mit dem Fortschritt → der BG „lebt". */
+.mg-ana-vid.base { transform: scale(calc(1.05 + var(--ana-p, 0) * 0.07)) translateY(calc(var(--ana-p, 0) * -1.6%)); }
+/* Druckpresse wischt diagonal herein (Maske fährt von rechts nach links auf, weiche Kante). */
+.mg-ana-vid.b {
+  transform: scale(calc(1.09 - var(--ana-pB, 0) * 0.04));
+  -webkit-mask-image: linear-gradient(108deg, #000 40%, transparent 64%);
+          mask-image: linear-gradient(108deg, #000 40%, transparent 64%);
+  -webkit-mask-size: 260% 100%; mask-size: 260% 100%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: calc((1 - var(--ana-pB, 0)) * 100%) 0; mask-position: calc((1 - var(--ana-pB, 0)) * 100%) 0;
+}
+/* Schwärzung/Rauch wischt aus dem anderen Winkel herein (zum Paywall-/Redaktions-Schluss). */
+.mg-ana-vid.c {
+  transform: scale(calc(1.11 - var(--ana-pC, 0) * 0.05));
+  -webkit-mask-image: linear-gradient(72deg, #000 36%, transparent 66%);
+          mask-image: linear-gradient(72deg, #000 36%, transparent 66%);
+  -webkit-mask-size: 260% 100%; mask-size: 260% 100%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: calc((1 - var(--ana-pC, 0)) * 100%) 0; mask-position: calc((1 - var(--ana-pC, 0)) * 100%) 0;
+}
+/* Farbtönung: kühles Blau, das mit dem Edit-Fortschritt rot durchglüht (soft-light auf das Graubild). */
+.mg-ana-tint { position: absolute; inset: 0; mix-blend-mode: soft-light;
+  background:
+    radial-gradient(120% 90% at 40% 22%, rgba(110, 138, 255, 0.55), transparent 60%),
+    radial-gradient(130% 95% at 72% 116%, rgba(229, 103, 92, calc(0.12 + var(--ana-p, 0) * 0.7)), transparent 62%);
+}
+/* Vignette + Lesbarkeits-Abdunklung (Mitte frei für die Schlagzeile, Ränder/Unten dunkel). */
 .mg-ana-vignette { position: absolute; inset: 0;
   background:
-    radial-gradient(120% 70% at 78% 116%, rgba(229, 103, 92, calc(0.05 + var(--ana-p, 0) * 0.16)), transparent 56%),
-    radial-gradient(120% 80% at 50% 46%, transparent 50%, rgba(4, 5, 8, 0.82) 100%);
+    radial-gradient(120% 70% at 78% 118%, rgba(229, 103, 92, calc(0.05 + var(--ana-p, 0) * 0.2)), transparent 56%),
+    radial-gradient(135% 92% at 50% 40%, transparent 40%, rgba(4, 5, 8, 0.88) 100%);
   transition: background 0.3s ease;
 }
 .mg-anatomy-stage {
