@@ -1,7 +1,14 @@
 name: pipeline
 on:
   schedule:
-    - cron: "23 * * * *"
+    # Drei Slots pro Stunde auf unauffaelligen Minuten (weg vom ueberlasteten :00).
+    # GitHubs Scheduler verwirft/verzoegert geplante Trigger -> mehrere Slots fangen
+    # einen verworfenen ab. Das Gate (Job unten) sorgt dafuer, dass trotzdem nur EIN
+    # echter Lauf pro Stunde passiert (Dedupe ueber articles.last_seen).
+    - cron: "7 * * * *"
+    - cron: "27 * * * *"
+    - cron: "47 * * * *"
+    # Woechentlicher Struktur-Lauf (Seitenbaum) - laeuft immer, am Gate vorbei.
     - cron: "23 5 * * 0"
   workflow_dispatch:
     inputs:
@@ -16,7 +23,57 @@ concurrency:
   group: pipeline
   cancel-in-progress: false
 jobs:
+  # Leichtgewichtiges Gate: entscheidet, ob die schwere Pipeline laeuft.
+  # - Manuell / Push-Trigger / woechentlicher Struktur-Lauf: immer durchlassen.
+  # - Stuendlicher Schedule: nur laufen, wenn der letzte Scan >= GATE_MINUTES her ist.
+  #   articles.last_seen wird frueh im Lauf hochgezogen (Discovery upsertet sofort),
+  #   misst also ~"Zeit seit letztem Lauf-Start". So fangen die 3 Slots GitHubs
+  #   verworfene Trigger ab, ohne 3x/Stunde zu rennen.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    env:
+      GATE_MINUTES: "45"
+    steps:
+      - id: decide
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          # Nicht-stuendliche Ausloeser immer durchlassen.
+          if [ "$EVENT_NAME" != "schedule" ] || [ "$SCHEDULE" = "23 5 * * 0" ]; then
+            echo "Trigger=$EVENT_NAME schedule='$SCHEDULE' -> laeuft (kein Gate)."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Stuendlicher Schedule: Frische des letzten Scans pruefen.
+          last=$(curl -fsS \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            "$SUPABASE_URL/rest/v1/articles?select=last_seen&order=last_seen.desc.nullslast&limit=1" \
+            | jq -r '.[0].last_seen // empty') || last=""
+          if [ -z "$last" ]; then
+            echo "Kein last_seen lesbar -> sicherheitshalber laufen."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 60 ))
+          echo "Letzter Scan vor ${age} min (last_seen=$last), Schwelle=${GATE_MINUTES} min."
+          if [ "$age" -ge "$GATE_MINUTES" ]; then
+            echo "-> Faellig, Pipeline laeuft."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "-> Frisch genug, Lauf uebersprungen (Dedupe)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   pipeline:
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -41,7 +98,7 @@ jobs:
         working-directory: scraper
 
       - name: discover
-        if: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
@@ -56,7 +113,7 @@ jobs:
           CRAWL_TIME_BUDGET_MS: "180000"
 
       - name: render
-        if: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
@@ -70,7 +127,7 @@ jobs:
           CRAWL_CONCURRENCY: "10"
 
       - name: structure
-        if: ${{ github.event.schedule == '23 5 * * 0' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'structure') }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 5 * * 0') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'structure') }}
         run: npm run scrape
         working-directory: scraper
         env:
