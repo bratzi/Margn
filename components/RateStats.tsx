@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS, TOPIC_COLORS } from "@/components/TimeRangeFilter";
-import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
+import { axisTime, berlinDayBoundsUTC, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 import { topicLabel } from "@/lib/topics";
 
 type Unit = "minute" | "hour" | "day" | "week";
@@ -80,8 +80,8 @@ export default function RateStats() {
     window.addEventListener("pointerup", onUp);
   };
 
-  const fromIso = f.days[f.rangeIdx.from] + "T00:00:00Z";
-  const toIso = f.days[f.rangeIdx.to] + "T23:59:59Z";
+  const fromIso = berlinDayBoundsUTC(f.days[f.rangeIdx.from]).from;
+  const toIso = berlinDayBoundsUTC(f.days[f.rangeIdx.to]).to;
   const spanDays = f.rangeIdx.to - f.rangeIdx.from + 1;
   const baseAutoUnit: Unit = spanDays <= 3 ? "hour" : spanDays <= 45 ? "day" : "week";
   // Im Dynamisch-Modus darf das Mausrad die Einheit verschieben (override), sonst zählt manual.
@@ -137,7 +137,7 @@ export default function RateStats() {
       for (const r of f.corpus) {
         if (!act.has(r.source_id)) continue;
         if (!match(r)) continue;
-        const t = effTime(r);
+        const t = axisTime(r, f.timeAxis);
         if (!t) continue;
         const k = truncTo(t, unit).toISOString();
         const topic = r.topic ?? "sonstiges";
@@ -160,7 +160,7 @@ export default function RateStats() {
     for (const r of f.corpus) {
       if (!act.has(r.source_id)) continue;
       if (!match(r)) continue;
-      const t = effTime(r);
+      const t = axisTime(r, f.timeAxis);
       if (!t) continue;
       const k = truncTo(t, unit).toISOString();
       if (!map.has(r.source_id)) map.set(r.source_id, new Map());
@@ -173,7 +173,7 @@ export default function RateStats() {
       vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0),
     }));
     return { series: ser, total: tot };
-  }, [chartMode, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso,
+  }, [chartMode, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
       f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
       f.subPats.join("|"), f.kwIdSet]);
 
@@ -422,7 +422,7 @@ export default function RateStats() {
   return (
     <>
       <h2 className="section-h" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        Publikationen über Zeit
+        {f.timeAxis === "seen" ? "Gesehen über Zeit" : "Publikationen über Zeit"}
         <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span>
         <div className="seg seg-xs" style={{ marginLeft: "auto" }}>
           <button className={chartMode === "publishers" ? "on" : ""} onClick={() => setChartMode("publishers")} title="Linien je Verleger">Verleger</button>
@@ -443,7 +443,7 @@ export default function RateStats() {
       <div className="panel pad" style={{ position: "relative" }}>
         <div className="trf-resize" onPointerDown={startResize} title="Höhe ziehen" style={{ cursor: resizing ? "row-resize" : undefined }}><span /></div>
         {!total ? (
-          <p className="faint" style={{ fontSize: 13 }}>Keine veröffentlichten Artikel im gewählten Zeitraum.</p>
+          <p className="faint" style={{ fontSize: 13 }}>Keine Artikel im gewählten Zeitraum.</p>
         ) : (
           <>
             <div className="rate-legend">

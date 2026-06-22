@@ -25,26 +25,68 @@ export type CorpusRow = {
   id: number; article_id: number | null; source_id: number; url: string;
   ptype: string; topic: string | null; author_status: string | null;
   paywalled: boolean | null; language: string | null;
-  published_at: string | null; discovered_at: string | null;
+  published_at: string | null; discovered_at: string | null; last_seen: string | null;
   word_count: number | null; revision_count: number | null; edit_count: number | null;
   scan_count: number | null;
 };
 
 export const CORPUS_COLS =
   "id,article_id,source_id,url,ptype,topic,author_status,paywalled,language," +
-  "published_at,discovered_at,word_count,revision_count,edit_count,scan_count";
+  "published_at,discovered_at,last_seen,word_count,revision_count,edit_count,scan_count";
+
+// Zeitachse: nach welchem Zeitstempel gefiltert/gebucketet wird.
+//  - "published": wann der Verlag den Artikel veröffentlicht hat (Publikations-Timing).
+//  - "seen":      wann margn den Artikel zuletzt gescannt/online gesehen hat (alles, was HEUTE
+//                 online ist — auch früher veröffentlichte Artikel). Das ist die Antwort auf
+//                 „warum sehe ich für heute nur wenige?": die meisten sind älter veröffentlicht.
+export type TimeAxis = "published" | "seen";
+export const TIME_AXIS_LABEL: Record<TimeAxis, string> = { published: "Veröffentlicht", seen: "Zuletzt gesehen" };
 
 // Der Teil des Filter-Contexts, den beide Implementierungen brauchen.
 export type FilterSnapshot = {
   status: string; paywall: string; atype: string; author: string;
   topics: string[]; lang: string; changed: string; depth: string;
-  rangeFrom: string | null; rangeTo: string | null;
+  rangeFrom: string | null; rangeTo: string | null; timeAxis: TimeAxis;
 };
 
+type TimedRow = { published_at: string | null; discovered_at: string | null; last_seen?: string | null };
 // Effektive Zeit eines Artikels: Verlagsdatum, sonst erster Scan.
 // (Sonst fallen Artikel ohne published_at aus jedem Zeitfilter — bei Bild/Spiegel viele.)
-export const effTime = (r: { published_at: string | null; discovered_at: string | null }) =>
-  r.published_at ?? r.discovered_at;
+export const effTime = (r: TimedRow) => r.published_at ?? r.discovered_at;
+// Achsen-abhängige Zeit: "seen" → letzter Scan, sonst Verlagsdatum (jeweils mit Scan-Fallback).
+export const axisTime = (r: TimedRow, axis: TimeAxis) =>
+  axis === "seen" ? (r.last_seen ?? r.discovered_at) : (r.published_at ?? r.discovered_at);
+
+// ---------- Zeitzone: Tage & Tagesgrenzen in Europe/Berlin statt UTC ----------
+// Vorher liefen alle Tagesgrenzen über UTC-Mitternacht → „heute" begann für DE-Nutzer erst um
+// 02:00 nachts. Jetzt: Tage und Range-Grenzen in Berlin-Zeit, DST-sicher via Intl.
+const BERLIN_TZ = "Europe/Berlin";
+// "YYYY-MM-DD" des Zeitpunkts in Berlin.
+export function berlinDate(d: Date | string): string {
+  return (typeof d === "string" ? new Date(d) : d).toLocaleDateString("en-CA", { timeZone: BERLIN_TZ });
+}
+// Offset (ms) Berlin gegenüber UTC zum Zeitpunkt `date`.
+function berlinOffsetMs(date: Date): number {
+  const dtf = new Intl.DateTimeFormat("en-US", { timeZone: BERLIN_TZ, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const m: Record<string, string> = {};
+  for (const p of dtf.formatToParts(date)) m[p.type] = p.value;
+  const hour = m.hour === "24" ? 0 : +m.hour;
+  return Date.UTC(+m.year, +m.month - 1, +m.day, hour, +m.minute, +m.second) - date.getTime();
+}
+// UTC-ISO-Grenzen eines Berlin-Tages "YYYY-MM-DD": from = 00:00 Berlin, to = 23:59:59 Berlin.
+export function berlinDayBoundsUTC(dateStr: string): { from: string; to: string } {
+  const base = new Date(dateStr + "T00:00:00Z");
+  const from = new Date(base.getTime() - berlinOffsetMs(base));
+  return { from: from.toISOString(), to: new Date(from.getTime() + 86400000 - 1000).toISOString() };
+}
+// Die letzten n Berlin-Tage (älteste zuerst). Mittag-Anker → DST-sicher.
+export function makeBerlinDays(n: number): string[] {
+  const out: string[] = [];
+  let cur = new Date(berlinDate(new Date()) + "T12:00:00Z");
+  for (let i = 0; i < n; i++) { out.unshift(berlinDate(cur)); cur = new Date(cur.getTime() - 86400000); }
+  return out;
+}
 
 // ---------- SERVER-Seite (Artikel-Tabelle) ----------
 // Spiegelbild von makeMatcher — Änderungen immer in BEIDEN Funktionen nachziehen!
@@ -66,7 +108,11 @@ export function applyServerFilters(q: any, f: FilterSnapshot, subPats: string[],
   if (f.depth === "kurz") q = q.gt("word_count", 0).lt("word_count", 300);
   else if (f.depth === "mittel") q = q.gte("word_count", 300).lte("word_count", 900);
   else if (f.depth === "lang") q = q.gt("word_count", 900);
-  if (f.rangeFrom && f.rangeTo) {
+  if (f.timeAxis === "seen") {
+    // Scan-Achse: last_seen ist praktisch immer gesetzt → einfacher Bereichsfilter.
+    if (f.rangeFrom) q = q.gte("last_seen", f.rangeFrom);
+    if (f.rangeTo) q = q.lte("last_seen", f.rangeTo);
+  } else if (f.rangeFrom && f.rangeTo) {
     q = q.or(`and(published_at.gte.${f.rangeFrom},published_at.lte.${f.rangeTo}),and(published_at.is.null,discovered_at.gte.${f.rangeFrom},discovered_at.lte.${f.rangeTo})`);
   } else if (f.rangeFrom) {
     q = q.or(`published_at.gte.${f.rangeFrom},and(published_at.is.null,discovered_at.gte.${f.rangeFrom})`);
@@ -109,7 +155,7 @@ export function makeMatcher(
     else if (f.depth === "mittel") { if (r.word_count == null || r.word_count < 300 || r.word_count > 900) return false; }
     else if (f.depth === "lang") { if (r.word_count == null || r.word_count <= 900) return false; }
     if (!skip.time && (fromMs !== null || toMs !== null)) {
-      const t = effTime(r);
+      const t = axisTime(r, f.timeAxis);
       if (!t) return false;
       const ms = Date.parse(t);
       if (fromMs !== null && ms < fromMs) return false;
@@ -129,6 +175,6 @@ export function snapshotOf(f: FilterSnapshot & Record<string, unknown>): FilterS
   return {
     status: f.status, paywall: f.paywall, atype: f.atype, author: f.author,
     topics: f.topics, lang: f.lang, changed: f.changed, depth: f.depth,
-    rangeFrom: f.rangeFrom, rangeTo: f.rangeTo,
+    rangeFrom: f.rangeFrom, rangeTo: f.rangeTo, timeAxis: (f.timeAxis as TimeAxis) ?? "published",
   };
 }

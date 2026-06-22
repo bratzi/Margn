@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
-import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
+import { axisTime, berlinDate, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
 // „Auf einen Blick" — verdichtete Headline-Metriken mit Kontext.
 // Zählt über den gemeinsamen Corpus mit dem GLEICHEN Prädikat wie die Artikel-Tabelle
@@ -50,8 +50,8 @@ export default function PulseBar() {
       bySource.set(r.source_id, (bySource.get(r.source_id) ?? 0) + 1);
       const t = r.topic ?? "sonstiges";
       byTopic.set(t, (byTopic.get(t) ?? 0) + 1);
-      const et = effTime(r);
-      if (et) { const d = et.slice(0, 10); dayBuckets.set(d, (dayBuckets.get(d) ?? 0) + 1); }
+      const et = axisTime(r, f.timeAxis);
+      if (et) { const d = berlinDate(et); dayBuckets.set(d, (dayBuckets.get(d) ?? 0) + 1); }
     }
     const daysSorted = [...dayBuckets.keys()].sort();
     const last14 = daysSorted.slice(-14);
@@ -72,7 +72,7 @@ export default function PulseBar() {
       topTopic: topTopic ? { key: topTopic[0], n: topTopic[1], sh: pct(topTopic[1], n) } : null,
     };
   }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
-      f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo,
+      f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.timeAxis,
       f.subPats.join("|"), f.kwIdSet, nameById]);
 
   if (!f.corpusReady) {

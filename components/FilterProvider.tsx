@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
 import { fetchAllRows } from "@/lib/pgFetch";
-import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, type CorpusRow } from "@/lib/filterCorpus";
+import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, makeBerlinDays, berlinDayBoundsUTC, type CorpusRow, type TimeAxis } from "@/lib/filterCorpus";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
@@ -68,11 +68,6 @@ function urlRubric(url: string): { raw: string; label: string } | null {
 }
 
 const WINDOW_OPTS = [7, 14, 30, 60, 90] as const;
-function makeDays(n: number): string[] {
-  const out: string[] = []; const d = new Date(); d.setUTCHours(0, 0, 0, 0);
-  for (let i = n - 1; i >= 0; i--) { const x = new Date(d); x.setUTCDate(x.getUTCDate() - i); out.push(x.toISOString().slice(0, 10)); }
-  return out;
-}
 export { WINDOW_OPTS };
 
 type Ctx = {
@@ -92,6 +87,8 @@ type Ctx = {
   depth: string; setDepth: (v: string) => void;
   // Zeitfenster-Breite (Tage) — per Preset wählbar (7/14/30/60/90)
   windowDays: number; setWindowDays: (n: number) => void;
+  // Zeitachse: nach Veröffentlichung ODER nach letztem Scan ("zuletzt gesehen") filtern/bucketen
+  timeAxis: TimeAxis; setTimeAxis: (a: TimeAxis) => void;
   // Alle Filter auf Ausgangszustand
   resetAll: () => void;
   topicOpts: Opt[]; keywordOpts: Opt[]; subOpts: SubOpt[];
@@ -138,11 +135,15 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [windowDays, _setWindowDays] = useState(60);
   // setWindowDays: Fensterbreite wechseln und Slider + Pinpoint sofort zurücksetzen.
   const setWindowDays = (n: number) => { _setWindowDays(n); setRangeIdx({ from: 0, to: n - 1 }); setPinpoint(null); };
+  // Zeitachse (Veröffentlicht ↔ Zuletzt gesehen). Achsenwechsel hebt einen Pinpoint auf,
+  // damit kein Chart-Klick mit der falschen Zeitsemantik hängen bleibt.
+  const [timeAxis, _setTimeAxis] = useState<TimeAxis>("published");
+  const setTimeAxis = (a: TimeAxis) => { _setTimeAxis(a); setPinpoint(null); };
   const [topicOpts, setTopicOpts] = useState<Opt[]>([]);
   const [keywordOpts, setKeywordOpts] = useState<Opt[]>([]);
   const [ready, setReady] = useState(false);
 
-  const days = useMemo(() => makeDays(windowDays), [windowDays]);
+  const days = useMemo(() => makeBerlinDays(windowDays), [windowDays]);
   const [trfOpen, setTrfOpen] = useState(true);
   const [rangeIdx, setRangeIdx] = useState<{ from: number; to: number }>({ from: 0, to: 59 });
   const [pinpoint, setPinpoint] = useState<Pin | null>(null);
@@ -152,8 +153,8 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const safeTo = Math.min(rangeIdx.to, days.length - 1);
   // Pinpoint (Chart-Klick) hat Vorrang über den Tages-Range für die Tabellen-Abfrage.
   // Rechtes Ende am Fensterrand → kein rangeTo (keine künstliche Zukunfts-Abschneidung).
-  const rangeFrom = pinpoint ? pinpoint.from : days[safeFrom] + "T00:00:00Z";
-  const rangeTo = pinpoint ? pinpoint.to : (safeTo === days.length - 1 ? null : days[safeTo] + "T23:59:59Z");
+  const rangeFrom = pinpoint ? pinpoint.from : berlinDayBoundsUTC(days[safeFrom]).from;
+  const rangeTo = pinpoint ? pinpoint.to : (safeTo === days.length - 1 ? null : berlinDayBoundsUTC(days[safeTo]).to);
 
   const savedActiveRef = useRef<number[] | null>(null);
 
@@ -178,6 +179,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (f.lang) setLang(f.lang);
       if (f.changed) setChanged(f.changed);
       if (f.depth) setDepth(f.depth);
+      if (f.timeAxis === "published" || f.timeAxis === "seen") _setTimeAxis(f.timeAxis);
       if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
       // windowDays zuerst setzen (nicht setWindowDays, um rangeIdx nicht automatisch zu resetten),
       // dann rangeIdx manuell klemmen — so bleibt ein gespeicherter Teilbereich erhalten.
@@ -207,10 +209,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!sources.length) return;
     try {
       localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays,
+        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis,
       }));
     } catch {}
-  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, sources.length]);
+  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, sources.length]);
 
   const nn = (v: string) => (v === "all" ? null : v);
 
@@ -230,7 +232,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     // → Corpus unvollständig → Charts zählen weniger als die Tabelle.
     const floor = new Date(); floor.setUTCDate(floor.getUTCDate() - 95);
     const cf = floor.toISOString();
-    const corpusFilter = `published_at.gte.${cf},and(published_at.is.null,discovered_at.gte.${cf})`;
+    // Deckt BEIDE Zeitachsen ab: kürzlich veröffentlicht ODER kürzlich gescannt ("zuletzt gesehen").
+    // Sonst fehlten auf der Scan-Achse ältere, aber heute noch online/gescannte Artikel.
+    const corpusFilter = `published_at.gte.${cf},and(published_at.is.null,discovered_at.gte.${cf}),last_seen.gte.${cf}`;
     fetchAllRows<CorpusRow>(
       () => supabase.from("page_overview").select("id", { count: "exact", head: true })
         .in("ptype", ALLOWED_PTYPES).or(corpusFilter),
@@ -269,7 +273,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // (alle Filter außer Themen/Rubriken selbst). Zählt damit exakt das, was die Tabelle zeigt.
   useEffect(() => {
     if (!active.size || !corpusReady) { if (!active.size) setTopicOpts([]); return; }
-    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo } as any);
+    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo, timeAxis } as any);
     const match = makeMatcher(snap, [], kwIdSet, { topics: true });
     const counts = new Map<string, number>();
     for (const r of corpus) {
@@ -280,7 +284,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     }
     setTopicOpts([...counts.entries()].sort((a, b) => b[1] - a[1])
       .map(([key, n]) => ({ key, label: topicLabel(key), n })));
-  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, rangeFrom, rangeTo, kwIdSet]);
+  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, rangeFrom, rangeTo, timeAxis, kwIdSet]);
 
   // Unterthemen-Baum: verlagseigene Rubriken je kanonischem Topic — abgeleitet aus dem
   // URL-PFAD (nicht aus article_categories, das bei Bild/FAZ/n-tv/Tagesschau leer ist).
@@ -288,7 +292,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [catTree, setCatTree] = useState<Map<string, SubOpt[]>>(new Map());
   useEffect(() => {
     if (!active.size || !corpusReady) { if (!active.size) setCatTree(new Map()); return; }
-    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo } as any);
+    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo, timeAxis } as any);
     const match = makeMatcher(snap, [], kwIdSet, { topics: true });
     // raw-Rubriken je Topic sammeln (alle aktiven Quellen)
     const agg = new Map<string, Map<string, { label: string; n: number; src: Set<number> }>>();
@@ -329,7 +333,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (list.length) tree.set(topic, list);
     }
     setCatTree(tree);
-  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, rangeFrom, rangeTo, kwIdSet]);
+  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, rangeFrom, rangeTo, timeAxis, kwIdSet]);
 
   // Gewählte Sub-Rubriken → rohe URL-Muster (mehrsprachig, quellenübergreifend)
   const subPats = useMemo(() => {
@@ -366,7 +370,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     setStatus("all"); setPaywall("all"); setAtype("all"); setAuthor("all");
     setTopics([]); setSubcats([]); setKeyword("all"); setLang("all");
     setChanged("all"); setDepth("all"); setPinpoint(null);
-    _setWindowDays(60); setRangeIdx({ from: 0, to: 59 });
+    _setWindowDays(60); setRangeIdx({ from: 0, to: 59 }); _setTimeAxis("published");
     setActive(new Set(sources.map((s) => s.id)));
   };
 
@@ -378,7 +382,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     topicOpts, keywordOpts, subOpts, catTree,
     corpus, corpusReady, kwIds, kwIdSet, subPats,
     days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen,
-    windowDays, setWindowDays, ready,
+    windowDays, setWindowDays, timeAxis, setTimeAxis, ready,
   };
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
 }

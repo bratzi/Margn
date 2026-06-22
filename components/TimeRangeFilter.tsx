@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFilters, WINDOW_OPTS } from "@/components/FilterProvider";
-import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
+import { axisTime, berlinDate, berlinDayBoundsUTC, makeMatcher, snapshotOf, TIME_AXIS_LABEL } from "@/lib/filterCorpus";
 import { topicLabel } from "@/lib/topics";
 
 export const PUB_COLORS = ["#3D63DD", "#1A7F55", "#CF4035", "#B0790C", "#0C8F86", "#8B5CF6", "#D6457A", "#0E7490"];
@@ -41,7 +41,7 @@ export default function TimeRangeFilter() {
   // Säulen direkt aus dem gemeinsamen Corpus — GLEICHES Prädikat wie die Tabelle,
   // nur ohne Zeitfilter (die Zeitachse ist ja der Chart selbst). Damit stimmen die
   // Balken exakt mit den Tabellen-Treffern des jeweiligen Tages überein.
-  const corpusDeps = [f.corpus, f.corpusReady, days,
+  const corpusDeps = [f.corpus, f.corpusReady, days, f.timeAxis,
     f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
     f.subPats.join("|"), f.kwIdSet] as const;
 
@@ -53,9 +53,9 @@ export default function TimeRangeFilter() {
     for (const r of f.corpus) {
       if (!act.has(r.source_id)) continue;
       if (!match(r)) continue;
-      const t = effTime(r);
+      const t = axisTime(r, f.timeAxis);
       if (!t) continue;
-      const i = dayIdx.get(t.slice(0, 10));
+      const i = dayIdx.get(berlinDate(t));
       if (i === undefined) continue;
       let vals = map.get(r.source_id);
       if (!vals) { vals = new Array(days.length).fill(0); map.set(r.source_id, vals); }
@@ -75,9 +75,9 @@ export default function TimeRangeFilter() {
     for (const r of f.corpus) {
       if (!act.has(r.source_id)) continue;
       if (!match(r)) continue;
-      const t = effTime(r);
+      const t = axisTime(r, f.timeAxis);
       if (!t) continue;
-      const i = dayIdx.get(t.slice(0, 10));
+      const i = dayIdx.get(berlinDate(t));
       if (i === undefined) continue;
       const topic = r.topic ?? "sonstiges";
       let vals = map.get(topic);
@@ -147,14 +147,15 @@ export default function TimeRangeFilter() {
     const total = series.reduce((sum, s) => sum + s.vals[dayIdx], 0);
     if (total === 0) return;
     const day = days[dayIdx];
-    f.setPinpoint({ from: day + "T00:00:00Z", to: day + "T23:59:59Z", label: fmtDay(day) });
+    const b = berlinDayBoundsUTC(day);
+    f.setPinpoint({ from: b.from, to: b.to, label: fmtDay(day) });
   };
 
   if (!trfOpen) {
     return (
       <div className="trf trf-mini">
         <button className="rail-toggle" onClick={() => setTrfOpen(true)} title="Zeitstrahl aufklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 18V9M9 18V5M14 18v-7M19 18v-4" /></svg></button>
-        <span className="trf-mini-label">Veröffentlicht: <b>{rangeIdx.from === rangeIdx.to ? fmtDay(days[rangeIdx.from]) : `${fmtDay(days[rangeIdx.from])} – ${fmtDay(days[rangeIdx.to])}`}</b></span>
+        <span className="trf-mini-label">{TIME_AXIS_LABEL[f.timeAxis]}: <b>{rangeIdx.from === rangeIdx.to ? fmtDay(days[rangeIdx.from]) : `${fmtDay(days[rangeIdx.from])} – ${fmtDay(days[rangeIdx.to])}`}</b></span>
       </div>
     );
   }
@@ -163,7 +164,11 @@ export default function TimeRangeFilter() {
     <div className="trf trf-open" style={{ height: h }}>
       <div className="trf-resize" onPointerDown={(e) => start("resize", e)} title="Höhe ziehen"><span /></div>
       <div className="trf-head">
-        <div className="trf-title">Veröffentlichungs-Zeitraum <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
+        <div className="trf-title">{f.timeAxis === "seen" ? "Zeitraum · Zuletzt gesehen" : "Veröffentlichungs-Zeitraum"} <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
+        <div className="seg seg-xs trf-axis">
+          <button className={f.timeAxis === "published" ? "on" : ""} onClick={() => f.setTimeAxis("published")} title="Nach Veröffentlichungsdatum des Verlags">Veröffentlicht</button>
+          <button className={f.timeAxis === "seen" ? "on" : ""} onClick={() => f.setTimeAxis("seen")} title="Nach letztem Scan — zeigt alles, was im Zeitraum online/gescannt war (auch früher veröffentlicht)">Zuletzt gesehen</button>
+        </div>
         <div className="seg seg-xs trf-presets">
           {WINDOW_OPTS.map((n) => (
             <button key={n} className={windowDays === n ? "on" : ""} onClick={() => setWindowDays(n)} title={`Letzte ${n} Tage`}>{n}T</button>

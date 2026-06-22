@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
-import { effTime, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
+import { axisTime, berlinDayBoundsUTC, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 
 type Stat = {
   source_id: number; articles: number; paywalled: number;
@@ -67,8 +67,8 @@ export default function PublisherCompare() {
   const { curFrom, curTo, prevFrom, periodDays } = useMemo(() => {
     if (period === "dyn") {
       // Dynamisch: nutzt aktuellen TimeRangeFilter-Bereich
-      const cf = new Date(days[rangeIdx.from] + "T00:00:00Z");
-      const ct = new Date(days[rangeIdx.to] + "T23:59:59Z");
+      const cf = new Date(berlinDayBoundsUTC(days[rangeIdx.from]).from);
+      const ct = new Date(berlinDayBoundsUTC(days[rangeIdx.to]).to);
       const spanMs = ct.getTime() - cf.getTime();
       const pf = new Date(cf.getTime() - spanMs);
       const pdDays = Math.max(1, Math.round(spanMs / 86400000));
@@ -91,7 +91,7 @@ export default function PublisherCompare() {
     for (const r of f.corpus) {
       if (!act.has(r.source_id)) continue;
       if (!match(r)) continue;
-      const t = effTime(r);
+      const t = axisTime(r, f.timeAxis);
       if (!t) continue;
       const ms = Date.parse(t);
       const target = ms >= curFromMs && ms <= curToMs ? cur : ms >= prevFromMs && ms < curFromMs ? prev : null;
@@ -106,7 +106,7 @@ export default function PublisherCompare() {
     }
     return { stats: [...cur.values()], prevMap: prev };
   }, [f.corpus, f.corpusReady, activeSources.join(","), topics.join(","), f.status, f.paywall,
-      f.atype, f.author, f.lang, f.changed, f.depth, f.subPats.join("|"), f.kwIdSet,
+      f.atype, f.author, f.lang, f.changed, f.depth, f.timeAxis, f.subPats.join("|"), f.kwIdSet,
       curFrom.getTime(), curTo.getTime(), prevFrom.getTime()]);
 
   if (!stats.length) return null;
@@ -136,7 +136,7 @@ export default function PublisherCompare() {
     data: { sid: number; label: string; value: number; display: string; raw?: string; delta: React.ReactNode }[];
   }[] = [
     {
-      title: "Artikel", desc: `Veröffentlichte Artikel${ctx}`, color: "var(--accent)",
+      title: "Artikel", desc: `${f.timeAxis === "seen" ? "Heute/Zeitraum gesehene" : "Veröffentlichte"} Artikel${ctx}`, color: "var(--accent)",
       data: derived.map((d) => ({
         sid: d.sid, label: d.name, value: d.articles, display: d.articles.toLocaleString("de-DE"),
         delta: <DeltaCount cur={d.articles} prev={d.prevArticles} />,
