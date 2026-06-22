@@ -160,9 +160,12 @@ export default function ScrollSpine() {
       let endY = H, endX: number | null = null;
       if (finalBtnEl) {
         const br = finalBtnEl.getBoundingClientRect();
-        // Endpunkt etwas IN den Button hinein (mittig, von der Oberkante) → die Linie läuft an der
-        // Oberkante in den Button und verschwindet dahinter (Button liegt z-index 6 über der Spine 4).
-        endY = br.top + window.scrollY + Math.min(br.height * 0.5, 18);
+        // Endpunkt KNAPP ÜBER der Oberkante (mittig) — die Linie läuft NICHT mehr in den Button.
+        // Puffer > maximale magnetische Hover-Auslenkung des Buttons (vertikal ~ (h/2)*0.34),
+        // damit der Button die Linie auch beim Hovern in keine Richtung berührt.
+        const magY = br.height * 0.5 * 0.34;
+        const gap = Math.max(16, magY + 6);
+        endY = br.top + window.scrollY - gap;
         endX = br.left + br.width / 2;
       }
       endYv = endY;
