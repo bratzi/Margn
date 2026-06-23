@@ -430,12 +430,11 @@ html.lenis, html.lenis body { height: auto; }
    Maske/Filter/mix-blend rastern (das war der alte Freeze). Die Parallaxe/Zoom läuft
    rein über transform mit --ana-p. */
 .mg-ana-scrub {
-  position: absolute; inset: -4%; width: 108%; height: 108%; object-fit: cover;
-  /* dunkel genug für Lesbarkeit, aber präsent — die Karte deckt den Text ohnehin ab */
-  filter: saturate(0.92) contrast(1.1) brightness(0.6);
-  opacity: 1; pointer-events: none;
-  backface-visibility: hidden; transform-origin: 50% 50%; will-change: transform;
-  transform: translate3d(0, calc(var(--ana-p, 0) * -3%), 0) scale(calc(1.02 + var(--ana-p, 0) * 0.06));
+  /* KEIN Zoom: 1:1 object-fit cover, damit maximal viel Footage sichtbar ist und
+     nichts hochskaliert/unscharf wirkt. Die Bewegung kommt allein aus dem Scrub. */
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  filter: saturate(0.92) contrast(1.08) brightness(0.62);
+  opacity: 1; pointer-events: none; backface-visibility: hidden;
 }
 @media (max-width: 860px) { .mg-ana-scrub { display: none; } }
 /* Statische kühle Grundtönung (normaler Blend — kein mix-blend-mode pro Frame). */
