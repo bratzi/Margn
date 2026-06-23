@@ -424,44 +424,20 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------- Bühne: dasselbe Blueprint-Raster wie die anderen Sektionen, hinter der Karte ---------- */
 .mg-ana-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .mg-anatomy-stage { position: relative; z-index: 1; }
-/* ---------- Drei getönte Video-Ebenen: Tinte → Druckpresse → Schwärzung ----------
-   Beim Scrollen (--ana-p 0→1) wischt jede folgende Ebene per weicher Diagonal-Maske über
-   die vorige. Stark abgedunkelt/entsättigt → atmosphärisch, ohne den Text zu stören. */
-.mg-ana-vid {
-  /* sehr großzügige Überdeckung (160 %), damit Drift+Rotation+Zoom die Ränder nie freilegen */
-  position: absolute; inset: -30%; width: 160%; height: 160%; object-fit: cover;
-  filter: saturate(0.62) contrast(1.06) brightness(0.46);
-  opacity: 0; will-change: opacity, transform; pointer-events: none;
-  backface-visibility: hidden; transform-origin: 50% 50%;
+/* ---------- EIN scroll-gescrubbtes Video (Scrollytelling-Look) ----------
+   Dunkelblaue, langsam morphende Tinte; currentTime hängt am Scroll-Fortschritt (JS).
+   Hier nur statische Grading-/Transform-Eigenschaften (Compositor) — NIE pro Frame
+   Maske/Filter/mix-blend rastern (das war der alte Freeze). Die Parallaxe/Zoom läuft
+   rein über transform mit --ana-p. */
+.mg-ana-scrub {
+  position: absolute; inset: -4%; width: 108%; height: 108%; object-fit: cover;
+  /* dunkel genug für Lesbarkeit, aber präsent — die Karte deckt den Text ohnehin ab */
+  filter: saturate(0.92) contrast(1.1) brightness(0.6);
+  opacity: 1; pointer-events: none;
+  backface-visibility: hidden; transform-origin: 50% 50%; will-change: transform;
+  transform: translate3d(0, calc(var(--ana-p, 0) * -3%), 0) scale(calc(1.02 + var(--ana-p, 0) * 0.06));
 }
-@media (max-width: 860px) { .mg-ana-vid { display: none; } }
-/* PERFORMANT „morphende" Masken: die Masken-GEOMETRIE bleibt STATISCH (sonst Re-Raster pro Frame
-   = der alte Freeze). Stattdessen rotieren/zoomen/driften die statisch maskierten Ebenen beim
-   Ein-/Ausblenden (reine Compositor-Transforms) → die Ellipsen-Fenster kippen, wachsen und laufen
-   gegenläufig ineinander. Basis ist der unmaskierte Backstop (deckt immer), b/c sind die
-   morphenden Fenster, durch die jeweils andere Footage hereinblutet. */
-.mg-ana-vid.base {
-  opacity: 1;
-  transform: translate3d(calc(var(--ana-p, 0) * 16%), calc(var(--ana-p, 0) * 5%), 0) scale(calc(1.04 + var(--ana-p, 0) * 0.08));
-}
-.mg-ana-vid.b {
-  opacity: var(--ana-pB, 0);
-  -webkit-mask-image: radial-gradient(62% 96% at 36% 44%, #000 42%, transparent 76%);
-          mask-image: radial-gradient(62% 96% at 36% 44%, #000 42%, transparent 76%);
-  transform:
-    translate3d(calc(var(--ana-p, 0) * -22%), calc(var(--ana-p, 0) * -7%), 0)
-    rotate(calc((1 - var(--ana-pB, 0)) * -13deg))
-    scale(calc(0.9 + var(--ana-pB, 0) * 0.24));
-}
-.mg-ana-vid.c {
-  opacity: var(--ana-pC, 0);
-  -webkit-mask-image: radial-gradient(98% 60% at 66% 58%, #000 44%, transparent 78%);
-          mask-image: radial-gradient(98% 60% at 66% 58%, #000 44%, transparent 78%);
-  transform:
-    translate3d(calc(var(--ana-p, 0) * 20%), calc(var(--ana-p, 0) * 8%), 0)
-    rotate(calc((1 - var(--ana-pC, 0)) * 15deg))
-    scale(calc(0.9 + var(--ana-pC, 0) * 0.26));
-}
+@media (max-width: 860px) { .mg-ana-scrub { display: none; } }
 /* Statische kühle Grundtönung (normaler Blend — kein mix-blend-mode pro Frame). */
 .mg-ana-tint { position: absolute; inset: 0;
   background: radial-gradient(120% 95% at 38% 18%, rgba(96, 124, 255, 0.20), transparent 62%);

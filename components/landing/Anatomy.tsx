@@ -84,29 +84,31 @@ export default function Anatomy() {
     const prog = root.querySelector<HTMLElement>(".mg-rail .prog");
     if (!doc) return;
 
-    // Hintergrund-Videos (nur Desktop/Pin): Quelle erst hier setzen → kein Mobile-Download.
-    const vids = gsap.utils.toArray<HTMLVideoElement>(".mg-ana-vid", root); // [base, b, c]
-    const VID_SRC = ["/landing/ana/ink.mp4", "/landing/ana/mid.mp4", "/landing/ana/dark.mp4"];
-    const SLOW = 0.5; // zusätzlich verlangsamen → ruhige, träge Bewegung
-    const startVideos = (play: boolean) => {
-      vids.forEach((v, i) => {
-        if (!v.getAttribute("src")) v.setAttribute("src", VID_SRC[i]);
-        v.playbackRate = SLOW;
-        if (play && i === 0) v.play?.().catch(() => {}); // nur die Basis dauerhaft; b/c steuert applyStep
-        else { try { v.load(); } catch {} }
-      });
+    // EIN scroll-gescrubbtes Hintergrund-Video (Scrollytelling-Look): die Footage wird
+    // NICHT abgespielt, sondern ihre currentTime hängt direkt am Scroll-Fortschritt — beim
+    // Scrollen morpht die dunkelblaue Tinte mit. Quelle erst hier setzen → kein Mobile-DL.
+    // Voraussetzung für flüssiges Seeken: all-intra-Encode (jedes Frame ein Keyframe).
+    const scrub = root.querySelector<HTMLVideoElement>(".mg-ana-scrub");
+    const SCRUB_SRC = "/landing/ana/scrub.mp4";
+    let vidDur = 0;
+    let lastSeek = -1;
+    const primeVideo = () => {
+      if (!scrub) return;
+      if (!scrub.getAttribute("src")) scrub.setAttribute("src", SCRUB_SRC);
+      scrub.muted = true;
+      scrub.addEventListener("loadedmetadata", () => { vidDur = scrub.duration || 0; });
+      // Decoder einmal anwerfen, dann sofort pausieren → currentTime-Seeks werden flüssig.
+      scrub.play?.().then(() => scrub.pause?.()).catch(() => {});
     };
-    const stopVideos = () => vids.forEach((v) => v.pause?.());
-    // Nur abspielen, wenn der Layer auch sichtbar ist → höchstens 2 Decodes gleichzeitig
-    // (sonst dekodieren 3 Vollbild-Videos permanent und würgen den Main-Thread ab).
-    const setPlay = (v: HTMLVideoElement | undefined, want: boolean) => {
-      if (!v) return;
-      if (want && v.paused) { v.playbackRate = SLOW; v.play?.().catch(() => {}); }
-      else if (!want && !v.paused) v.pause?.();
+    const seekTo = (p: number) => {
+      if (!scrub || !vidDur) return;
+      const t = Math.max(0, Math.min(vidDur - 0.05, p * (vidDur - 0.05)));
+      if (Math.abs(t - lastSeek) < 0.02) return; // redundante Seeks vermeiden
+      lastSeek = t;
+      try { scrub.currentTime = t; } catch {}
     };
+    const stopVideo = () => scrub?.pause?.();
 
-    const c01 = (x: number) => Math.max(0, Math.min(1, x));
-    const smooth = (t: number) => t * t * (3 - 2 * t); // smoothstep → weicheres Auf-/Abblenden
     let lastIdx = -1;
 
     // teure DOM-Arbeit (Klassen/Text) NUR bei Schrittwechsel; pro Frame nur die billigen
@@ -127,15 +129,9 @@ export default function Anatomy() {
         railSteps.forEach((r, i) => r.classList.toggle("on", i <= idx));
         lastIdx = idx;
       }
-      // Per-Layer-Crossfade (gesmootht): Druckpresse blendet 0.14–0.48 ein,
-      // der Schwärz-/Rauch-Layer 0.50–0.90 → der BG wird „überschrieben".
-      const pB = smooth(c01((p - 0.14) / 0.34));
-      const pC = smooth(c01((p - 0.50) / 0.40));
+      // Nur die billige Fortschritts-Variable (Compositor): treibt die kühl→rot-Tönung
+      // (Warm-Layer-Opacity) + die dezente Parallaxe/Zoom des Scrub-Videos.
       root.style.setProperty("--ana-p", p.toFixed(3));
-      root.style.setProperty("--ana-pB", pB.toFixed(3));
-      root.style.setProperty("--ana-pC", pC.toFixed(3));
-      setPlay(vids[1], pB > 0.02);
-      setPlay(vids[2], pC > 0.02);
     };
 
     const mm = gsap.matchMedia();
@@ -145,14 +141,16 @@ export default function Anatomy() {
       if (!pinEl) return;
       doc.classList.remove("is-static");
 
+      primeVideo();
+
       if (reduced) {
-        startVideos(false); // erstes Bild zeigen, nicht abspielen
+        // Kein Scrubbing: ein repräsentatives Standbild zeigen, Endzustand des Edits.
+        scrub?.addEventListener("loadedmetadata", () => { vidDur = scrub?.duration || 0; seekTo(0.6); }, { once: true });
         applyStep(3, 1);
         if (prog) gsap.set(prog, { scaleY: 1 });
         return;
       }
 
-      startVideos(true);
       applyStep(0, 0);
       const tl = gsap.timeline({
         scrollTrigger: {
@@ -164,6 +162,8 @@ export default function Anatomy() {
           anticipatePin: 1,
           snap: { snapTo: "labels", duration: { min: 0.2, max: 0.6 }, ease: "power1.inOut" },
           onUpdate(self) {
+            // Video-Scrub direkt am Scroll-Fortschritt (das IST der Scrollytelling-Effekt).
+            seekTo(self.progress);
             const idx = Math.max(0, Math.min(3, Math.round(self.progress * 3)));
             applyStep(idx, self.progress);
           },
@@ -178,7 +178,7 @@ export default function Anatomy() {
       if (prog) tl.fromTo(prog, { scaleY: 0 }, { scaleY: 1, ease: "none", duration: 3 }, 0);
 
       return () => {
-        stopVideos();
+        stopVideo();
         doc.classList.remove("ed-verb", "ed-num", "ed-quote");
         railSteps.forEach((r) => r.classList.remove("on"));
       };
@@ -206,13 +206,12 @@ export default function Anatomy() {
     <section className="mg-anatomy" id="anatomie" ref={rootRef}>
       <div className="mg-anatomy-pin">
         <div className="mg-ana-bg" aria-hidden>
-          {/* Drei langsame, abstrakte Clips (fließende Linien → morphendes Liquid → langsame Tinte),
-              verlangsamt + durch rotierende/zoomende Ellipsen-Masken. Quelle wird erst auf
-              dem Desktop per JS gesetzt; beim Scrollen wischt jeder folgende per weicher Maske
-              über den vorigen — der Hintergrund wird „überschrieben" wie der Artikel. */}
-          <video className="mg-ana-vid base" muted loop playsInline preload="none" />
-          <video className="mg-ana-vid b" muted loop playsInline preload="none" />
-          <video className="mg-ana-vid c" muted loop playsInline preload="none" />
+          {/* EIN scroll-gescrubbtes Video (dunkelblaue, langsam morphende Tinte): seine
+              currentTime hängt am Scroll-Fortschritt — die Footage „läuft" nicht, sie wird
+              gescrubbt. Quelle wird erst auf dem Desktop per JS gesetzt → kein Mobile-DL.
+              Über dem Video nur statische Tönung/Vignette (Compositor), nie pro Frame
+              gerastert. */}
+          <video className="mg-ana-scrub" muted playsInline preload="auto" />
           <span className="mg-ana-tint" />
           <span className="mg-ana-warm" />
           <span className="mg-ana-vignette" />
