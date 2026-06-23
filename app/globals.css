@@ -821,18 +821,31 @@ table.dt.dt-fit { width: max-content; }
 .dq-col.new .dq-side-tag { color: var(--green); }
 .dq-side-body { overflow-wrap: anywhere; }
 @media (max-width: 720px) { .dq-2 { grid-template-columns: 1fr; } .dq-col.old { border-right: 0; border-bottom: 1px solid var(--line); } }
-/* Unterschiede schraffiert hervorheben (wie ein Diff-Tool): Entfernung rot, Einfügung grün. */
+/* Geänderter Text FARBIG wie in Section 3 (alt = rot durchgestrichen, neu = grün) —
+   KEINE Schraffur auf dem Text selbst. */
 .dq-text del.dq-del {
   color: var(--red); text-decoration: line-through; text-decoration-thickness: 2px;
-  background-color: color-mix(in srgb, var(--red) 10%, transparent);
-  background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--red) 34%, transparent) 0 2px, transparent 2px 6px);
+  text-decoration-color: color-mix(in srgb, var(--red) 60%, transparent);
+  background-color: color-mix(in srgb, var(--red) 13%, transparent);
   border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
 }
 .dq-text ins.dq-ins {
-  color: var(--green); text-decoration: none;
-  background-color: color-mix(in srgb, var(--green) 10%, transparent);
-  background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--green) 34%, transparent) 0 2px, transparent 2px 6px);
+  color: var(--green); text-decoration: none; font-weight: 500;
+  background-color: color-mix(in srgb, var(--green) 13%, transparent);
   border-radius: 3px; padding: 0 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+/* Schraffur AUSSCHLIESSLICH als Lückenfüller auf der Gegenseite: der Text ist transparent
+   (nimmt aber exakt die Breite des fehlenden Texts ein → L/R bleibt aligned), nur die
+   diagonale Schraffur markiert die Leerstelle. Rot = hier wurde entfernt, Grün = hier kam dazu. */
+.dq-text .dq-gap {
+  color: transparent; border-radius: 3px; padding: 0 2px; user-select: none;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
+.dq-text .dq-gap.gap-del {
+  background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--red) 28%, transparent) 0 2px, transparent 2px 6px);
+}
+.dq-text .dq-gap.gap-ins {
+  background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--green) 28%, transparent) 0 2px, transparent 2px 6px);
 }
 .dq-add-body { color: var(--green); background: color-mix(in srgb, var(--green) 6%, transparent); white-space: pre-wrap; }
 .dq-del-body { color: var(--red); background: color-mix(in srgb, var(--red) 6%, transparent); white-space: pre-wrap; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 50%, transparent); }

@@ -493,9 +493,19 @@ function DiffSide({ ops, side }: { ops: Op[]; side: "old" | "new" }) {
   return (
     <span className="dq-text">
       {ops.map((o, i) => {
-        if (o.op === "del") return side === "old" ? <del key={i} className="dq-del">{o.t}</del> : null;
-        if (o.op === "ins" || o.op === "repl") return side === "new" ? <ins key={i} className="dq-ins">{o.t}</ins> : null;
-        return <span key={i}>{o.t}</span>;
+        if (o.op === "eq") return <span key={i}>{o.t}</span>;
+        if (o.op === "del") {
+          // Entferntes: links „alt" rot durchgestrichen; rechts eine rote Schraffur-LÜCKE,
+          // die exakt die Breite des fehlenden Texts einnimmt (transparenter Text) → Zeilen
+          // bleiben aligned und man sieht im L/R-Vergleich, wo etwas wegfiel.
+          return side === "old"
+            ? <del key={i} className="dq-del">{o.t}</del>
+            : <span key={i} className="dq-gap gap-del" aria-hidden>{o.t}</span>;
+        }
+        // ins | repl → Ergänztes: rechts „neu" grün; links eine grüne Schraffur-Lücke.
+        return side === "new"
+          ? <ins key={i} className="dq-ins">{o.t}</ins>
+          : <span key={i} className="dq-gap gap-ins" aria-hidden>{o.t}</span>;
       })}
     </span>
   );
