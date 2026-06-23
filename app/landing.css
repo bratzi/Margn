@@ -433,10 +433,10 @@ html.lenis, html.lenis body { height: auto; }
   /* KEIN Zoom: 1:1 object-fit cover, damit maximal viel Footage sichtbar ist und
      nichts hochskaliert/unscharf wirkt. Die Bewegung kommt allein aus dem Scrub. */
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  /* Clip ist nahezu schwarz mit sparsamen Partikeln/roten Glints → kaum abdunkeln,
-     leicht Kontrast/Sättigung anheben, damit Partikel + Rot sichtbar bleiben. */
-  filter: saturate(1.08) contrast(1.06) brightness(0.98);
-  opacity: 1; pointer-events: none; backface-visibility: hidden;
+  /* Bewusst SEHR dezent: ein leises Ziffern-Rauschen im Hintergrund, nicht präsent.
+     Niedrige Opacity + Abdunklung → die Footage tritt zurück (User: „viel dezenter"). */
+  filter: saturate(0.8) contrast(0.95) brightness(0.78);
+  opacity: 0.38; pointer-events: none; backface-visibility: hidden;
 }
 @media (max-width: 860px) { .mg-ana-scrub { display: none; } }
 /* Statische kühle Grundtönung (normaler Blend — kein mix-blend-mode pro Frame). */
