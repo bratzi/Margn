@@ -847,6 +847,12 @@ table.dt.dt-fit { width: max-content; }
 .dq-text .dq-gap.gap-ins {
   background-image: repeating-linear-gradient(45deg, color-mix(in srgb, var(--green) 28%, transparent) 0 2px, transparent 2px 6px);
 }
+/* Zusammengefaltete unveränderte Strecke (Zeilen-Diff): dezenter Trenner, beidseitig gleich. */
+.dq-text .dq-skip {
+  display: block; margin: 5px 0; text-align: center; user-select: none;
+  font-size: 11px; font-style: italic; color: var(--faint);
+  border-top: 1px dashed var(--line-2); border-bottom: 1px dashed var(--line-2); padding: 3px 0;
+}
 .dq-add-body { color: var(--green); background: color-mix(in srgb, var(--green) 6%, transparent); white-space: pre-wrap; }
 .dq-del-body { color: var(--red); background: color-mix(in srgb, var(--red) 6%, transparent); white-space: pre-wrap; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 50%, transparent); }
 

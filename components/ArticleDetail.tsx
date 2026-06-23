@@ -467,7 +467,7 @@ function TypeBadge({ type }: { type: string }) {
 }
 
 // Inline-Wort-Diff (LCS): EIN durchgehender Text, in dem nur die geänderten Wörter markiert sind.
-type Op = { t: string; op: "eq" | "del" | "ins" | "repl" };
+type Op = { t: string; op: "eq" | "del" | "ins" | "repl" | "skip" };
 function inlineOps(oldS: string, newS: string): Op[] {
   const o = oldS.split(/(\s+)/).filter((x) => x !== ""), n = newS.split(/(\s+)/).filter((x) => x !== "");
   const m = o.length, k = n.length;
@@ -493,6 +493,7 @@ function DiffSide({ ops, side }: { ops: Op[]; side: "old" | "new" }) {
   return (
     <span className="dq-text">
       {ops.map((o, i) => {
+        if (o.op === "skip") return <span key={i} className="dq-skip">{o.t}</span>;
         if (o.op === "eq") return <span key={i}>{o.t}</span>;
         if (o.op === "del") {
           // Entferntes: links „alt" rot durchgestrichen; rechts eine rote Schraffur-LÜCKE,
@@ -510,28 +511,64 @@ function DiffSide({ ops, side }: { ops: Op[]; side: "old" | "new" }) {
     </span>
   );
 }
-// Sehr lange Absätze (z.B. n-tv: Body = EIN Riesenabsatz): unveränderte Strecken zusammenfalten,
-// damit nicht zweimal die komplette Textwand erscheint. Nur die geänderten Stellen + etwas Kontext
-// bleiben; lange „eq"-Läufe werden auf Kopf … Schwanz gekürzt. Kurze Diffs (Titel/Teaser) bleiben
-// unangetastet — dort ist Volltext gewollt.
-function elideOps(ops: Op[], ctx = 60): Op[] {
-  const firstChange = ops.findIndex((o) => o.op !== "eq");
-  if (firstChange === -1) return ops;
-  let lastChange = firstChange;
-  for (let i = ops.length - 1; i >= 0; i--) if (ops[i].op !== "eq") { lastChange = i; break; }
-  return ops.map((o, i) => {
-    if (o.op !== "eq" || o.t.length <= ctx * 2 + 5) return o;
-    if (i < firstChange) return { ...o, t: "… " + o.t.slice(-ctx) };          // vor der ersten Änderung
-    if (i > lastChange) return { ...o, t: o.t.slice(0, ctx) + " …" };          // nach der letzten Änderung
-    return { ...o, t: o.t.slice(0, ctx) + " … " + o.t.slice(-ctx) };          // zwischen zwei Änderungen
-  });
+// Lange Body-Diffs (Ticker/Liveblog/Riesenabsatz wie n-tv) auf ZEILEN-Ebene diffen statt
+// Wort-Ebene: ein Wort-LCS über zwei verschobene 1500-Zeichen-Fenster matcht zufällig
+// wiederkehrende Tokens („Uhr:", „Gruppe", Städtenamen) und produziert Wort-Konfetti.
+// Stattdessen in sinnvolle „Zeilen" segmentieren (Ticker-Zeit-/Datums-Marker + Satzgrenzen),
+// dann LCS über ganze Zeilen → entfernte/ergänzte Einträge erscheinen als saubere Blöcke.
+function splitLines(s: string): string[] {
+  const parts = s.split(
+    /(?=\d{1,2}[.:]\d{2}\s*Uhr)|(?=(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag),\s*\d)|(?<=[.!?»“"])(?=[A-ZÄÖÜ])/u
+  );
+  return parts.filter((p) => p.length > 0);
+}
+function lineOps(oldS: string, newS: string): Op[] {
+  const o = splitLines(oldS), n = splitLines(newS);
+  const m = o.length, k = n.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(k + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) for (let j = k - 1; j >= 0; j--)
+    dp[i][j] = o[i] === n[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const ops: Op[] = []; let i = 0, j = 0;
+  while (i < m || j < k) {
+    if (i < m && j < k && o[i] === n[j]) { ops.push({ t: o[i], op: "eq" }); i++; j++; }
+    else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) { ops.push({ t: n[j], op: "ins" }); j++; }
+    else { ops.push({ t: o[i], op: "del" }); i++; }
+  }
+  return ops;
+}
+// Eine GEÄNDERTE Zeile (entfernt + direkt danach ergänzt, hohe Wort-Ähnlichkeit) als
+// Wort-Diff verfeinern → man sieht die geänderten Wörter statt der ganzen roten/grünen Zeile.
+function refineLineOps(ops: Op[]): Op[] {
+  const out: Op[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const cur = ops[i], nxt = ops[i + 1];
+    if (cur.op === "del" && nxt && nxt.op === "ins" && jaccard(normTxt(cur.t), normTxt(nxt.t)) >= 0.5) {
+      out.push(...inlineOps(cur.t, nxt.t)); i++;
+    } else out.push(cur);
+  }
+  return out;
+}
+// Lange Läufe unveränderter Zeilen zu „⋯ N unveränderte Zeilen ⋯" zusammenfalten (beidseitig).
+function elideLines(ops: Op[], keep = 2): Op[] {
+  const out: Op[] = []; let i = 0;
+  while (i < ops.length) {
+    if (ops[i].op !== "eq") { out.push(ops[i]); i++; continue; }
+    let j = i; while (j < ops.length && ops[j].op === "eq") j++;
+    const run = ops.slice(i, j);
+    if (run.length > keep * 2 + 1) {
+      out.push(...run.slice(0, keep), { t: `⋯ ${run.length - keep * 2} unveränderte Zeilen ⋯`, op: "skip" }, ...run.slice(run.length - keep));
+    } else out.push(...run);
+    i = j;
+  }
+  return out;
 }
 // Side-by-Side: Vorher links, Jetzt rechts — voller Text je Version, Unterschiede schraffiert.
 function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta" }) {
-  const ops = inlineOps(oldS, newS);
-  const changed = ops.some((o) => o.op !== "eq");
-  // Nur bei echten Textwänden falten — Überschriften/Teaser bleiben Volltext.
-  const shown = oldS.length + newS.length > 1500 ? elideOps(ops) : ops;
+  // Lange Body-Texte (Ticker/Liveblog/Riesenabsatz) → Zeilen-Diff + Eliding (saubere Blöcke
+  // statt Wort-Konfetti). Kurze Diffs (Titel/Teaser) bleiben Wort-Diff mit Volltext.
+  const big = oldS.length + newS.length > 600;
+  const shown = big ? elideLines(refineLineOps(lineOps(oldS, newS))) : inlineOps(oldS, newS);
+  const changed = shown.some((o) => o.op !== "eq" && o.op !== "skip");
   return (
     <div className={`dq ${kind}`}>
       <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
