@@ -87,9 +87,11 @@ export default function Anatomy() {
     // Hintergrund-Videos (nur Desktop/Pin): Quelle erst hier setzen → kein Mobile-Download.
     const vids = gsap.utils.toArray<HTMLVideoElement>(".mg-ana-vid", root); // [base, b, c]
     const VID_SRC = ["/landing/ana/ink.mp4", "/landing/ana/mid.mp4", "/landing/ana/dark.mp4"];
+    const SLOW = 0.5; // zusätzlich verlangsamen → ruhige, träge Bewegung
     const startVideos = (play: boolean) => {
       vids.forEach((v, i) => {
         if (!v.getAttribute("src")) v.setAttribute("src", VID_SRC[i]);
+        v.playbackRate = SLOW;
         if (play && i === 0) v.play?.().catch(() => {}); // nur die Basis dauerhaft; b/c steuert applyStep
         else { try { v.load(); } catch {} }
       });
@@ -99,7 +101,7 @@ export default function Anatomy() {
     // (sonst dekodieren 3 Vollbild-Videos permanent und würgen den Main-Thread ab).
     const setPlay = (v: HTMLVideoElement | undefined, want: boolean) => {
       if (!v) return;
-      if (want && v.paused) v.play?.().catch(() => {});
+      if (want && v.paused) { v.playbackRate = SLOW; v.play?.().catch(() => {}); }
       else if (!want && !v.paused) v.pause?.();
     };
 
@@ -204,7 +206,8 @@ export default function Anatomy() {
     <section className="mg-anatomy" id="anatomie" ref={rootRef}>
       <div className="mg-anatomy-pin">
         <div className="mg-ana-bg" aria-hidden>
-          {/* Drei getönte Clips (Tinte → marmorierte Tinte → Schwärzung/Rauch). Quelle wird erst auf
+          {/* Drei langsame, abstrakte Clips (fließende Linien → morphendes Liquid → langsame Tinte),
+              verlangsamt + durch rotierende/zoomende Ellipsen-Masken. Quelle wird erst auf
               dem Desktop per JS gesetzt; beim Scrollen wischt jeder folgende per weicher Maske
               über den vorigen — der Hintergrund wird „überschrieben" wie der Artikel. */}
           <video className="mg-ana-vid base" muted loop playsInline preload="none" />
