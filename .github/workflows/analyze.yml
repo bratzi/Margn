@@ -1,14 +1,15 @@
 name: pipeline
 on:
   schedule:
-    # Drei Slots pro Stunde auf unauffaelligen Minuten (weg vom ueberlasteten :00).
-    # GitHubs Scheduler verwirft/verzoegert geplante Trigger -> mehrere Slots fangen
-    # einen verworfenen ab. Das Gate (Job unten) sorgt dafuer, dass trotzdem nur EIN
-    # echter Lauf pro Stunde passiert (Dedupe ueber articles.last_seen).
+    # Seed-Slots: GitHubs Scheduler ist best-effort und verwirft/verzoegert Trigger
+    # (real oft 2-6 h Luecken, dann mehrere Slots auf einmal). Diese Slots STARTEN nur
+    # einen Lauf - die eigentliche Stuendlichkeit macht der Lauf selbst per Schlaf-Loop
+    # (siehe Step "hourly-loop"). Mehrere Slots/h sorgen dafuer, dass nach dem Ende
+    # eines Loops zeitnah ein Nachfolger in der Concurrency-Queue bereitsteht.
     - cron: "7 * * * *"
     - cron: "27 * * * *"
     - cron: "47 * * * *"
-    # Woechentlicher Struktur-Lauf (Seitenbaum) - laeuft immer, am Gate vorbei.
+    # Woechentlicher Struktur-Lauf (Seitenbaum) - eigene Lane, laeuft sofort.
     - cron: "23 5 * * 0"
   workflow_dispatch:
     inputs:
@@ -19,63 +20,24 @@ on:
   push:
     paths:
       - ".github/pipeline.trigger"
-concurrency:
-  group: pipeline
-  cancel-in-progress: false
-jobs:
-  # Leichtgewichtiges Gate: entscheidet, ob die schwere Pipeline laeuft.
-  # - Manuell / Push-Trigger / woechentlicher Struktur-Lauf: immer durchlassen.
-  # - Stuendlicher Schedule: nur laufen, wenn der letzte Scan >= GATE_MINUTES her ist.
-  #   articles.last_seen wird frueh im Lauf hochgezogen (Discovery upsertet sofort),
-  #   misst also ~"Zeit seit letztem Lauf-Start". So fangen die 3 Slots GitHubs
-  #   verworfene Trigger ab, ohne 3x/Stunde zu rennen.
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    env:
-      GATE_MINUTES: "45"
-    steps:
-      - id: decide
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          EVENT_NAME: ${{ github.event_name }}
-          SCHEDULE: ${{ github.event.schedule }}
-        run: |
-          set -euo pipefail
-          # Nicht-stuendliche Ausloeser immer durchlassen.
-          if [ "$EVENT_NAME" != "schedule" ] || [ "$SCHEDULE" = "23 5 * * 0" ]; then
-            echo "Trigger=$EVENT_NAME schedule='$SCHEDULE' -> laeuft (kein Gate)."
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Stuendlicher Schedule: Frische des letzten Scans pruefen.
-          last=$(curl -fsS \
-            -H "apikey: $SUPABASE_SERVICE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
-            "$SUPABASE_URL/rest/v1/articles?select=last_seen&order=last_seen.desc.nullslast&limit=1" \
-            | jq -r '.[0].last_seen // empty') || last=""
-          if [ -z "$last" ]; then
-            echo "Kein last_seen lesbar -> sicherheitshalber laufen."
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 60 ))
-          echo "Letzter Scan vor ${age} min (last_seen=$last), Schwelle=${GATE_MINUTES} min."
-          if [ "$age" -ge "$GATE_MINUTES" ]; then
-            echo "-> Faellig, Pipeline laeuft."
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "-> Frisch genug, Lauf uebersprungen (Dedupe)."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
 
+# Stuendliche Schedule-Laeufe teilen sich EINE Lane ("pipeline-loop"): GitHub haelt
+# pro Gruppe max. 1 laufenden + 1 wartenden Lauf. Der laufende Loop blockiert ~5 h
+# die Lane, ein wartender Lauf uebernimmt nahtlos, sobald er endet -> luckenlose
+# stuendliche Kette, unabhaengig davon ob GitHub den naechsten Slot feuert.
+# Manuell / Push / woechentlich bekommen je eine eigene (run_id-)Lane -> laufen sofort.
+concurrency:
+  group: ${{ (github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') && 'pipeline-loop' || format('pipeline-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+jobs:
   pipeline:
-    needs: gate
-    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    # Etwas unter GitHubs 6-h-Hardlimit; der Loop selbst endet bei HORIZON (5h20m).
+    timeout-minutes: 355
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -97,13 +59,71 @@ jobs:
       - run: npx playwright install-deps chromium
         working-directory: scraper
 
+      # ---- Stuendlicher Schedule: self-pacing Loop ------------------------------
+      # Einmal gestartet, scrapt der Lauf zur vollen Stunde - per internem sleep,
+      # nicht per GitHub-Cron. Laeuft ~5h20m und uebergibt dann an den wartenden
+      # Nachfolger. Ein Inline-Gate (Frische von articles.last_seen) verhindert
+      # Doppel-Scrapes bei der Uebergabe.
+      - name: hourly-loop
+        if: ${{ github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0' }}
+        working-directory: scraper
+        run: |
+          set -uo pipefail   # KEIN -e: ein einzelner Scrape-Fehler darf den Loop nicht killen.
+
+          GATE_MINUTES=55
+          HORIZON=$(( $(date -u +%s) + 320*60 ))   # 5h20m Sicherheitshorizont (< timeout 355)
+
+          discover () {
+            CRAWL_RENDER=0 CRAWL_MAX_FETCHES=150 CRAWL_MAX_SITEMAP_URLS=1500 \
+            CRAWL_MAX_DEPTH=2 CRAWL_DELAY_MS=50 CRAWL_CONCURRENCY=10 \
+            CRAWL_TIME_BUDGET_MS=180000 npm run scrape
+          }
+          render () {
+            CRAWL_MODE=analyze CRAWL_MAX_PAGES=2500 CRAWL_RESCAN_SHARE=0.6 \
+            RESCAN_DAYS=3 CRAWL_DELAY_MS=60 CRAWL_CONCURRENCY=10 npm run scrape
+          }
+
+          # 0 = faellig (>= GATE_MINUTES her oder unlesbar), 1 = frisch -> diese Stunde skippen.
+          due () {
+            local last age
+            last=$(curl -fsS \
+              -H "apikey: $SUPABASE_SERVICE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+              "$SUPABASE_URL/rest/v1/articles?select=last_seen&order=last_seen.desc.nullslast&limit=1" \
+              | jq -r '.[0].last_seen // empty') || last=""
+            if [ -z "$last" ]; then echo "last_seen unlesbar -> faellig"; return 0; fi
+            age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 60 ))
+            echo "letzter Scan vor ${age} min (Schwelle ${GATE_MINUTES})"
+            [ "$age" -ge "$GATE_MINUTES" ]
+          }
+
+          i=0
+          while true; do
+            i=$((i+1))
+            echo "===== Iteration $i  $(date -u +%H:%M) UTC ====="
+            if due; then
+              echo "-> faellig: discover + render"
+              discover || echo "WARN: discover-Fehler, Loop laeuft weiter"
+              render   || echo "WARN: render-Fehler, Loop laeuft weiter"
+            else
+              echo "-> frisch (Uebergabe/Doppel vermieden), diese Stunde uebersprungen"
+            fi
+            now=$(date -u +%s)
+            next=$(( (now/3600 + 1)*3600 ))   # naechste volle Stunde (UTC)
+            if [ "$next" -ge "$HORIZON" ]; then
+              echo "Horizont erreicht -> Lauf endet, Nachfolger uebernimmt die Lane"
+              break
+            fi
+            echo "schlafe bis $(date -u -d @"$next" +%H:%M) UTC ($(( (next-now)/60 )) min)"
+            sleep $(( next - now ))
+          done
+
+      # ---- Manuell (pipeline) / Push: einmaliger Lauf, kein Loop ----------------
       - name: discover
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_RENDER: "0"
           CRAWL_MAX_FETCHES: "150"
           CRAWL_MAX_SITEMAP_URLS: "1500"
@@ -111,14 +131,11 @@ jobs:
           CRAWL_DELAY_MS: "50"
           CRAWL_CONCURRENCY: "10"
           CRAWL_TIME_BUDGET_MS: "180000"
-
       - name: render
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pipeline') }}
         run: npm run scrape
         working-directory: scraper
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "analyze"
           CRAWL_MAX_PAGES: "2500"
           CRAWL_RESCAN_SHARE: "0.6"
@@ -126,13 +143,12 @@ jobs:
           CRAWL_DELAY_MS: "60"
           CRAWL_CONCURRENCY: "10"
 
+      # ---- Woechentlich (Sonntag) / Manuell (structure): Seitenbaum -------------
       - name: structure
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '23 5 * * 0') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'structure') }}
         run: npm run scrape
         working-directory: scraper
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           CRAWL_MODE: "structure"
           CRAWL_MAX_PAGES: "100"
           CRAWL_MAX_DEPTH: "3"
