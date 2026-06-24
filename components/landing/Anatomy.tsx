@@ -221,19 +221,19 @@ export default function Anatomy() {
 
   return (
     <section className="mg-anatomy" id="anatomie" ref={rootRef}>
-      <div className="mg-anatomy-pin">
-        <div className="mg-ana-bg" aria-hidden>
-          {/* EIN scroll-gescrubbtes Video (dunkelblaue, langsam morphende Tinte): seine
-              currentTime hängt am Scroll-Fortschritt — die Footage „läuft" nicht, sie wird
-              gescrubbt. Quelle wird erst auf dem Desktop per JS gesetzt → kein Mobile-DL.
-              Über dem Video nur statische Tönung/Vignette (Compositor), nie pro Frame
-              gerastert. */}
-          <video className="mg-ana-scrub" muted playsInline preload="auto" />
-          <span className="mg-ana-tint" />
-          <span className="mg-ana-warm" />
-          <span className="mg-ana-vignette" />
-        </div>
+      {/* BG liegt AUSSERHALB des gepinnten Elements (sticky), damit die Spine-Linie ZWISCHEN
+          BG (darunter) und Karte (darüber) verlaufen kann: BG z<Spine, Karte/Pin z>Spine. */}
+      <div className="mg-ana-bg" aria-hidden>
+        {/* EIN scroll-gescrubbtes Video: currentTime hängt am Scroll-Fortschritt — die Footage
+            „läuft" nicht, sie wird gescrubbt. Quelle erst auf dem Desktop per JS → kein Mobile-DL.
+            Über dem Video nur statische Tönung/Vignette (Compositor), nie pro Frame gerastert. */}
+        <video className="mg-ana-scrub" muted playsInline preload="auto" />
+        <span className="mg-ana-tint" />
+        <span className="mg-ana-warm" />
+        <span className="mg-ana-vignette" />
+      </div>
 
+      <div className="mg-anatomy-pin">
         <div className="mg-anatomy-stage">
           <div className="mg-head">
             <p className="mg-overline">Fallbeispiel · nachgestellt</p>

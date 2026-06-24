@@ -412,19 +412,23 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Anatomie (Pin) */
 .mg-anatomy {
-  /* z-index 5 > Spine (4): die Anatomie-Sektion (Karte) liegt ÜBER der Spine-Linie →
-     die Linie verläuft hinter der Karte statt davor (User: „nimmt zu sehr den Fokus"). */
-  position: relative; isolation: isolate; z-index: 5; border-bottom: 1px solid var(--mg-line);
+  /* KEIN eigener Stacking-Context (kein isolate/z-index) → BG und Karte können sich um die
+     globale Spine-Linie (z 4) herum einsortieren: BG z0 < Spine 4 < Pin/Karte z5. So verläuft
+     die Linie ÜBER dem BG, aber HINTER der Karte (User-Wunsch). */
+  position: relative; border-bottom: 1px solid var(--mg-line);
   /* Statt Foto: tiefer Grund, die Atmosphäre macht der animierte Aurora-Layer (.mg-ana-bg). */
   background-color: #07080b;
   background-image:
     radial-gradient(90% 60% at 50% -10%, rgba(110, 138, 255, 0.08), transparent 60%),
     linear-gradient(180deg, #090a0e, #06070a);
 }
-.mg-anatomy-pin { position: relative; overflow: hidden; }
+/* Pin/Karte ÜBER der Spine (z 4); overflow:hidden NICHT hier (würde das sticky-BG-Scrubbing
+   nicht stören, aber wir clippen die Karte separat). */
+.mg-anatomy-pin { position: relative; z-index: 5; overflow: hidden; }
 
-/* ---------- Bühne: dasselbe Blueprint-Raster wie die anderen Sektionen, hinter der Karte ---------- */
-.mg-ana-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+/* BG als STICKY-Layer (klebt während der Sektion am Viewport-Top, deckt es ab), UNTER der Spine
+   (z 0 < 4). Liegt außerhalb des gepinnten Elements → die Spine kann dazwischen verlaufen. */
+.mg-ana-bg { position: sticky; top: 0; height: 100svh; z-index: 0; pointer-events: none; overflow: hidden; }
 .mg-anatomy-stage { position: relative; z-index: 1; }
 /* ---------- EIN scroll-gescrubbtes Video (Scrollytelling-Look) ----------
    Dunkelblaue, langsam morphende Tinte; currentTime hängt am Scroll-Fortschritt (JS).
