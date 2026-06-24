@@ -152,6 +152,7 @@ export default function Anatomy() {
       }
 
       applyStep(0, 0);
+
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: pinEl,
@@ -162,8 +163,6 @@ export default function Anatomy() {
           anticipatePin: 1,
           snap: { snapTo: "labels", duration: { min: 0.2, max: 0.6 }, ease: "power1.inOut" },
           onUpdate(self) {
-            // Video-Scrub direkt am Scroll-Fortschritt (das IST der Scrollytelling-Effekt).
-            seekTo(self.progress);
             const idx = Math.max(0, Math.min(3, Math.round(self.progress * 3)));
             applyStep(idx, self.progress);
           },
@@ -177,7 +176,25 @@ export default function Anatomy() {
         .addLabel("end");
       if (prog) tl.fromTo(prog, { scaleY: 0 }, { scaleY: 1, ease: "none", duration: 3 }, 0);
 
+      // Video-Scrub über die GESAMTE Durchfahrt der Sektion (rein → gepinnt → raus) aus EINER
+      // Quelle: direkt aus der Scroll-Position der Sektion (kein zweiter ScrollTrigger, der mit
+      // dem Pin um die Footage streitet → war nicht-monoton). p=0 wenn die Sektion unten ins
+      // Viewport tritt, p=1 wenn sie oben austritt → die Footage läuft FLÜSSIG mit dem Scroll an
+      // UND aus, nicht erst wenn gepinnt/zentriert (User: „am Anfang und Ende zu abgehackt").
+      let vraf = 0;
+      const seekFromScroll = () => {
+        vraf = 0;
+        const r = root.getBoundingClientRect();
+        const vh = window.innerHeight;
+        seekTo(Math.max(0, Math.min(1, (vh - r.top) / (r.height + vh))));
+      };
+      const onVidScroll = () => { if (!vraf) vraf = requestAnimationFrame(seekFromScroll); };
+      window.addEventListener("scroll", onVidScroll, { passive: true });
+      seekFromScroll();
+
       return () => {
+        window.removeEventListener("scroll", onVidScroll);
+        if (vraf) cancelAnimationFrame(vraf);
         stopVideo();
         doc.classList.remove("ed-verb", "ed-num", "ed-quote");
         railSteps.forEach((r) => r.classList.remove("on"));
