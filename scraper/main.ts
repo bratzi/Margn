@@ -443,6 +443,10 @@ function cleanBody(body: string, url: string, title: string | null): string {
     if (tail > 120) b = b.slice(0, tail);
     // 4) Verbliebene "FAZ+"-Badges (FAZ-Plus-Empfehlungen/Recirculation-Teaser im Text) neutralisieren.
     b = b.replace(/\bFAZ\+/g, " ");
+    // 5) Autoren-Box-Chrome: der „Folgen"-Button (Follow) in der Autorenzeile erscheint/verschwindet
+    //    je Render → reine Oszillation (Art. 235745: „…Wirtschaft. Folgen Redakteurin…" ↔ „…Wirtschaft.
+    //    Redakteurin…"). „Folgen" vor der (oft wiederholten) Rollen-Angabe entfernen → Body stabil.
+    b = b.replace(/\.\s*Folgen\s+(?=(?:Redakteur|Redaktor|Autor|Korrespondent|Reporter|Volont[aä]r|Redaktionsleiter|Ressortleiter|Herausgeber|Kolumnist|Wirtschafts|Politik|Sport|Feuilleton)[a-zäöüß]*\b)/g, ". ");
   }
 
   return b.replace(/\s+/g, " ").trim();
@@ -489,6 +493,23 @@ function buildMetaEdits(prev: NonNullable<PrevState>, m: MetaNow | null): MetaEd
   return out;
 }
 
+// Rollende Historie der letzten Inhalts-Hashes (für die verlagsübergreifende Oszillations-
+// Erkennung). Gleichen Hash ans Ende ziehen (dedup), max. `keep` behalten.
+function pushHash(recent: string[], h: string, keep = 8): string {
+  return [...recent.filter((x) => x !== h), h].slice(-keep).join(",");
+}
+// articles-Update, das die optionale Spalte `recent_hashes` GRACEFUL behandelt: existiert sie
+// (noch) nicht (kein ALTER gelaufen), wird das Feld weggelassen und erneut versucht → der
+// Scraper läuft weiter, der Oszillations-Schutz ist dann nur inaktiv.
+async function updateArticle(articleId: number, fields: Record<string, unknown>) {
+  let { error } = await sb.from("articles").update(fields).eq("id", articleId);
+  if (error && /recent_hashes/i.test(error.message)) {
+    const rest = { ...fields }; delete (rest as any).recent_hashes;
+    ({ error } = await sb.from("articles").update(rest).eq("id", articleId));
+  }
+  if (error) console.error("ARTICLE-UPDATE-FEHLER:", error.message);
+}
+
 // Vergleicht neuen Inhalt mit dem letzten Stand und schreibt bei echter Änderung einen Snapshot.
 // Unterscheidet "extension" (nur hinzugefügt = valide Erweiterung, z.B. Timeline-Artikel) von
 // "edit" (entfernt/ersetzt = stille Änderung) und "mixed".
@@ -501,12 +522,19 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
 
   // Erstkontakt: nur Baseline-Fingerprint + Absätze speichern, kein Snapshot.
   if (!prev || !prev.content_hash) {
-    await sb.from("articles").update({
+    await updateArticle(articleId, {
       content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords,
+      recent_hashes: pushHash([], contentHash),
       ...(isLiveblog ? { article_type: "liveblog" } : {}),
-    }).eq("id", articleId);
+    });
     await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
+  }
+  // Rollende Hash-Historie laden (separat + graceful: fehlt die Spalte, bleibt der Schutz inaktiv).
+  let recentHashes: string[] = [];
+  {
+    const { data: rh, error: rhErr } = await sb.from("articles").select("recent_hashes").eq("id", articleId).maybeSingle();
+    if (!rhErr && (rh as any)?.recent_hashes) recentHashes = String((rh as any).recent_hashes).split(",").filter(Boolean);
   }
   // Re-Baseline-Schutz: Eine ALTE Baseline (Bild/n-tv) kann noch Verlags-Kopf-Chrome enthalten,
   // das cleanBody inzwischen entfernt. Ein reiner Extraktions-Unterschied darf KEINEN Edit erzeugen
@@ -622,6 +650,20 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   else if (addedFps.length > removedCount) kind = "extension";
   else kind = "edit";
 
+  // OSZILLATIONS-SCHUTZ (verlagsübergreifend): Springt der Inhalt auf einen KÜRZLICH dagewesenen
+  // Stand zurück (A→B→A…, typisch für rotierendes Chrome wie den FAZ-„Folgen"-Button, wechselnde
+  // Werbe-/Empfehlungs-Slots) und ist sonst NICHTS Echtes geändert (kein Titel/Datum/Meta), dann
+  // KEINEN Snapshot schreiben — nur Baseline + Historie still nachziehen. So hört die endlose
+  // Wiederholung im Änderungsverlauf auf (Art. 235745). Liveblogs/Ticker ausgenommen (echtes Wachstum).
+  if (contentChanged && !isTimeline && !titleChanged && !pubChanged && !metaChanged && recentHashes.includes(contentHash)) {
+    await updateArticle(articleId, {
+      content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords,
+      recent_hashes: pushHash(recentHashes, contentHash),
+    });
+    await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
+    return;
+  }
+
   const snapRow: Record<string, unknown> = {
     article_id: articleId, change_kind: kind,
     title_old: titleChanged ? decodeEntities(prev.title!) : null,
@@ -646,11 +688,12 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   const editCount = (prev.edit_count ?? 0) + (kind === "edit" ? 1 : 0);
   // Kategorie "timeline": mehrfach erweitert (echter, über Tage wachsender Artikel)
   const newType = isLiveblog ? "liveblog" : (extCount >= 2 ? "timeline" : undefined);
-  await sb.from("articles").update({
+  await updateArticle(articleId, {
     content_hash: contentHash, para_fps: fps.join(","), title: newTitle, body_words: bodyWords,
     revision_count: (prev.revision_count ?? 0) + 1, extension_count: extCount, edit_count: editCount,
+    recent_hashes: pushHash(recentHashes, contentHash),
     ...(newType ? { article_type: newType } : {}),
-  }).eq("id", articleId);
+  });
   await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
 }
 
