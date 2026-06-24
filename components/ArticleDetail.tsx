@@ -50,6 +50,18 @@ function durStr(ms: number): string {
 function timeDelta(isoA: string, isoB: string): string {
   return durStr(Math.abs(new Date(isoB).getTime() - new Date(isoA).getTime()));
 }
+// Echte stille Re-Datierung? Eine Veröffentlichungszeit, die RÜCKWÄRTS springt oder um Monate
+// abweicht, ist fast immer eine Fehl-Extraktion (Seiten tragen mehrere Datums-Signale: Original,
+// „aktualisiert", verwandte Artikel) — KEIN echtes „still geändert". Sonst falsche Datums-Meldungen
+// verlagsübergreifend (z.B. Art. 34243: 2026-06-18 → 2025-11-14, 7 Monate rückwärts). Plausibel =
+// vorwärts und höchstens ~30 Tage (so wie Verlage Artikel „auffrischen").
+function realDateShift(oldIso: string | null, newIso: string | null): boolean {
+  if (!oldIso || !newIso) return false;
+  const a = new Date(oldIso).getTime(), b = new Date(newIso).getTime();
+  if (!a || !b || a === b) return false;
+  const days = (b - a) / 864e5;
+  return days > 0 && days <= 30;
+}
 
 export default function ArticleDetail({ id }: { id: number }) {
   const [a, setA] = useState<Detail | null>(null);
@@ -188,7 +200,7 @@ export default function ArticleDetail({ id }: { id: number }) {
     }
     const edit = a.edit_count ?? 0, ext = a.extension_count ?? 0, rev = a.revision_count ?? 0;
     let insight: string | null = null;
-    if (snaps.some((s) => s.pubdate_old && s.pubdate_new)) insight = "Das Veröffentlichungsdatum wurde nachträglich verschoben — eine Änderung, die Leser nie zu sehen bekommen.";
+    if (snaps.some((s) => realDateShift(s.pubdate_old, s.pubdate_new))) insight = "Das Veröffentlichungsdatum wurde nachträglich verschoben — eine Änderung, die Leser nie zu sehen bekommen.";
     else if (edit > 0 && ext === 0) insight = "Alle erfassten Änderungen waren stille Korrekturen am bestehenden Text — ergänzt wurde nichts.";
     else if (ext >= 2) insight = "Der Beitrag wuchs über mehrere Besuche hinweg — fortlaufende, mitlaufende Berichterstattung.";
     else if (rev > 0 && sn.length && pub && sn[sn.length - 1] - pub > 86400000) insight = `Noch ${durStr(sn[sn.length - 1] - pub)} nach Veröffentlichung redaktionell angefasst.`;
@@ -490,31 +502,6 @@ function inlineOps(oldS: string, newS: string): Op[] {
   for (let x = 1; x < segs.length; x++) if (segs[x].op === "ins" && segs[x - 1].op === "del") segs[x].op = "repl";
   return segs;
 }
-// Eine Seite des Diffs: VOLLER Text. „Vorher" zeigt unverändert + Entfernungen (rot schraffiert),
-// „Jetzt" unverändert + Ergänzungen (grün schraffiert). Gleicher Text wird NICHT gekürzt — nur der
-// Unterschied wird per Schraffur hervorgehoben, wie in einem Diff-Tool.
-function DiffSide({ ops, side }: { ops: Op[]; side: "old" | "new" }) {
-  return (
-    <span className="dq-text">
-      {ops.map((o, i) => {
-        if (o.op === "skip") return <span key={i} className="dq-skip">{o.t}</span>;
-        if (o.op === "eq") return <span key={i}>{o.t}</span>;
-        if (o.op === "del") {
-          // Entferntes: links „alt" rot durchgestrichen; rechts eine rote Schraffur-LÜCKE,
-          // die exakt die Breite des fehlenden Texts einnimmt (transparenter Text) → Zeilen
-          // bleiben aligned und man sieht im L/R-Vergleich, wo etwas wegfiel.
-          return side === "old"
-            ? <del key={i} className="dq-del">{o.t}</del>
-            : <span key={i} className="dq-gap gap-del" aria-hidden>{o.t}</span>;
-        }
-        // ins | repl → Ergänztes: rechts „neu" grün; links eine grüne Schraffur-Lücke.
-        return side === "new"
-          ? <ins key={i} className="dq-ins">{o.t}</ins>
-          : <span key={i} className="dq-gap gap-ins" aria-hidden>{o.t}</span>;
-      })}
-    </span>
-  );
-}
 // Lange Body-Diffs (Ticker/Liveblog/Riesenabsatz wie n-tv) auf ZEILEN-Ebene diffen statt
 // Wort-Ebene: ein Wort-LCS über zwei verschobene 1500-Zeichen-Fenster matcht zufällig
 // wiederkehrende Tokens („Uhr:", „Gruppe", Städtenamen) und produziert Wort-Konfetti.
@@ -576,7 +563,9 @@ function trimHunk(h: Op[]): Op[] {
     return { ...o, t: o.t.slice(0, 80) + " … " + o.t.slice(-80) };
   });
 }
-// Eine einzelne Diff-Box (Vorher|Jetzt nebeneinander).
+// Eine einzelne Diff-Box — UNIFIED inline (wie Section 3 der Landingpage): EIN Textfluss,
+// Entferntes rot durchgestrichen + ausgegraut, Hinzugefügtes grün. KEINE Vorher/Jetzt-Spalten,
+// KEINE Schraffur auf dem Text — so wie echte Diff-Tools (und vom User explizit gewünscht).
 function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string }) {
   const changed = ops.some((o) => o.op !== "eq" && o.op !== "skip");
   return (
@@ -585,9 +574,13 @@ function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string 
       {!changed ? (
         <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>nur Whitespace/Formatierung geändert</span></div>
       ) : (
-        <div className="dq-2">
-          <div className="dq-col old"><span className="dq-side-tag">Vorher</span><div className="dq-side-body"><DiffSide ops={ops} side="old" /></div></div>
-          <div className="dq-col new"><span className="dq-side-tag">Jetzt</span><div className="dq-side-body"><DiffSide ops={ops} side="new" /></div></div>
+        <div className="dq-uni">
+          {ops.map((o, i) =>
+            o.op === "skip" ? <span key={i} className="dq-uni-skip">{o.t}</span>
+            : o.op === "del" ? <del key={i} className="dq-uni-del">{o.t}</del>
+            : o.op === "ins" || o.op === "repl" ? <ins key={i} className="dq-uni-ins">{o.t}</ins>
+            : <span key={i}>{o.t}</span>
+          )}
         </div>
       )}
     </div>
@@ -694,7 +687,7 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   const changes = [...allChanges].sort((a, b) => ((b.old?.length ?? 0) + (b.new?.length ?? 0)) - ((a.old?.length ?? 0) + (a.new?.length ?? 0))).slice(0, 3);
   const moreChanges = allChanges.length - changes.length;
   const titleChanged = !!(s.title_old && s.title_new);
-  const dateChanged = !!(s.pubdate_old && s.pubdate_new);
+  const dateChanged = realDateShift(s.pubdate_old, s.pubdate_new);
   const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field);
   return (
     <div className={`chist-card ${s.change_kind}`}>
