@@ -433,9 +433,13 @@ function cleanBody(body: string, url: string, title: string | null): string {
     // 2) Führender "[Ressort]FAZ+<Kicker> :"-Kopf (Ressort = ein großgeschriebenes Wort direkt davor).
     b = b.replace(/^\s*(?:[A-ZÄÖÜ][A-Za-zäöüß-]{2,20})?FAZ\+[^:]{0,80}:\s*/, "");
     // 3) Abschluss-Chrome am Ende abschneiden (wächst/wechselt je Scan → Phantom-Edits):
-    //    Paywall-CTA, "Das Beste von FAZ+"-Empfehlungen, Verlags-Footer. Marker VOR der FAZ+-
-    //    Neutralisierung suchen (sonst sind die "FAZ+"-Anker schon weg).
-    const tail = b.search(/jetzt nur \d+,\d{2}\s*€|Zugang zu allen FAZ\+|Mit einem Klick online kündbar|Das Beste von FAZ\+|Stellenmarkt\s+Verlagsangebot|FAZ\+ kostenlos testen/);
+    //    Paywall-CTA, "Das Beste von FAZ+"-Empfehlungen, Verlags-Footer, sowie der
+    //    Leserkommentar-Block ("Lesermeinungen<Nutzer><Datum>…") und Recirculation-Teaser.
+    //    WICHTIG (Art. 171547): genau dieser Kommentar-/Empfehlungs-Slot ROTIERT je Scan
+    //    (mal Kommentare, mal Teaser) → Readability greift ihn mal so, mal so → oszillierende
+    //    Phantom-Edits (add+remove, die sich Version für Version gegenseitig aufheben).
+    //    Marker VOR der FAZ+-Neutralisierung suchen (sonst sind die "FAZ+"-Anker schon weg).
+    const tail = b.search(/jetzt nur \d+,\d{2}\s*€|Zugang zu allen FAZ\+|Mit einem Klick online kündbar|Das Beste von FAZ\+|Stellenmarkt\s+Verlagsangebot|FAZ\+ kostenlos testen|Lesermeinungen(?=[A-ZÄÖÜ0-9])|Quelle:\s*F\.A\.Z\./);
     if (tail > 120) b = b.slice(0, tail);
     // 4) Verbliebene "FAZ+"-Badges (FAZ-Plus-Empfehlungen/Recirculation-Teaser im Text) neutralisieren.
     b = b.replace(/\bFAZ\+/g, " ");
