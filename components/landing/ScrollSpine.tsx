@@ -17,7 +17,7 @@ type Mood = "straight" | "wave" | "zig" | "step" | "spring" | "ease";
 const SECTIONS: { sel: string; mood: Mood; color: string; lane: number; amp: number }[] = [
   { sel: ".mg-hero",     mood: "ease",   color: "#9fb2ff", lane: 0.16, amp: 0.55 },
   { sel: "#funktionen",  mood: "wave",   color: "#6e8aff", lane: 0.52, amp: 1.0 },
-  { sel: "#anatomie",    mood: "zig",    color: "#ff6f61", lane: 0.78, amp: 1.15 },
+  { sel: "#anatomie",    mood: "ease",   color: "#ff6f61", lane: 0.5,  amp: 0.3 },
   { sel: ".mg-stats",    mood: "step",   color: "#9fb2ff", lane: 0.40, amp: 0.9 },
   { sel: "#methodik",    mood: "spring", color: "#43d9a3", lane: 0.22, amp: 0.85 },
   { sel: "#abdeckung",   mood: "wave",   color: "#6e8aff", lane: 0.66, amp: 1.0 },

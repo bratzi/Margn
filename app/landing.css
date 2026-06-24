@@ -412,7 +412,9 @@ html.lenis, html.lenis body { height: auto; }
 
 /* ---------------------------------------------------------------- Anatomie (Pin) */
 .mg-anatomy {
-  position: relative; isolation: isolate; border-bottom: 1px solid var(--mg-line);
+  /* z-index 5 > Spine (4): die Anatomie-Sektion (Karte) liegt ÜBER der Spine-Linie →
+     die Linie verläuft hinter der Karte statt davor (User: „nimmt zu sehr den Fokus"). */
+  position: relative; isolation: isolate; z-index: 5; border-bottom: 1px solid var(--mg-line);
   /* Statt Foto: tiefer Grund, die Atmosphäre macht der animierte Aurora-Layer (.mg-ana-bg). */
   background-color: #07080b;
   background-image:
@@ -433,10 +435,11 @@ html.lenis, html.lenis body { height: auto; }
   /* KEIN Zoom: 1:1 object-fit cover, damit maximal viel Footage sichtbar ist und
      nichts hochskaliert/unscharf wirkt. Die Bewegung kommt allein aus dem Scrub. */
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  /* Bewusst SEHR dezent: ein leises Ziffern-Rauschen im Hintergrund, nicht präsent.
-     Niedrige Opacity + Abdunklung → die Footage tritt zurück (User: „viel dezenter"). */
-  filter: saturate(0.8) contrast(0.95) brightness(0.78);
-  opacity: 0.38; pointer-events: none; backface-visibility: hidden;
+  /* Dezent, aber NICHT matt: das rote organische Motiv darf satt/präsent durchkommen
+     (User: „wirkt zu matt"). Mehr Sättigung/Helligkeit + höhere Opacity als beim
+     Ziffern-Clip, bleibt aber hinter der Karte. */
+  filter: saturate(1.32) contrast(1.08) brightness(1.02);
+  opacity: 0.62; pointer-events: none; backface-visibility: hidden;
 }
 @media (max-width: 860px) { .mg-ana-scrub { display: none; } }
 /* Statische kühle Grundtönung (normaler Blend — kein mix-blend-mode pro Frame). */
