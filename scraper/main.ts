@@ -1441,30 +1441,30 @@ async function analyzeBacklog() {
   const srcById = new Map((srcs ?? []).map((s: any) => [s.id, s]));
   const activeIds = [...srcById.keys()];
 
-  // 1) entdeckte Artikel-Knoten + bereits analysierte URLs laden.
-  // NEUESTE zuerst (id desc): die jüngsten Funde (Feeds/Sitemaps/Crawl) werden
-  // priorisiert gerendert → relevante, aktuelle Artikel zuerst statt altem Backlog.
-  const discovered = await fetchAll<{ url: string; source_id: number }>((from) =>
-    sb.from("pages").select("url,source_id").eq("kind", "article").in("source_id", activeIds).order("id", { ascending: false })
+  // 1) OFFENE Artikel-Knoten laden = entdeckte pages.kind='article', die noch NICHT
+  // gerendert sind (kein articles-Eintrag mit gesetztem title). Reine Sitemap-Vorab-
+  // Zeilen (title=null, nur published_at aus harvestSitemaps) gelten als offen → werden
+  // weiterhin gerendert.
+  // Früher zog dieser Schritt die KOMPLETTE pages- UND articles-Liste (~je 30k Zeilen,
+  // ~5 MB) und verglich clientseitig — der mit Abstand größte Supabase-Egress-Posten
+  // (stündlich). Jetzt erledigt ein Server-seitiger Anti-Join (RPC open_article_pages)
+  // den Abgleich; übertragen wird nur der tatsächlich offene Rest (typ. wenige hundert).
+  // WICHTIG: Re-Scans (stille Edits) hängen NICHT hier dran — sie laufen über den eigenen
+  // altersgestaffelten Block weiter unten direkt gegen `articles` und sind unberührt.
+  // NEUESTE zuerst (id desc): die jüngsten Funde werden priorisiert gerendert.
+  const open = await fetchAll<{ id: number; url: string; source_id: number }>((from) =>
+    sb.rpc("open_article_pages", { src_ids: activeIds }).order("id", { ascending: false })
   );
-  // „Erledigt" = bereits GERENDERT (title gesetzt). Reine Sitemap-Vorab-Zeilen
-  // (title=null, nur published_at aus harvestSitemaps) zählen NICHT als erledigt →
-  // werden weiterhin gerendert, statt vom Renderer übersprungen zu werden.
-  const doneRows = await fetchAll<{ url: string }>((from) => sb.from("articles").select("url").not("title", "is", null));
-  const done = new Set(doneRows.map((r) => r.url));
 
   // Budget gleichmäßig über die Quellen verteilen (sonst frisst die größte Quelle alles).
   const perSource = Math.ceil(MAX_PAGES / activeIds.length);
   const bySrc = new Map<number, string[]>();
-  let openTotal = 0;
-  for (const p of discovered) {
-    if (done.has(p.url)) continue;
-    openTotal++;
+  for (const p of open) {
     const arr = bySrc.get(p.source_id) ?? bySrc.set(p.source_id, []).get(p.source_id)!;
     if (arr.length < perSource) arr.push(p.url);
   }
   const batch = [...bySrc.values()].reduce((s, a) => s + a.length, 0);
-  console.log(`Entdeckt: ${discovered.length} | analysiert: ${done.size} | offen: ${openTotal} | dieser Lauf: ${batch} (max ${perSource}/Quelle)`);
+  console.log(`Offen (nicht gerendert): ${open.length} | dieser Lauf: ${batch} (max ${perSource}/Quelle)`);
 
   // Neue Artikel werden DIREKT gerendert und voll angereichert (Titel, Wörter, Datum,
   // Autoren, Keywords) — statt nur nackte URLs einzufügen. So kommen neue Artikel OHNE den
@@ -1565,9 +1565,9 @@ async function analyzeBacklog() {
   const newCount = queue.length;
   if (queue.length < MAX_PAGES) {
     const inQ = new Set(queue.map((q) => q.url));
-    for (const p of discovered) { // bereits id-desc (neueste zuerst)
+    for (const p of open) { // bereits id-desc (neueste zuerst), enthält nur offene Knoten
       if (queue.length >= MAX_PAGES) break;
-      if (done.has(p.url) || inQ.has(p.url)) continue;
+      if (inQ.has(p.url)) continue;
       queue.push({ url: p.url, sid: p.source_id }); inQ.add(p.url);
     }
     console.log(`Wasserstand aufgefüllt: ${queue.length - newCount} weitere neue Artikel`);
