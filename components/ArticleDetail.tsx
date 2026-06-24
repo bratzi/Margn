@@ -469,7 +469,11 @@ function TypeBadge({ type }: { type: string }) {
 // Inline-Wort-Diff (LCS): EIN durchgehender Text, in dem nur die geänderten Wörter markiert sind.
 type Op = { t: string; op: "eq" | "del" | "ins" | "repl" | "skip" };
 function inlineOps(oldS: string, newS: string): Op[] {
-  const o = oldS.split(/(\s+)/).filter((x) => x !== ""), n = newS.split(/(\s+)/).filter((x) => x !== "");
+  // Token = Wort INKL. nachfolgendem Whitespace. Wichtig: KEINE eigenständigen Whitespace-Tokens,
+  // sonst matchen die Leerzeichen im LCS und verankern völlig verschiedene Texte Wort für Wort
+  // (→ „Konfetti" mit Schraffur zwischen jedem Wort, v.a. bei Überschriften). So zerfällt ein
+  // komplett anderer Tail sauber in EINEN del- + EINEN ins-Block.
+  const o = oldS.match(/\S+\s*/gu) ?? [], n = newS.match(/\S+\s*/gu) ?? [];
   const m = o.length, k = n.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(k + 1).fill(0));
   for (let i = m - 1; i >= 0; i--) for (let j = k - 1; j >= 0; j--)
@@ -477,8 +481,8 @@ function inlineOps(oldS: string, newS: string): Op[] {
   const raw: Op[] = []; let i = 0, j = 0;
   while (i < m || j < k) {
     if (i < m && j < k && o[i] === n[j]) { raw.push({ t: o[i], op: "eq" }); i++; j++; }
-    else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) { raw.push({ t: n[j], op: "ins" }); j++; }
-    else { raw.push({ t: o[i], op: "del" }); i++; }
+    else if (i < m && (j >= k || dp[i + 1][j] >= dp[i][j + 1])) { raw.push({ t: o[i], op: "del" }); i++; }
+    else { raw.push({ t: n[j], op: "ins" }); j++; }
   }
   for (let x = 1; x < raw.length - 1; x++) if (/^\s+$/.test(raw[x].t) && raw[x].op === "eq" && raw[x - 1].op === raw[x + 1].op && raw[x - 1].op !== "eq") raw[x].op = raw[x - 1].op;
   const segs: Op[] = [];
@@ -548,27 +552,33 @@ function refineLineOps(ops: Op[]): Op[] {
   }
   return out;
 }
-// Lange Läufe unveränderter Zeilen zu „⋯ N unveränderte Zeilen ⋯" zusammenfalten (beidseitig).
-function elideLines(ops: Op[], keep = 2): Op[] {
-  const out: Op[] = []; let i = 0;
-  while (i < ops.length) {
-    if (ops[i].op !== "eq") { out.push(ops[i]); i++; continue; }
-    let j = i; while (j < ops.length && ops[j].op === "eq") j++;
-    const run = ops.slice(i, j);
-    if (run.length > keep * 2 + 1) {
-      out.push(...run.slice(0, keep), { t: `⋯ ${run.length - keep * 2} unveränderte Zeilen ⋯`, op: "skip" }, ...run.slice(run.length - keep));
-    } else out.push(...run);
-    i = j;
+// Zeilen-Diff in „Hunks" zerlegen: zusammenhängende Änderungen + etwas Kontext = EIN Hunk.
+// Sind mehrere Änderungsstellen weit auseinander, entstehen mehrere Hunks → mehrere kleine
+// Boxen statt einer riesigen (User-Wunsch: „mehrere Boxen statt 1 großen, logisch gesplittet").
+function toHunks(ops: Op[], ctx = 2): Op[][] {
+  const ch = ops.map((o, i) => (o.op !== "eq" ? i : -1)).filter((i) => i >= 0);
+  if (!ch.length) return [];
+  const groups: [number, number][] = [];
+  let start = ch[0], prev = ch[0];
+  for (let x = 1; x < ch.length; x++) {
+    if (ch[x] - prev - 1 > ctx * 2) { groups.push([start, prev]); start = ch[x]; }
+    prev = ch[x];
   }
-  return out;
+  groups.push([start, prev]);
+  return groups.map(([a, b]) => ops.slice(Math.max(0, a - ctx), Math.min(ops.length, b + ctx + 1)));
 }
-// Side-by-Side: Vorher links, Jetzt rechts — voller Text je Version, Unterschiede schraffiert.
-function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta" }) {
-  // Lange Body-Texte (Ticker/Liveblog/Riesenabsatz) → Zeilen-Diff + Eliding (saubere Blöcke
-  // statt Wort-Konfetti). Kurze Diffs (Titel/Teaser) bleiben Wort-Diff mit Volltext.
-  const big = oldS.length + newS.length > 600;
-  const shown = big ? elideLines(refineLineOps(lineOps(oldS, newS))) : inlineOps(oldS, newS);
-  const changed = shown.some((o) => o.op !== "eq" && o.op !== "skip");
+// Lange Kontext-Zeilen an den Hunk-Rändern kürzen (zur Änderung hin), damit ein Hunk kompakt bleibt.
+function trimHunk(h: Op[]): Op[] {
+  return h.map((o, i) => {
+    if (o.op !== "eq" || o.t.length <= 160) return o;
+    if (i === 0) return { ...o, t: "… " + o.t.slice(-120) };
+    if (i === h.length - 1) return { ...o, t: o.t.slice(0, 120) + " …" };
+    return { ...o, t: o.t.slice(0, 80) + " … " + o.t.slice(-80) };
+  });
+}
+// Eine einzelne Diff-Box (Vorher|Jetzt nebeneinander).
+function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string }) {
+  const changed = ops.some((o) => o.op !== "eq" && o.op !== "skip");
   return (
     <div className={`dq ${kind}`}>
       <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
@@ -576,11 +586,27 @@ function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: s
         <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>nur Whitespace/Formatierung geändert</span></div>
       ) : (
         <div className="dq-2">
-          <div className="dq-col old"><span className="dq-side-tag">Vorher</span><div className="dq-side-body"><DiffSide ops={shown} side="old" /></div></div>
-          <div className="dq-col new"><span className="dq-side-tag">Jetzt</span><div className="dq-side-body"><DiffSide ops={shown} side="new" /></div></div>
+          <div className="dq-col old"><span className="dq-side-tag">Vorher</span><div className="dq-side-body"><DiffSide ops={ops} side="old" /></div></div>
+          <div className="dq-col new"><span className="dq-side-tag">Jetzt</span><div className="dq-side-body"><DiffSide ops={ops} side="new" /></div></div>
         </div>
       )}
     </div>
+  );
+}
+// Side-by-Side: Vorher links, Jetzt rechts. Kurze Diffs (Titel/Teaser) = EINE Box mit Wort-Diff.
+// Lange Body-Texte (Ticker/Liveblog/Riesenabsatz) = Zeilen-Diff, in MEHRERE Boxen je Änderungsstelle
+// gesplittet statt einer riesigen Box.
+function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta" }) {
+  const big = oldS.length + newS.length > 600;
+  if (!big) return <DiffBox ops={inlineOps(oldS, newS)} label={label} kind={kind} />;
+  const hunks = toHunks(refineLineOps(lineOps(oldS, newS))).map(trimHunk);
+  if (hunks.length <= 1) {
+    return <DiffBox ops={hunks[0] ?? inlineOps(oldS, newS)} label={label} kind={kind} />;
+  }
+  return (
+    <>
+      {hunks.map((h, i) => <DiffBox key={i} ops={h} kind={kind} label={`${label} · Stelle ${i + 1}/${hunks.length}`} />)}
+    </>
   );
 }
 
@@ -691,12 +717,22 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
       {metaEdits.map((m, i) => <MetaEditView key={`${m.field}-${i}`} m={m} />)}
       {titleChanged && <DiffBlock oldS={s.title_old!} newS={s.title_new!} label="Überschrift geändert" kind="title" />}
       {isExt ? (() => {
-        const newText = s.added || changes.filter((c) => c.new).map((c) => c.new).join("\n\n");
-        return newText ? (
-          <div className="dq ext">
-            <div className="dq-lbl"><span className="dq-pm add">+</span>Neu hinzugekommen</div>
-            <div className="dq-body dq-add-body">{newText.length > 520 ? newText.slice(0, 520) + " …" : newText}</div>
-          </div>
+        // Neu hinzugekommenes NICHT als ein Riesenblock — jeder hinzugefügte Absatz = eigene Box
+        // (in Dokument-Reihenfolge). So ist es logisch gesplittet statt eine große Textwand.
+        let paras = (s.changes ?? []).filter((c) => c.new && !c.old).map((c) => (c.new ?? "").trim()).filter(Boolean);
+        if (!paras.length && s.added) paras = [s.added.trim()];
+        const shown = paras.slice(0, 5);
+        const more = paras.length - shown.length;
+        return shown.length ? (
+          <>
+            {shown.map((p, i) => (
+              <div className="dq ext" key={i}>
+                <div className="dq-lbl"><span className="dq-pm add">+</span>Neu hinzugekommen{shown.length > 1 ? ` · Abschnitt ${i + 1}` : ""}</div>
+                <div className="dq-body dq-add-body">{p.length > 560 ? p.slice(0, 560) + " …" : p}</div>
+              </div>
+            ))}
+            {more > 0 && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>+ {more} weiterer Abschnitt{more > 1 ? "e" : ""}</p>}
+          </>
         ) : null;
       })() : (
         <>
