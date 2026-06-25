@@ -479,7 +479,7 @@ function TypeBadge({ type }: { type: string }) {
 }
 
 // Inline-Wort-Diff (LCS): EIN durchgehender Text, in dem nur die geänderten Wörter markiert sind.
-type Op = { t: string; op: "eq" | "del" | "ins" | "repl" | "skip" };
+type Op = { t: string; op: "eq" | "del" | "ins" | "repl" | "skip" | "trunc" };
 function inlineOps(oldS: string, newS: string): Op[] {
   // Token = Wort INKL. nachfolgendem Whitespace. Wichtig: KEINE eigenständigen Whitespace-Tokens,
   // sonst matchen die Leerzeichen im LCS und verankern völlig verschiedene Texte Wort für Wort
@@ -542,6 +542,25 @@ function refineLineOps(ops: Op[]): Op[] {
   }
   return out;
 }
+// Abgeschnittenen Schluss als neutrales „…" versiegeln (VERSATZ, kein echter Zugewinn):
+// Der Scraper kappt gespeicherte Absätze bei 2000 Zeichen — oft MITTEN IM WORT. Die alte
+// Fassung endet dann früher als die neue (z.B. „…der F"), und der Diff zeigt das angeschnittene
+// Wort rot + den ganzen Rest grün, obwohl dort gar nichts „hinzugefügt" wurde, sondern nur
+// außerhalb des erfassten Ausschnitts lag. Erkennen: die LETZTE Abweichung ist ein einzelnes,
+// am Wortende angeschnittenes del-Token (kein folgender Whitespace), gefolgt NUR von ins/repl,
+// deren erstes genau dieses Wort fortsetzt. Dann del + ins-Schwanz durch ein „…" ersetzen.
+function sealTruncatedTail(ops: Op[]): Op[] {
+  let di = -1;
+  for (let i = ops.length - 1; i >= 0; i--) {
+    if (ops[i].op === "del") { di = i; break; }
+    if (ops[i].op !== "ins" && ops[i].op !== "repl") return ops; // hinter dem Schwanz steht echter Text → kein Trunkierungsfall
+  }
+  if (di < 0 || di === ops.length - 1) return ops;
+  const d = ops[di].t;
+  if (/\s/.test(d.trim()) || /\s$/.test(d)) return ops;            // EIN Token, am Ende angeschnitten (kein Trenner danach)
+  if (!ops[di + 1].t.trimStart().startsWith(d.trim())) return ops; // die Ergänzung setzt genau dieses Wort fort
+  return [...ops.slice(0, di), { t: " …", op: "trunc" }];
+}
 // Zeilen-Diff in „Hunks" zerlegen: zusammenhängende Änderungen + etwas Kontext = EIN Hunk.
 // Sind mehrere Änderungsstellen weit auseinander, entstehen mehrere Hunks → mehrere kleine
 // Boxen statt einer riesigen (User-Wunsch: „mehrere Boxen statt 1 großen, logisch gesplittet").
@@ -570,7 +589,8 @@ function trimHunk(h: Op[]): Op[] {
 // Entferntes rot durchgestrichen + ausgegraut, Hinzugefügtes grün. KEINE Vorher/Jetzt-Spalten,
 // KEINE Schraffur auf dem Text — so wie echte Diff-Tools (und vom User explizit gewünscht).
 function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string }) {
-  const changed = ops.some((o) => o.op !== "eq" && o.op !== "skip");
+  const sealed = sealTruncatedTail(ops);
+  const changed = sealed.some((o) => o.op === "del" || o.op === "ins" || o.op === "repl");
   return (
     <div className={`dq ${kind}`}>
       <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
@@ -578,8 +598,9 @@ function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string 
         <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>nur Whitespace/Formatierung geändert</span></div>
       ) : (
         <div className="dq-uni">
-          {ops.map((o, i) =>
+          {sealed.map((o, i) =>
             o.op === "skip" ? <span key={i} className="dq-uni-skip">{o.t}</span>
+            : o.op === "trunc" ? <span key={i} className="dq-uni-skip" title="Text außerhalb des erfassten Ausschnitts (alte Fassung war gekürzt)">{o.t}</span>
             : o.op === "del" ? <del key={i} className="dq-uni-del">{o.t}</del>
             : o.op === "ins" || o.op === "repl" ? <ins key={i} className="dq-uni-ins">{o.t}</ins>
             : <span key={i}>{o.t}</span>
