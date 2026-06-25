@@ -454,12 +454,48 @@ function cleanBody(body: string, url: string, title: string | null): string {
 
 // Body + Liveblog-Flag fürs Change-Tracking bestimmen (verlagsübergreifend). Für echte
 // Liveblogs den vollständigen JSON-LD-Ticker bevorzugen; sonst den (bereinigten) Readability-Body.
-function trackBody(html: string, url: string, art: { body: string } | null, metaIsLive: boolean, title: string | null = null): { body: string; isLive: boolean } | null {
-  const live = extractLiveBlog(html);
-  if (live) return { body: live.body, isLive: true }; // JSON-LD-Ticker ist sauber → nicht bereinigen
-  if (art) return { body: cleanBody(art.body, url, title), isLive: metaIsLive };
-  const fb = extractBodyFallback(html, url); // z.B. Spiegel: Readability scheiterte
-  return fb ? { body: cleanBody(fb.body, url, title), isLive: metaIsLive } : null;
+// Rohen Artikeltext aus EINER HTML-Quelle ziehen (Readability, sonst DOM-Container-Fallback).
+function extractArticleText(html: string, url: string): string {
+  return asArticle(html, url)?.body ?? extractBodyFallback(html, url)?.body ?? "";
+}
+// Substanz-Maß eines Bodys: Gesamtlänge der ECHTEN Absätze (normalizeParas: ≥60 Zeichen, keine
+// Boilerplate). Junk-RESISTENT: kurze Widget-Labels (<60 Z.) und Boilerplate fließen NICHT ein,
+// also misst `chars` echten Artikeltext. Grundlage für die Roh-vs-gerendert-Abwägung; wird VOR
+// cleanBody gemessen, solange die Readability-Absatzumbrüche (so vorhanden) noch da sind.
+function bodyMeasure(text: string): { paras: number; chars: number } {
+  const ps = normalizeParas(text);
+  return { paras: ps.length, chars: ps.reduce((s, p) => s + p.length, 0) };
+}
+// SELBST-ENTSCHEIDUNG: der sauberste UND zugleich vollständigste Body gewinnt.
+//  - ROH-HTML (vor JS) ist sauber (kein JS-injizierter Werbe-/Streaming-/Empfehlungs-Müll), kann
+//    aber UNVOLLSTÄNDIG sein: reine Client-Render-Verlage (Spiegel-Newsblogs) ODER per JS nach-
+//    geladene Ticker/Timelines/Folgeseiten stehen nur im gerenderten DOM.
+//  - GERENDERT ist vollständig (JS-Inhalte da), aber oft mit Müll verschmutzt.
+// Maß ist die bereinigte ECHT-Text-Länge (kurze Junk-Schnipsel sind durch normalizeParas schon
+// rausgefiltert). Der gerenderte Body gewinnt nur, wenn er SPÜRBAR mehr echten Text trägt
+// (> 20 %, d.h. JS-nachgeladener Inhalt: Ticker/Folgeseiten) ODER es ein erkannter Live-/Timeline-
+// Inhalt ist (den wir bewusst aufgeklappt haben). Bei ähnlicher Vollständigkeit (±20 %) gewinnt das
+// saubere Roh-HTML — dessen fehlendes „Mehr" wäre ohnehin nur das injizierte Widget (Art. 269704:
+// gerendert nur +3,7 % → Roh gewinnt). So entscheidet das System fallweise selbst.
+function chooseBody(rawText: string, renText: string, isLive: boolean): { text: string; fromRendered: boolean } {
+  const r = bodyMeasure(rawText), d = bodyMeasure(renText);
+  const rawOk = r.chars >= MIN_BODY, renOk = d.chars >= MIN_BODY;
+  if (!rawOk && !renOk) return d.chars >= r.chars ? { text: renText, fromRendered: true } : { text: rawText, fromRendered: false };
+  if (!rawOk) return { text: renText, fromRendered: true };
+  if (!renOk) return { text: rawText, fromRendered: false };
+  const renMoreComplete = d.chars > r.chars * 1.2;
+  return (isLive || renMoreComplete) ? { text: renText, fromRendered: true } : { text: rawText, fromRendered: false };
+}
+
+function trackBody(html: string, url: string, rawHtml: string | null, art: { body: string } | null, metaIsLive: boolean, title: string | null = null): { body: string; isLive: boolean } | null {
+  const live = extractLiveBlog(rawHtml ?? html);
+  if (live) return { body: live.body, isLive: true }; // JSON-LD-Ticker ist sauber & vollständig → direkt nehmen
+  // Zwei Kandidaten gewinnen lassen: Artikeltext aus ROH-HTML (vor JS) vs. aus gerendertem DOM.
+  const rawText = rawHtml ? extractArticleText(rawHtml, url) : "";
+  const renText = art?.body ?? extractArticleText(html, url);
+  if (!rawText && !renText) return null;
+  const pick = chooseBody(rawText, renText, metaIsLive);
+  return { body: cleanBody(pick.text, url, title), isLive: metaIsLive };
 }
 
 type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null; description: string | null; og_image: string | null; paywalled: boolean | null; author_status: string | null; topic: string | null } | null;
@@ -498,13 +534,26 @@ function buildMetaEdits(prev: NonNullable<PrevState>, m: MetaNow | null): MetaEd
 function pushHash(recent: string[], h: string, keep = 8): string {
   return [...recent.filter((x) => x !== h), h].slice(-keep).join(",");
 }
-// articles-Update, das die optionale Spalte `recent_hashes` GRACEFUL behandelt: existiert sie
-// (noch) nicht (kein ALTER gelaufen), wird das Feld weggelassen und erneut versucht → der
-// Scraper läuft weiter, der Oszillations-Schutz ist dann nur inaktiv.
+// RICHTUNGSUNABHÄNGIGE „Flip-Signatur" eines Edits: der Hash der symmetrischen Fingerprint-
+// Differenz zwischen altem und neuem Absatz-Set. Schlüssel-Eigenschaft: ein A→B-Edit und das
+// spätere B→A-Zurück-Flip liefern DIESELBE Signatur (die Menge der wechselnden Absätze ist
+// identisch, nur die Richtung dreht). Damit lässt sich „die Stelle pendelt schon wieder" auch
+// dann erkennen, wenn der GANZE-Body-Hash nie exakt wiederkehrt — z.B. wenn ein client-
+// gerendertes Widget (Streaming-Angebote, Empfehlungen, „Folgen"-Button) je Render mal im
+// Readability-Body landet, mal nicht. Robuster als der reine content_hash-Vergleich, weil er
+// nur die WECHSELNDE Stelle betrachtet statt den oft mit-jitternden Gesamttext.
+function flipSig(aFps: string[], bFps: string[]): string {
+  const A = new Set(aFps), B = new Set(bFps);
+  const sym = [...new Set([...aFps.filter((f) => !B.has(f)), ...bFps.filter((f) => !A.has(f))])].sort();
+  return sym.length ? fp(sym.join("|")) : "";
+}
+// articles-Update, das die optionalen Spalten `recent_hashes`/`recent_flips` GRACEFUL behandelt:
+// existiert eine (noch) nicht (kein ALTER gelaufen), wird das Feld weggelassen und erneut
+// versucht → der Scraper läuft weiter, der Oszillations-Schutz ist dann nur inaktiv.
 async function updateArticle(articleId: number, fields: Record<string, unknown>) {
   let { error } = await sb.from("articles").update(fields).eq("id", articleId);
-  if (error && /recent_hashes/i.test(error.message)) {
-    const rest = { ...fields }; delete (rest as any).recent_hashes;
+  if (error && /recent_hashes|recent_flips/i.test(error.message)) {
+    const rest = { ...fields }; delete (rest as any).recent_hashes; delete (rest as any).recent_flips;
     ({ error } = await sb.from("articles").update(rest).eq("id", articleId));
   }
   if (error) console.error("ARTICLE-UPDATE-FEHLER:", error.message);
@@ -530,12 +579,19 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
   }
-  // Rollende Hash-Historie laden (separat + graceful: fehlt die Spalte, bleibt der Schutz inaktiv).
+  // Rollende Hash- + Flip-Historie laden (separat + graceful: fehlt eine Spalte, bleibt der
+  // jeweilige Schutz inaktiv). recent_flips trägt die richtungsunabhängigen Flip-Signaturen.
   let recentHashes: string[] = [];
+  let recentFlips: string[] = [];
   {
-    const { data: rh, error: rhErr } = await sb.from("articles").select("recent_hashes").eq("id", articleId).maybeSingle();
+    const { data: rh, error: rhErr } = await sb.from("articles").select("recent_hashes,recent_flips").eq("id", articleId).maybeSingle();
     if (!rhErr && (rh as any)?.recent_hashes) recentHashes = String((rh as any).recent_hashes).split(",").filter(Boolean);
+    if (!rhErr && (rh as any)?.recent_flips) recentFlips = String((rh as any).recent_flips).split(",").filter(Boolean);
   }
+  // Original-Fingerprints des letzten Stands (unbeschnitten, VOR dem Re-Baseline-Schutz unten) —
+  // Basis der Flip-Signatur. Gegen die nächste Runde wird wieder hiergegen verglichen, daher
+  // konsistent mit dem, was gleich als para_fps gespeichert wird.
+  const origPrevFps = (prev.para_fps ?? "").split(",").filter(Boolean);
   // Re-Baseline-Schutz: Eine ALTE Baseline (Bild/n-tv) kann noch Verlags-Kopf-Chrome enthalten,
   // das cleanBody inzwischen entfernt. Ein reiner Extraktions-Unterschied darf KEINEN Edit erzeugen
   // und keinen Chrome-Text in den Diff schreiben → alte Absätze identisch normalisieren und damit
@@ -652,13 +708,24 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
 
   // OSZILLATIONS-SCHUTZ (verlagsübergreifend): Springt der Inhalt auf einen KÜRZLICH dagewesenen
   // Stand zurück (A→B→A…, typisch für rotierendes Chrome wie den FAZ-„Folgen"-Button, wechselnde
-  // Werbe-/Empfehlungs-Slots) und ist sonst NICHTS Echtes geändert (kein Titel/Datum/Meta), dann
-  // KEINEN Snapshot schreiben — nur Baseline + Historie still nachziehen. So hört die endlose
-  // Wiederholung im Änderungsverlauf auf (Art. 235745). Liveblogs/Ticker ausgenommen (echtes Wachstum).
-  if (contentChanged && !isTimeline && !titleChanged && !pubChanged && !metaChanged && recentHashes.includes(contentHash)) {
+  // Werbe-/Empfehlungs-Slots, ein client-gerendertes Streaming-Widget wie Art. 269704) und ist
+  // sonst NICHTS Echtes geändert (kein Titel/Datum/Meta), dann KEINEN Snapshot schreiben — nur
+  // Baseline + Historie still nachziehen. So hört die endlose Wiederholung im Änderungsverlauf auf.
+  // Liveblogs/Ticker ausgenommen (echtes Wachstum).
+  //
+  // Zwei Erkennungen, ODER-verknüpft:
+  //  1) content_hash schon kürzlich dagewesen (exakter Ganz-Body-Rücksprung) — billig, aber spröde:
+  //     greift nur, wenn der GESAMTE Body byte-genau wiederkehrt.
+  //  2) FLIP-SIGNATUR schon kürzlich dagewesen (richtungsunabhängig) — der eigentliche Hebel:
+  //     erkennt das Pendeln EINER Stelle auch dann, wenn der restliche Body mit-jittert und der
+  //     Ganz-Body-Hash daher nie exakt wiederkehrt. flipSig(A→B) == flipSig(B→A).
+  const sig = flipSig(origPrevFps, fps);
+  const oscillates = recentHashes.includes(contentHash) || (sig !== "" && recentFlips.includes(sig));
+  if (contentChanged && !isTimeline && !titleChanged && !pubChanged && !metaChanged && oscillates) {
     await updateArticle(articleId, {
       content_hash: contentHash, para_fps: fps.join(","), body_words: bodyWords,
       recent_hashes: pushHash(recentHashes, contentHash),
+      recent_flips: sig ? pushHash(recentFlips, sig) : recentFlips.join(","),
     });
     await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
     return;
@@ -692,6 +759,9 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     content_hash: contentHash, para_fps: fps.join(","), title: newTitle, body_words: bodyWords,
     revision_count: (prev.revision_count ?? 0) + 1, extension_count: extCount, edit_count: editCount,
     recent_hashes: pushHash(recentHashes, contentHash),
+    // Flip-Signatur dieses Edits merken (nur bei reinem Body-Edit sinnvoll) → der nächste
+    // Rücksprung auf diese Stelle wird oben als Oszillation erkannt und nicht erneut geschrieben.
+    ...(sig && !titleChanged && !pubChanged && !metaChanged ? { recent_flips: pushHash(recentFlips, sig) } : {}),
     ...(newType ? { article_type: newType } : {}),
   });
   await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
@@ -786,7 +856,7 @@ function payDiag(html: string, url: string, decided: boolean | null) {
 }
 
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
-async function saveArticleFull(sourceId: number, url: string, html: string) {
+async function saveArticleFull(sourceId: number, url: string, html: string, rawHtml: string | null = null) {
   url = canonUrl(url); // n-tv-Ticker-Varianten → Kanonik, damit prev/upsert/Tracking konsistent EINE Zeile treffen
   const meta = extractMeta(html, url);
   const art = asArticle(html, url);
@@ -799,7 +869,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string) {
   if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
-  const tb = trackBody(html, url, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
+  const tb = trackBody(html, url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
   if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
   return id;
 }
@@ -857,11 +927,17 @@ async function autoScroll(page: import("playwright").Page, maxMs = 6000): Promis
 // VOR dem Auslesen wird IMMER vollständig nachgeladen: erst autoScroll (lazy/infinite
 // für alle Verleger), dann Button-Expansion (self-gating — ohne passenden Button
 // sofort fertig). expand=true (erkannter Live-/Timeline-Inhalt) → gründlicher.
-async function renderPage(ctx: BrowserContext, url: string, expand = false): Promise<{ status: number; html: string | null }> {
+async function renderPage(ctx: BrowserContext, url: string, expand = false): Promise<{ status: number; html: string | null; rawHtml: string | null }> {
   const page = await ctx.newPage();
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     const status = resp?.status() ?? 0;
+    // ROH-HTML (vor JavaScript) aus der Navigations-Response greifen — KEIN zusätzlicher Request.
+    // Das ist der server-gelieferte Artikeltext: deterministisch über Renders UND frei von den
+    // JS-injizierten Werbe-/Streaming-/Empfehlungs-Widgets, die Readability sonst aus dem
+    // gerenderten DOM zieht (Hauptquelle der Oszillations-Phantome). Body-Tracking bevorzugt das.
+    let rawHtml: string | null = null;
+    try { rawHtml = resp ? await resp.text() : null; } catch { rawHtml = null; }
     // Nur erkannte Liveblogs/Timelines vollständig nachladen (autoScroll + Button-Expansion).
     // Normale Artikel haben den Volltext schon im Erst-Render → kein Scroll nötig; und der
     // Liveblog-Ticker kommt ohnehin aus JSON-LD (serverseitig, scroll-unabhängig). autoScroll
@@ -871,9 +947,9 @@ async function renderPage(ctx: BrowserContext, url: string, expand = false): Pro
       await expandTimeline(page, 6);
     }
     const html = await page.content();
-    return { status, html };
+    return { status, html, rawHtml };
   } catch {
-    return { status: 0, html: null };
+    return { status: 0, html: null, rawHtml: null };
   } finally {
     await page.close();
   }
@@ -1355,6 +1431,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
     // geholte Seite als Artikel, wird ihr Knoten unten korrekt als 'article'
     // markiert → der analyze-Job rendert sie nach.
     let html: string | null = null;
+    let rawHtml: string | null = null; // Server-HTML vor JS (fürs deterministische Body-Tracking)
     let didRender = false;
     let renderStatus = 0; // HTTP-Status des Renders (0 = nicht gerendert/HTTP-Fetch) → Fehlerseiten-Filter
     if (predicted === "article" || live) {
@@ -1362,7 +1439,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
       // als Knoten (existiert bereits via ensureNodes/Sitemap/Feed); analyze rendert.
       if (!RENDER || !ctx || renders >= MAX_PAGES) return;
       const rr = await renderPage(ctx, s.url, live);
-      html = rr.html; renderStatus = rr.status;
+      html = rr.html; rawHtml = rr.rawHtml; renderStatus = rr.status;
       if (html) { renders++; didRender = true; }
     } else {
       html = await fetchHtml(s.url);
@@ -1370,7 +1447,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
       // Notnagel: link-arme JS-Seite → einmal rendern (nur wenn Browser + Budget da).
       if (RENDER && ctx && (!html || (s.depth < MAX_DEPTH && sameDomainLinks(html, src.base_url, s.url).length < 5)) && renders < MAX_PAGES) {
         const rr = await renderPage(ctx, s.url);
-        if (rr.html) { html = rr.html; renderStatus = rr.status; renders++; didRender = true; }
+        if (rr.html) { html = rr.html; rawHtml = rr.rawHtml; renderStatus = rr.status; renders++; didRender = true; }
       }
     }
     if (!html) return;
@@ -1391,7 +1468,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
         // Artikel nur speichern, wenn WIRKLICH gerendert (sonst rendert analyze
         // ihn sauber nach — kein Speichern aus link-armem Roh-HTML).
         if (kind === "article" && article && didRender && MODE !== "structure") {
-          await saveArticleFull(src.id, s.url, html);
+          await saveArticleFull(src.id, s.url, html, rawHtml);
           saved++;
         }
       } catch (e) { console.error("FEHLER:", s.url, (e as Error).message); }
@@ -1583,7 +1660,7 @@ async function analyzeBacklog() {
         const item = queue.shift();
         if (!item) break;
         try {
-          const { status, html } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
+          const { status, html, rawHtml } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
           if (html) {
             // Selbst-Korrektur: stellt sich eine entdeckte „Artikel"-URL als Fehlerseite/Hub/Video
             // heraus, nicht als Artikel führen. Fehlerseiten (404/410/5xx, Soft-404) zuerst prüfen:
@@ -1592,7 +1669,7 @@ async function analyzeBacklog() {
             if (isErrorPage(status, html)) { await sb.from("pages").update({ kind: "error" }).eq("url", item.url); }
             else {
               const cls = classifyRendered(item.url, html);
-              if (cls.kind === "article") { await saveArticleFull(item.sid, item.url, html); ok++; }
+              if (cls.kind === "article") { await saveArticleFull(item.sid, item.url, html, rawHtml); ok++; }
               else { await sb.from("pages").update({ kind: cls.kind }).eq("url", item.url); }
             }
           }
@@ -1660,7 +1737,7 @@ async function enrichArticles(sources: Source[]) {
       while (true) {
         const item = queue.shift();
         if (!item) break;
-        const { html } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
+        const { html, rawHtml } = await renderPage(ctx, item.url, isLiveContent(item.url, null));
         if (!html) continue;
         // Selbst-Korrektur: Hub/Übersicht (robust erkannt) → demoten, nicht als Artikel führen.
         const cls = classifyRendered(item.url, html);
@@ -1682,7 +1759,7 @@ async function enrichArticles(sources: Source[]) {
           void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
-          const tb = trackBody(html, item.url, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
+          const tb = trackBody(html, item.url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
           if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, item.url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
