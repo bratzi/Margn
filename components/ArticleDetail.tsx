@@ -522,8 +522,11 @@ function lineOps(oldS: string, newS: string): Op[] {
   const ops: Op[] = []; let i = 0, j = 0;
   while (i < m || j < k) {
     if (i < m && j < k && o[i] === n[j]) { ops.push({ t: o[i], op: "eq" }); i++; j++; }
-    else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) { ops.push({ t: n[j], op: "ins" }); j++; }
-    else { ops.push({ t: o[i], op: "del" }); i++; }
+    // del-ZUERST bei Gleichstand (wie inlineOps) — sonst kommt eine geänderte Zeile als
+    // ins→del heraus, und refineLineOps (das NUR del→ins zu Wort-Diff verfeinert) greift nie
+    // → man sieht den ganzen Absatz rot UND grün statt nur der geänderten Wörter (Art. 393012).
+    else if (i < m && (j >= k || dp[i + 1][j] >= dp[i][j + 1])) { ops.push({ t: o[i], op: "del" }); i++; }
+    else { ops.push({ t: n[j], op: "ins" }); j++; }
   }
   return ops;
 }
