@@ -18,3 +18,6 @@
 #              statt der ersten 1500 Zeichen → keine scheinbar identischen „stillen Edits" mehr.
 # 2026-06-19 — Re-Run: Lauf #83 (push, c63a7e2) war von der Concurrency gecancelt; manueller
 #              Neustart der Pipeline auf demselben diffRegion-Stand.
+# 2026-06-25 — Body-Tracking aus Roh-HTML (chooseBody Roh vs. gerendert) + recent_flips-
+#              Oszillationssperre live (fed27f6); Baselines resettet → frischer Lauf mit neuem
+#              Code soll sauber re-baselinen (kein JS-Widget-Müll, keine Phantom-Versionen).
