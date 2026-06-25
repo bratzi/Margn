@@ -710,6 +710,13 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
   // Nur die größten Passagen zeigen (Länge der Änderung), der Rest als Hinweis — nicht jeder Absatz.
   const changes = [...allChanges].sort((a, b) => ((b.old?.length ?? 0) + (b.new?.length ?? 0)) - ((a.old?.length ?? 0) + (a.new?.length ?? 0))).slice(0, 3);
   const moreChanges = allChanges.length - changes.length;
+  // Absatz-Chips aus den ABGEGLICHENEN Changes ableiten, nicht aus den rohen Scraper-Zählern:
+  // bei Bild/n-tv ist der Body EIN Absatz, dessen Fingerprint bei jeder Änderung komplett kippt
+  // → added_count=1/removed_count=1, obwohl es nur EINE modifizierte Passage ist (z.B. nur Chrome
+  // entfernt). reconcileChanges paart das als {old,new} → zählt weder als Zu- noch als Abgang.
+  // So kein falsches „+1 Absatz" mehr ohne sichtbares Grün (Art. 388298).
+  const addedParas = allChanges.filter((c) => c.new && !c.old).length;
+  const removedParas = allChanges.filter((c) => c.old && !c.new).length;
   const titleChanged = !!(s.title_old && s.title_new);
   const dateChanged = realDateShift(s.pubdate_old, s.pubdate_new);
   const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field);
@@ -723,8 +730,8 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
           {titleChanged && <span className="chist-chip">Überschrift</span>}
           {dateChanged && <span className="chist-chip date">Datum</span>}
           {metaEdits.map((m) => <span key={m.field} className="chist-chip meta">{META_LABEL[m.field] ?? m.field}</span>)}
-          {s.added_count > 0 && <span className="chist-chip add">+{s.added_count}&nbsp;Absatz{s.added_count > 1 ? "e" : ""}</span>}
-          {!isExt && s.removed_count > 0 && <span className="chist-chip del">−{s.removed_count}&nbsp;Absatz{s.removed_count > 1 ? "e" : ""}</span>}
+          {addedParas > 0 && <span className="chist-chip add">+{addedParas}&nbsp;Absatz{addedParas > 1 ? "e" : ""}</span>}
+          {!isExt && removedParas > 0 && <span className="chist-chip del">−{removedParas}&nbsp;Absatz{removedParas > 1 ? "e" : ""}</span>}
           {s.word_delta ? <span className="chist-chip">{s.word_delta > 0 ? "+" : ""}{s.word_delta}&nbsp;W</span> : null}
         </span>
       </div>
