@@ -815,16 +815,14 @@ table.dt.dt-fit { width: max-content; }
    durchgestrichen + leicht ausgegraut, Hinzugefügtes grün. Keine Vorher/Jetzt-Spalten,
    KEINE Schraffur auf dem Text — sauber lesbar wie ein echtes Diff-Tool. */
 .dq-uni { padding: 12px 14px; font-size: 13px; line-height: 1.85; color: var(--ink); overflow-wrap: anywhere; }
+/* GENAU wie Section 3 (.ana-w .old/.new): Entferntes = leicht AUSGEGRAUTER Text mit einer
+   soliden ROTEN durchgezogenen Linie darüber (KEIN roter Kasten); Neues = schlicht grün. */
 .dq-uni del.dq-uni-del {
-  color: var(--red); text-decoration: line-through; text-decoration-thickness: 2px;
-  text-decoration-color: color-mix(in srgb, var(--red) 55%, transparent);
-  background-color: var(--red-sub); border-radius: 3px; padding: 0 2px; opacity: .85;
-  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  color: var(--muted); text-decoration: line-through;
+  text-decoration-color: var(--red); text-decoration-thickness: 2px;
 }
 .dq-uni ins.dq-uni-ins {
-  color: var(--green); text-decoration: none; font-weight: 500;
-  background-color: var(--green-sub); border-radius: 3px; padding: 0 2px;
-  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  color: var(--green); text-decoration: none;
 }
 /* Zusammengefaltete unveränderte Strecke (Zeilen-Diff): dezenter Trenner. */
 .dq-uni .dq-uni-skip {
