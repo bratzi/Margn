@@ -21,3 +21,6 @@
 # 2026-06-25 — Body-Tracking aus Roh-HTML (chooseBody Roh vs. gerendert) + recent_flips-
 #              Oszillationssperre live (fed27f6); Baselines resettet → frischer Lauf mit neuem
 #              Code soll sauber re-baselinen (kein JS-Widget-Müll, keine Phantom-Versionen).
+# 2026-06-26 — Frischer Lauf zum Beobachten: 90-Tage-Recency-Filter + uniforme Feed-Discovery
+#              + n-tv-Teaser/Dedup + recentFirst-Fix (00a86a4). Prüfen: alte Artikel→archive,
+#              breitere Feed-Abdeckung, keine fälschlich archivierten aktuellen Artikel.
