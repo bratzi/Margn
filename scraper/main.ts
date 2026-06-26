@@ -906,6 +906,18 @@ function payDiag(html: string, url: string, decided: boolean | null) {
 }
 
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
+// Soll ein NEUER (noch nicht verfolgter) Artikel als Archiv geparkt werden? Nur wenn das
+// FRISCHESTE verlässliche Datum (präzises Seiten-Datum ODER vorbefülltes Sitemap-Datum) älter als
+// das Fenster ist UND es kein Liveblog/Ticker ist. Verhindert Fehl-Archivierung von Mehrfach-
+// Datum-Seiten (Liveticker, Evergreen). Genutzt in saveArticleFull + enrich.
+function isStaleForArchive(meta: { published_at: string | null; published_precise: boolean; title: string | null }, prevPublishedAt: string | null | undefined, url: string): boolean {
+  if (isLiveContent(url, meta.title)) return false;
+  const pageDate = meta.published_precise && meta.published_at ? Date.parse(meta.published_at) : NaN;
+  const prevDate = prevPublishedAt ? Date.parse(prevPublishedAt) : NaN;
+  const freshest = Math.max(Number.isNaN(pageDate) ? -Infinity : pageDate, Number.isNaN(prevDate) ? -Infinity : prevDate);
+  return Number.isFinite(freshest) && (Date.now() - freshest) / 864e5 > ARTICLE_MAX_AGE_DAYS;
+}
+
 async function saveArticleFull(sourceId: number, url: string, html: string, rawHtml: string | null = null) {
   const discoveredUrl = url;
   url = canonUrl(url); // n-tv-Ticker-Varianten → Kanonik, damit prev/upsert/Tracking konsistent EINE Zeile treffen
@@ -916,11 +928,13 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   const { data: prev } = await sb.from("articles")
     .select(PREV_COLS)
     .eq("url", url).maybeSingle();
-  // RECENCY-FILTER (Quellen-Vereinheitlichung): NEUE Artikel (noch nicht verfolgt) mit verlässlichem
-  // Datum älter als das Fenster NICHT als Artikel führen — Archiv-Seite parken, damit analyze sie
-  // nicht erneut rendert. Bereits verfolgte (prev.content_hash) bleiben unangetastet.
-  if (!(prev as any)?.content_hash && meta.published_precise && meta.published_at
-      && (Date.now() - Date.parse(meta.published_at)) / 864e5 > ARTICLE_MAX_AGE_DAYS) {
+  // RECENCY-FILTER (Quellen-Vereinheitlichung): NEUE Artikel (noch nicht verfolgt), deren BESTES
+  // verlässliches Datum älter als das Fenster ist, NICHT als Artikel führen — Archiv-Seite parken.
+  // FRISCHESTES Datum aus (präzisem Seiten-Datum ODER vorbefülltem News-Sitemap-Datum) nehmen —
+  // sonst werden Mehrfach-Datum-Seiten fälschlich archiviert (Liveticker: erste Meldung Monate alt;
+  // Evergreen mit altem Originaldatum, aber aktueller Sitemap-Zeit). Liveblogs/Ticker NIE archivieren
+  // (immer aktuell + editierfreudig). Bereits verfolgte (prev.content_hash) bleiben unangetastet.
+  if (!(prev as any)?.content_hash && isStaleForArchive(meta, (prev as any)?.published_at, url)) {
     if (!DRY_RUN) await sb.from("pages").update({ kind: "archive" }).in("url", [...new Set([discoveredUrl, url])]);
     return null;
   }
@@ -1858,9 +1872,9 @@ async function enrichArticles(sources: Source[]) {
             .eq("id", item.id).maybeSingle();
           meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
           if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
-          // Recency-Filter (wie saveArticleFull): noch nicht verfolgte Alt-Artikel raus → Archiv parken.
-          if (!(prev as any)?.content_hash && meta.published_precise && meta.published_at
-              && (Date.now() - Date.parse(meta.published_at)) / 864e5 > ARTICLE_MAX_AGE_DAYS) {
+          // Recency-Filter (wie saveArticleFull, frischestes Datum + kein Liveblog): noch nicht
+          // verfolgte Alt-Artikel raus → Archiv parken.
+          if (!(prev as any)?.content_hash && isStaleForArchive(meta, (prev as any)?.published_at, item.url)) {
             await sb.from("pages").update({ kind: "archive" }).eq("url", item.url);
             await sb.from("articles").delete().eq("id", item.id);
             continue;
