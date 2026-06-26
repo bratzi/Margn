@@ -85,7 +85,10 @@ function canonUrl(raw: string): string {
   try {
     const u = new URL(raw);
     if (/(^|\.)n-tv\.de$/i.test(u.hostname)) {
-      const m = u.pathname.match(/\/\d{2}-\d{2}-.*-id(\d+)\.html$/i);
+      // JEDE n-tv-Artikel-URL endet auf „-id<N>.html"; der Slug davor variiert (mehrere Slug-
+      // Varianten → sonst Mehrfach-Erfassung, z.B. id30797293 unter 2 Slugs). Auf die kanonische
+      // Kurzform id<N>.html umschlüsseln (resolved per 308-Redirect; folgt der Scraper).
+      const m = u.pathname.match(/-id(\d+)\.html$/i);
       if (m) return `https://www.n-tv.de/id${m[1]}.html`;
     }
   } catch { /* ungültige URL → unverändert */ }
