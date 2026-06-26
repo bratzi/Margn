@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
@@ -95,6 +95,9 @@ type Ctx = {
   catTree: Map<string, SubOpt[]>;
   // Gemeinsamer Datenbestand für ALLE Analytics-Komponenten (eine Wahrheit, ein Prädikat).
   corpus: CorpusRow[]; corpusReady: boolean;
+  // Manuelles Nachladen der Daten (Refresh-Button) — ohne Seiten-Reload. refreshing = Ladevorgang
+  // läuft; corpusLoadedAt = Zeitstempel des letzten erfolgreichen Ladens.
+  reloadCorpus: () => void; refreshing: boolean; corpusLoadedAt: number | null;
   // Keyword-Filter: Artikel-IDs des gewählten Keywords (null = kein Keyword-Filter aktiv)
   kwIds: number[] | null; kwIdSet: Set<number> | null;
   // Aufgelöste URL-Muster der gewählten Sub-Rubriken (kanonisch → roh, mehrsprachig)
@@ -223,6 +226,11 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [corpus, setCorpus] = useState<CorpusRow[]>([]);
   const [corpusReady, setCorpusReady] = useState(false);
   const [corpusGen, setCorpusGen] = useState(0); // erhöht = Neuladen
+  const [refreshing, setRefreshing] = useState(false);
+  const [corpusLoadedAt, setCorpusLoadedAt] = useState<number | null>(null);
+  // Refresh-Button: Daten neu ziehen, ohne die Seite zu laden (alter Bestand bleibt sichtbar,
+  // bis der neue da ist → kein Flackern). reloadCorpus erhöht nur corpusGen → der Lade-Effekt feuert.
+  const reloadCorpus = useCallback(() => { setRefreshing(true); setCorpusGen((g) => g + 1); }, []);
   useEffect(() => {
     if (!sources.length) return;
     let cancelled = false;
@@ -248,7 +256,8 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
       // Aggregation server-seitig (RPC), dann cap-frei.
       100000,
-    ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); } });
+    ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); setCorpusLoadedAt(Date.now()); setRefreshing(false); } })
+      .catch(() => { if (!cancelled) setRefreshing(false); });
     return () => { cancelled = true; };
   }, [sources.length, corpusGen]);
   // Der Scraper schreibt alle 2 h; ein 10-Minuten-Refresh hält die Zählungen aktuell,
@@ -380,7 +389,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang,
     changed, setChanged, depth, setDepth, resetAll,
     topicOpts, keywordOpts, subOpts, catTree,
-    corpus, corpusReady, kwIds, kwIdSet, subPats,
+    corpus, corpusReady, reloadCorpus, refreshing, corpusLoadedAt, kwIds, kwIdSet, subPats,
     days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen,
     windowDays, setWindowDays, timeAxis, setTimeAxis, ready,
   };

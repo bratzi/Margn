@@ -34,6 +34,9 @@ export default function RateStats() {
   const CH = VH - PAD_T - PAD_B;
   // Hover auf einen EINZELNEN Datenpunkt (nicht den ganzen Bucket)
   const [hoverDot, setHoverDot] = useState<{ key: string; idx: number; x: number; y: number } | null>(null);
+  // Fadenkreuz-Cursor (vertikale + horizontale Linie + x/y-Wert), SVG-Koordinaten. rAF-gedrosselt.
+  const [cross, setCross] = useState<{ x: number; y: number } | null>(null);
+  const crossRaf = useRef<number | null>(null);
   const [containerW, setContainerW] = useState(0);
   // dens = Pixel pro Bucket (Stauchen ↔ Strecken). null = automatisch an Containerbreite anpassen.
   const [dens, setDens] = useState<number | null>(null);
@@ -383,6 +386,7 @@ export default function RateStats() {
     const ratio = (el.scrollLeft + pointerInContainer) / totalSvgW;
     applyZoom(e.deltaY < 0 ? 1 : -1, ratio, pointerInContainer);
     setHoverDot(null);
+    clearCross();
   };
 
   // Click-and-Drag verschiebt die X-Achse (Pan). Nur sinnvoll wenn gescrollt werden kann.
@@ -392,15 +396,28 @@ export default function RateStats() {
     didPanRef.current = false;
     setPanning(true);
     setHoverDot(null);
+    clearCross();
   }
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const p = panRef.current;
-    if (!p || !scrollRef.current) return;
-    if (Math.abs(e.clientX - p.startX) > 3) didPanRef.current = true; // echte Pan-Geste
-    const sl = p.startScroll - (e.clientX - p.startX);
-    scrollRef.current.scrollLeft = sl;
-    if (axisRef.current) axisRef.current.scrollLeft = scrollRef.current.scrollLeft;
+    if (p && scrollRef.current) { // Pan-Geste → kein Fadenkreuz
+      if (Math.abs(e.clientX - p.startX) > 3) didPanRef.current = true;
+      scrollRef.current.scrollLeft = p.startScroll - (e.clientX - p.startX);
+      if (axisRef.current) axisRef.current.scrollLeft = scrollRef.current.scrollLeft;
+      return;
+    }
+    // Fadenkreuz: Mauskoordinaten → SVG-Koordinaten (skaliert, falls die SVG anders gerendert wird).
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (totalSvgW / r.width);
+    const y = (e.clientY - r.top) * (VH / r.height);
+    if (crossRaf.current != null) return; // max. ein Update pro Frame
+    crossRaf.current = requestAnimationFrame(() => {
+      crossRaf.current = null;
+      const inPlot = x >= PAD_L && x <= totalSvgW - PAD_R && y >= PAD_T && y <= PAD_T + CH;
+      setCross(inPlot ? { x, y } : null);
+    });
   }
+  function clearCross() { if (crossRaf.current != null) { cancelAnimationFrame(crossRaf.current); crossRaf.current = null; } setCross(null); }
   function handleUp() { panRef.current = null; setPanning(false); }
 
   const resetZoom = () => {
@@ -468,6 +485,15 @@ export default function RateStats() {
                 ))}
                 <line x1={PAD_L - 1} y1={PAD_T} x2={PAD_L - 1} y2={PAD_T + CH}
                   stroke="var(--line)" strokeWidth="1" />
+                {/* y-Wert des Fadenkreuz-Cursors — fest auf der Y-Achse, immer sichtbar */}
+                {cross && (
+                  <g>
+                    <rect className="rate-cross-chip" x={1} y={cross.y - 7} width={PAD_L - 3} height={14} rx={3} />
+                    <text className="rate-cross-txt" x={(PAD_L - 2) / 2} y={cross.y + 3.4} textAnchor="middle">
+                      {Math.max(0, Math.round(((PAD_T + CH - cross.y) / CH) * displayMaxVal))}
+                    </text>
+                  </g>
+                )}
               </svg>
 
               <div
@@ -488,7 +514,7 @@ export default function RateStats() {
                 onMouseDown={handleDown}
                 onMouseMove={handleMove}
                 onMouseUp={handleUp}
-                onMouseLeave={() => { handleUp(); setHoverDot(null); }}
+                onMouseLeave={() => { handleUp(); setHoverDot(null); clearCross(); }}
               >
                 {yTicks.map((v) => (
                   <g key={v}>
@@ -534,6 +560,22 @@ export default function RateStats() {
                     </g>
                   );
                 }))}
+
+                {/* Fadenkreuz-Cursor: vertikale + horizontale Linie + x-Wert (Zeit) am unteren Rand.
+                    Dezent (dünn, gestrichelt). pointerEvents:none → Dot-Hover bleibt funktionsfähig. */}
+                {cross && (() => {
+                  const bi = Math.min(NB - 1, Math.max(0, Math.round(((cross.x - PAD_L) / Math.max(1, naturalWidth)) * (NB - 1))));
+                  return (
+                    <g className="rate-cross" pointerEvents="none">
+                      <line className="rate-cross-line" x1={cross.x} y1={PAD_T} x2={cross.x} y2={PAD_T + CH} vectorEffect="non-scaling-stroke" />
+                      <line className="rate-cross-line" x1={PAD_L} y1={cross.y} x2={totalSvgW - PAD_R} y2={cross.y} vectorEffect="non-scaling-stroke" />
+                      <g transform={`translate(${cross.x}, ${PAD_T + CH + 2})`}>
+                        <rect className="rate-cross-chip" x={-26} y={0} width={52} height={14} rx={3} vectorEffect="non-scaling-stroke" />
+                        <text className="rate-cross-txt" x={0} y={10.3} textAnchor="middle">{fmtAxis(buckets[bi])}</text>
+                      </g>
+                    </g>
+                  );
+                })()}
               </svg>
 
               {/* Per-Dot-Tooltip — flippt nach UNTEN, wenn der Punkt zu weit oben liegt

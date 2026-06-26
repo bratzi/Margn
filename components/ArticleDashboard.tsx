@@ -58,6 +58,8 @@ export default function ArticleDashboard() {
   const [tableSort, setTableSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   useEffect(() => { setUpdatedAt(new Date()); }, [f.ready]);
+  // Zeitstempel an das tatsächliche (Neu-)Laden des Corpus koppeln (Auto-10min ODER Refresh-Button).
+  useEffect(() => { if (f.corpusLoadedAt) setUpdatedAt(new Date(f.corpusLoadedAt)); }, [f.corpusLoadedAt]);
 
   const loadRows = useCallback(async () => {
     if (!f.active.size) { setRows([]); setTotal(0); return; }
@@ -154,7 +156,21 @@ export default function ArticleDashboard() {
     <>
       <div className="topbar">
         <h1>Übersicht</h1>
-        <span className="live"><span className="live-dot" /> Live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</span>
+        <div className="topbar-right">
+          <button
+            className={`refresh-btn ${f.refreshing ? "is-loading" : ""}`}
+            onClick={() => { f.reloadCorpus(); loadRows(); }}
+            disabled={f.refreshing}
+            title="Daten neu laden — ohne die Seite neu zu laden"
+            aria-label="Daten aktualisieren"
+          >
+            <svg className="refresh-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
+            </svg>
+            <span>{f.refreshing ? "Lädt…" : "Aktualisieren"}</span>
+          </button>
+          <span className="live"><span className="live-dot" /> Live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</span>
+        </div>
       </div>
 
       <FilterPills />
