@@ -60,6 +60,13 @@ const KNOWN_FEEDS: Record<string, string[]> = {
   ],
 };
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
+// RECENCY-FENSTER (VEREINHEITLICHT die Quellen): Verlage exponieren wild unterschiedlich viele
+// URLs (n-tv: Archiv über dichte Quervernetzung bis 2009; Tagesschau/FAZ: keine Sitemap → wenig).
+// Das Projekt verfolgt STILLE EDITS über Zeit — Jahre alte Archiv-Artikel werden nicht mehr
+// editiert und verbrennen nur Render-Budget. Darum NEUE Artikel nur führen, wenn ihr (präzises)
+// Veröffentlichungsdatum jünger als ARTICLE_MAX_AGE_DAYS ist; ältere → pages.kind='archive'
+// (nicht erneut rendern). So konvergiert jede Quelle aufs gleiche jüngste Fenster.
+const ARTICLE_MAX_AGE_DAYS = Number(process.env.ARTICLE_MAX_AGE_DAYS ?? 90);
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
 // "articles":   crawlen + Artikel speichern (Metadaten).
 // "structure":  Rubriken crawlen, Links klassifizieren.
@@ -900,6 +907,7 @@ function payDiag(html: string, url: string, decided: boolean | null) {
 
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
 async function saveArticleFull(sourceId: number, url: string, html: string, rawHtml: string | null = null) {
+  const discoveredUrl = url;
   url = canonUrl(url); // n-tv-Ticker-Varianten → Kanonik, damit prev/upsert/Tracking konsistent EINE Zeile treffen
   url = canonicalArticleUrl(url, html); // Bild-Slug-Varianten → kanonische URL (Mehrfach-Erfassung verhindern)
   const meta = extractMeta(html, url);
@@ -908,6 +916,14 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   const { data: prev } = await sb.from("articles")
     .select(PREV_COLS)
     .eq("url", url).maybeSingle();
+  // RECENCY-FILTER (Quellen-Vereinheitlichung): NEUE Artikel (noch nicht verfolgt) mit verlässlichem
+  // Datum älter als das Fenster NICHT als Artikel führen — Archiv-Seite parken, damit analyze sie
+  // nicht erneut rendert. Bereits verfolgte (prev.content_hash) bleiben unangetastet.
+  if (!(prev as any)?.content_hash && meta.published_precise && meta.published_at
+      && (Date.now() - Date.parse(meta.published_at)) / 864e5 > ARTICLE_MAX_AGE_DAYS) {
+    if (!DRY_RUN) await sb.from("pages").update({ kind: "archive" }).in("url", [...new Set([discoveredUrl, url])]);
+    return null;
+  }
   meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
   // Präzises Datum (z.B. aus News-Sitemap) NICHT durch den URL-Mittags-Notnagel überschreiben.
   if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
@@ -1081,8 +1097,16 @@ function sitemapDate(s: string | undefined | null): string | null {
 async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   let origin = ""; try { origin = new URL(src.base_url).origin; } catch { return 0; }
   const seen = new Set<string>();
-  const recentFirst = (urls: string[]) =>
-    urls.sort((a, b) => (/(news|aktuell|recent|article|\d{4})/i.test(b) ? 1 : 0) - (/(news|aktuell|recent|article|\d{4})/i.test(a) ? 1 : 0));
+  // NEUESTE Sitemaps zuerst — echte Recency-Sortierung statt nur „matcht ein Muster ja/nein".
+  // Die alte Binär-Variante ließ z.B. Spiegels Index (alle Kinder matchen `\d{4}`) in Index-
+  // reihenfolge = ÄLTESTE zuerst (sitemap-1957…) → Budget verbrannte sich an Uralt-Archiven.
+  // Jetzt: News-Sitemaps ganz nach vorn, sonst nach Jahr(-Monat) aus dem Dateinamen absteigend.
+  const recencyScore = (u: string) => {
+    if (/(news|aktuell|recent)/i.test(u)) return Number.MAX_SAFE_INTEGER;
+    const m = u.match(/(\d{4})[-_/]?(\d{2})?/);
+    return m ? Number(m[1]) * 100 + Number(m[2] ?? 0) : 0;
+  };
+  const recentFirst = (urls: string[]) => [...urls].sort((a, b) => recencyScore(b) - recencyScore(a));
 
   // 1) Sitemap-URLs aus robots.txt (+ Fallback)
   let sitemaps: string[] = [];
@@ -1799,6 +1823,13 @@ async function enrichArticles(sources: Source[]) {
             .eq("id", item.id).maybeSingle();
           meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
           if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
+          // Recency-Filter (wie saveArticleFull): noch nicht verfolgte Alt-Artikel raus → Archiv parken.
+          if (!(prev as any)?.content_hash && meta.published_precise && meta.published_at
+              && (Date.now() - Date.parse(meta.published_at)) / 864e5 > ARTICLE_MAX_AGE_DAYS) {
+            await sb.from("pages").update({ kind: "archive" }).eq("url", item.url);
+            await sb.from("articles").delete().eq("id", item.id);
+            continue;
+          }
           const { authors, keywords, categories, published_precise, ...fields } = meta;
           void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
