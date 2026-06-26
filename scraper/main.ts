@@ -941,6 +941,14 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
   // Präzises Datum (z.B. aus News-Sitemap) NICHT durch den URL-Mittags-Notnagel überschreiben.
   if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
+  // published_at NIE RÜCKWÄRTS wandern lassen: viele Seiten (v.a. n-tv) tragen mehrere Datums-
+  // Signale (datePublished, „Aktualisiert", Ticker-Erstmeldung) → extractMeta zieht je Scan mal
+  // ein FRÜHERES → sonst Rückwärts-Datums-Phantome (vom Display via realDateShift versteckt, aber
+  // Snapshot-/Edit-Müll). Ein Erscheinungsdatum geht nicht rückwärts → auf den jüngeren Wert klemmen.
+  if (meta.published_precise && meta.published_at && (prev as any)?.published_at
+      && Date.parse(meta.published_at) < Date.parse((prev as any).published_at)) {
+    meta.published_at = (prev as any).published_at;
+  }
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   const tb = trackBody(html, url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
