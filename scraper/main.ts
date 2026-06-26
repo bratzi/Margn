@@ -92,6 +92,28 @@ function canonUrl(raw: string): string {
   return raw;
 }
 
+// Bilds Artikel-Hex-ID (24 Hex am Ende des Slugs, opt. .html). Identisch über alle Slug-Varianten.
+function bildId(u: string): string | null {
+  const m = /(?:^|[-/])([0-9a-f]{24})(?:\.html?)?(?:[?#]|$)/i.exec(u);
+  return m ? m[1].toLowerCase() : null;
+}
+// Kanonische Artikel-URL aus dem HTML (<link rel="canonical">, sonst og:url). Bild liefert
+// DENSELBEN Artikel unter mehreren Slug-Varianten (gleiche Hex-ID), aber EINER kanonischen URL
+// → Mehrfach-Erfassung (s. Screenshot „Dahoam is Dahoam"). Auf die kanonische umschlüsseln,
+// damit alle Varianten zu EINER articles-Zeile zusammenfallen. Konservativ: nur bild.de und nur
+// wenn die kanonische DIESELBE Hex-ID trägt (kein Verschlucken in eine fremde URL). Die kurze
+// Form bild.de/<id> resolved NICHT, daher braucht es die seiten-eigene kanonische URL.
+function canonicalArticleUrl(url: string, html: string): string {
+  let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch { return url; }
+  if (!/(^|\.)bild\.de$/.test(host)) return url;
+  const id = bildId(url); if (!id) return url;
+  const m = /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i.exec(html)
+    ?? /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i.exec(html)
+    ?? /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i.exec(html);
+  if (m?.[1] && bildId(m[1]) === id) { try { return new URL(m[1], url).href; } catch {} }
+  return url;
+}
+
 async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<typeof extractMeta>, extra?: Record<string, unknown>): Promise<number> {
   url = canonUrl(url);
   const row: Record<string, unknown> = { source_id: sourceId, url, last_seen: new Date().toISOString() };
@@ -415,12 +437,25 @@ function cleanBody(body: string, url: string, title: string | null): string {
     b = b.replace(/\bFoto:\s*[^/]{1,90}\/\s*(dpa[a-z-]*|AFP|Getty[^,. ]*|Reuters|AP|action ?press|imago|picture alliance|ddp|epd|Bildagentur[^,. ]*)\b\.?/gi, " ");
   }
 
-  if (/(^|\.)n-tv\.de$/.test(host) && title) {
-    const head = title.split(/\s+[-|–]\s+/)[0].trim();
-    if (head.length > 12) {
-      const esc = head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      b = b.replace(new RegExp("^[\\s\\S]{0,280}?" + esc), "");
+  if (/(^|\.)n-tv\.de$/.test(host)) {
+    if (title) {
+      const head = title.split(/\s+[-|–]\s+/)[0].trim();
+      if (head.length > 12) {
+        const esc = head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        b = b.replace(new RegExp("^[\\s\\S]{0,280}?" + esc), "");
+      }
     }
+    // Regional-Teaser-Block: an Regional-Artikeln hängt n-tv eine Liste ANDERER Regional-
+    // Schlagzeilen (je <Bundesland-Sektion><Schlagzeile>, ohne Trennzeichen), die per JS
+    // intermittierend in den Body geladen wird UND je Render rotiert → sonst Phantom-Edits
+    // (~−12 W, Art. 350418 u.v.). Erkennen am dichten, wiederholten Sektions-Label DIREKT vor
+    // einem Großbuchstaben (≥2 Treffer nah beieinander = echter Block, kein Zufall) und ab dem
+    // ERSTEN solchen Teaser bis zum Ende kappen. Labels = n-tvs Regional-Sektionen (Verbund-
+    // regionen zuerst, „Sachsen-Anhalt" vor „Sachsen").
+    const REGION = /(?:Baden-Württemberg|Berlin & Brandenburg|Hamburg & Schleswig-Holstein|Mecklenburg-Vorpommern|Niedersachsen & Bremen|Nordrhein-Westfalen|Rheinland-Pfalz & Saarland|Sachsen-Anhalt|Sachsen|Thüringen|Bayern|Hessen)[A-ZÄÖÜ]/g;
+    const hits: number[] = []; let mm: RegExpExecArray | null;
+    while ((mm = REGION.exec(b)) !== null) { hits.push(mm.index); if (hits.length > 3) break; }
+    if (hits.length >= 2 && hits[1] - hits[0] < 400) b = b.slice(0, hits[0]);
   }
 
   if (/(^|\.)faz\.net$/.test(host)) {
@@ -491,11 +526,16 @@ function trackBody(html: string, url: string, rawHtml: string | null, art: { bod
   const live = extractLiveBlog(rawHtml ?? html);
   if (live) return { body: live.body, isLive: true }; // JSON-LD-Ticker ist sauber & vollständig → direkt nehmen
   // Zwei Kandidaten gewinnen lassen: Artikeltext aus ROH-HTML (vor JS) vs. aus gerendertem DOM.
-  const rawText = rawHtml ? extractArticleText(rawHtml, url) : "";
-  const renText = art?.body ?? extractArticleText(html, url);
+  // WICHTIG: BEIDE erst per cleanBody bereinigen, DANN vergleichen. Sonst bläht ein JS-injiziertes
+  // Junk-Widget (z.B. n-tvs Regional-Teaser-Liste) den gerenderten Body künstlich auf, sodass er
+  // „> 20 % mehr Text" hat und chooseBody ihn fälschlich als „vollständiger" wählt — obwohl das
+  // „Mehr" nur Müll ist. Nach cleanBody schrumpft der gerenderte auf den echten Artikeltext, und
+  // bei Gleichstand gewinnt das saubere Roh-HTML.
+  const rawText = rawHtml ? cleanBody(extractArticleText(rawHtml, url), url, title) : "";
+  const renText = cleanBody(art?.body ?? extractArticleText(html, url), url, title);
   if (!rawText && !renText) return null;
   const pick = chooseBody(rawText, renText, metaIsLive);
-  return { body: cleanBody(pick.text, url, title), isLive: metaIsLive };
+  return { body: pick.text, isLive: metaIsLive };
 }
 
 type PrevState = { title: string | null; content_hash: string | null; para_fps: string | null; body_words: number | null; extension_count: number | null; edit_count: number | null; revision_count: number | null; article_type: string | null; description: string | null; og_image: string | null; paywalled: boolean | null; author_status: string | null; topic: string | null } | null;
@@ -858,6 +898,7 @@ function payDiag(html: string, url: string, decided: boolean | null) {
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
 async function saveArticleFull(sourceId: number, url: string, html: string, rawHtml: string | null = null) {
   url = canonUrl(url); // n-tv-Ticker-Varianten → Kanonik, damit prev/upsert/Tracking konsistent EINE Zeile treffen
+  url = canonicalArticleUrl(url, html); // Bild-Slug-Varianten → kanonische URL (Mehrfach-Erfassung verhindern)
   const meta = extractMeta(html, url);
   const art = asArticle(html, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
