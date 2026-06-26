@@ -1428,6 +1428,37 @@ async function addEdges(fromId: number, toUrls: string[]) {
   }
 }
 
+// UNIFORME, kuratierungsfreie Feed-Entdeckung für JEDEN Verlag: Startseite + Hauptsektionen
+// anfahren und ALLE deklarierten <link rel="alternate"> RSS/Atom-Feeds ernten. Hintergrund: die
+// Verlage exponieren Artikel sehr unterschiedlich (Sitemap/Feed/Crawl). Tagesschau & Spiegel
+// deklarieren JE SEKTION einen eigenen Feed (`/inland/…rss2.xml`, `/sport/index.rss`) → so bekommt
+// jeder Verlag dieselbe breite Sektions-Abdeckung, die bisher nur FAZ/n-tv kuratiert (KNOWN_FEEDS)
+// hatten — ohne Kuratierung, ohne Qualitätsverlust (Artikel werden normal extrahiert). Billig
+// (nur HTTP, keine Renders). Sektions-Fetches parallel. KNOWN_FEEDS bleibt als Sicherungs-Supplement.
+async function discoverFeeds(src: Source): Promise<string[]> {
+  let origin = ""; try { origin = new URL(src.base_url).origin; } catch { return []; }
+  const feeds = new Set<string>();
+  const home = await fetchHtml(src.base_url);
+  if (!home) return [];
+  for (const f of extractFeedLinks(home, src.base_url)) feeds.add(f);
+  // Top-Sektionen aus der Startseite (gleiche Domain, kurzer Pfad, kein Artikel), je 1. Segment einmal.
+  const secs = new Map<string, string>();
+  for (const link of sameDomainLinks(home, src.base_url, src.base_url)) {
+    try {
+      const segs = new URL(link).pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+      if (segs.length < 1 || segs.length > 2 || classifyUrl(link) === "article") continue;
+      if (!secs.has(segs[0])) secs.set(segs[0], `${origin}/${segs.join("/")}/`);
+    } catch {}
+  }
+  // Sektionsseiten (gedeckelt) parallel abklappern und ihre deklarierten Feeds ernten.
+  const found = await Promise.all([...secs.values()].slice(0, 24).map(async (u) => {
+    const html = await fetchHtml(u);
+    return html ? extractFeedLinks(html, u) : [];
+  }));
+  for (const fs of found) for (const f of fs) feeds.add(f);
+  return [...feeds];
+}
+
 // Rekursiver, begrenzter Chromium-Crawl einer Quelle.
 async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: number) {
   const visited = new Set<string>();
@@ -1449,7 +1480,11 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
   // Gespeicherten Feed (sources.feed_url) sofort einreihen — weitere Feeds werden
   // aus der Startseite auto-erkannt (<link rel="alternate">).
   if (src.feed_url) enqueue({ url: src.feed_url, depth: 0, feed: true }, false);
-  // Kuratierte Zusatz-Feeds (z.B. FAZ/n-tv-Ressorts), wo Auto-Erkennung wenig findet.
+  // UNIFORM für ALLE Verlage: Feeds generisch aus Startseite + Hauptsektionen ernten
+  // (kuratierungsfrei, deckt Sektions-Feeds ab). Ersetzt die Abhängigkeit vom Einzel-Mechanismus.
+  for (const f of await discoverFeeds(src)) enqueue({ url: f, depth: 0, feed: true }, false);
+  // Kuratierte Zusatz-Feeds (FAZ/n-tv-Ressorts) bleiben als SICHERUNG, wo Sektionsseiten keinen
+  // eigenen Feed deklarieren (z.B. FAZ-Ressort-Feeds) — kein Qualitätsverlust, nur redundant.
   let srcHost = ""; try { srcHost = new URL(src.base_url).host; } catch {}
   for (const f of (KNOWN_FEEDS[srcHost] ?? [])) enqueue({ url: f, depth: 0, feed: true }, false);
 
