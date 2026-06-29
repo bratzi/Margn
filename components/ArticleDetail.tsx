@@ -229,6 +229,20 @@ export default function ArticleDetail({ id }: { id: number }) {
     return { axes, area };
   }, [a, pctls, keywords.length, neighbors]);
 
+  // Cross-Version-Dedup für Liveblogs: je Snapshot die Absatz-Keys, die in FRÜHEREN Versionen
+  // schon gezeigt wurden → ChangeCard blendet die dort aus (kein doppeltes Anzeigen desselben
+  // Ticker-Eintrags über viele Versionen, Art. 5830).
+  const dupKeysPerSnap = useMemo(() => {
+    const seen = new Set<string>();
+    return snaps.map((s) => {
+      const before = new Set(seen);
+      const paras = (s.changes ?? []).filter((c) => c.new && !c.old).map((c) => (c.new ?? "").trim()).filter(Boolean);
+      const own = paras.length ? paras : (s.added ? [s.added.trim()] : []);
+      for (const p of own) seen.add(paraKey(p));
+      return before;
+    });
+  }, [snaps]);
+
   if (loading) return <div className="page detail"><p className="faint">Lade…</p></div>;
   if (!a) return <div className="page detail"><p className="faint">Artikel nicht gefunden.</p></div>;
 
@@ -327,7 +341,7 @@ export default function ArticleDetail({ id }: { id: number }) {
                   erscheint hier jede Version mit Vorher/Jetzt-Vergleich.
                 </div>
               ) : (
-                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} />)
+                snaps.map((s, i) => <ChangeCard key={s.id} s={s} v={i + 1} dupKeys={dupKeysPerSnap[i]} />)
               )}
               <ChistAnchor kind="now" label="Aktuelle Fassung" time={a.last_seen}
                 sub={snaps.length > 0 ? `${snaps.length} Änderung${snaps.length !== 1 ? "en" : ""} erfasst · zuletzt geprüft` : "zuletzt geprüft, unverändert"} />
@@ -549,7 +563,7 @@ function refineLineOps(ops: Op[]): Op[] {
 // außerhalb des erfassten Ausschnitts lag. Erkennen: die LETZTE Abweichung ist ein einzelnes,
 // am Wortende angeschnittenes del-Token (kein folgender Whitespace), gefolgt NUR von ins/repl,
 // deren erstes genau dieses Wort fortsetzt. Dann del + ins-Schwanz durch ein „…" ersetzen.
-function sealTruncatedTail(ops: Op[]): Op[] {
+function sealTruncatedTail(ops: Op[], netWd = 0): Op[] {
   let di = -1;
   for (let i = ops.length - 1; i >= 0; i--) {
     if (ops[i].op === "del") { di = i; break; }
@@ -559,6 +573,12 @@ function sealTruncatedTail(ops: Op[]): Op[] {
   const d = ops[di].t;
   if (/\s/.test(d.trim()) || /\s$/.test(d)) return ops;            // EIN Token, am Ende angeschnitten (kein Trenner danach)
   if (!ops[di + 1].t.trimStart().startsWith(d.trim())) return ops; // die Ergänzung setzt genau dieses Wort fort
+  // NUR versiegeln, wenn der Schwanz ein CAP-ARTEFAKT ist (alte Fassung gekürzt) und KEIN echter
+  // Zugewinn: der ins-Schwanz ist viel länger als das tatsächliche Body-Wachstum (word_delta).
+  // Sonst (echte Ergänzung, tailWörter ≈ +word_delta, z.B. Art. 19682 +305) den Text NORMAL zeigen
+  // statt fälschlich „…"/„nur Whitespace".
+  const tailWords = ops.slice(di + 1).reduce((s, o) => s + ((o.t.match(/\S+/g) ?? []).length), 0);
+  if (tailWords <= Math.abs(netWd) + 6) return ops;
   return [...ops.slice(0, di), { t: " …", op: "trunc" }];
 }
 // Zeilen-Diff in „Hunks" zerlegen: zusammenhängende Änderungen + etwas Kontext = EIN Hunk.
@@ -588,14 +608,14 @@ function trimHunk(h: Op[]): Op[] {
 // Eine einzelne Diff-Box — UNIFIED inline (wie Section 3 der Landingpage): EIN Textfluss,
 // Entferntes rot durchgestrichen + ausgegraut, Hinzugefügtes grün. KEINE Vorher/Jetzt-Spalten,
 // KEINE Schraffur auf dem Text — so wie echte Diff-Tools (und vom User explizit gewünscht).
-function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string }) {
-  const sealed = sealTruncatedTail(ops);
+function DiffBox({ ops, label, kind, netWd = 0 }: { ops: Op[]; label: string; kind: string; netWd?: number }) {
+  const sealed = sealTruncatedTail(ops, netWd);
   const changed = sealed.some((o) => o.op === "del" || o.op === "ins" || o.op === "repl");
   return (
     <div className={`dq ${kind}`}>
       <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
       {!changed ? (
-        <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>nur Whitespace/Formatierung geändert</span></div>
+        <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>Unterschied außerhalb des erfassten Ausschnitts</span></div>
       ) : (
         <div className="dq-uni">
           {sealed.map((o, i) =>
@@ -613,16 +633,24 @@ function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string 
 // Side-by-Side: Vorher links, Jetzt rechts. Kurze Diffs (Titel/Teaser) = EINE Box mit Wort-Diff.
 // Lange Body-Texte (Ticker/Liveblog/Riesenabsatz) = Zeilen-Diff, in MEHRERE Boxen je Änderungsstelle
 // gesplittet statt einer riesigen Box.
-function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta" }) {
+function DiffBlock({ oldS, newS, label, kind = "edit", netWd = 0 }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta"; netWd?: number }) {
   const big = oldS.length + newS.length > 600;
-  if (!big) return <DiffBox ops={inlineOps(oldS, newS)} label={label} kind={kind} />;
-  const hunks = toHunks(refineLineOps(lineOps(oldS, newS))).map(trimHunk);
+  if (!big) return <DiffBox ops={inlineOps(oldS, newS)} label={label} kind={kind} netWd={netWd} />;
+  // METHODENWAHL: WORT-Diff bevorzugen (sauber, markiert nur die geänderten Wörter — auch bei
+  // langen Bodys mit verstreuten kleinen Änderungen, Art. 443924). NUR bei KONFETTI (sehr viele
+  // verstreute Blöcke, typisch für rollende Ticker mit wiederkehrenden Tokens) auf den ZEILEN-Diff
+  // zurückfallen. Das behebt „ganzer Absatz rot+grün", das der Zeilen-Diff dumpt, wenn er keine
+  // gemeinsamen Zeilen findet.
+  const wordOps = inlineOps(oldS, newS);
+  const changeBlocks = wordOps.reduce((s, o) => s + (o.op !== "eq" ? 1 : 0), 0);
+  const ops = changeBlocks <= 40 ? wordOps : refineLineOps(lineOps(oldS, newS));
+  const hunks = toHunks(ops).map(trimHunk);
   if (hunks.length <= 1) {
-    return <DiffBox ops={hunks[0] ?? inlineOps(oldS, newS)} label={label} kind={kind} />;
+    return <DiffBox ops={hunks[0] ?? ops} label={label} kind={kind} netWd={netWd} />;
   }
   return (
     <>
-      {hunks.map((h, i) => <DiffBox key={i} ops={h} kind={kind} label={`${label} · Stelle ${i + 1}/${hunks.length}`} />)}
+      {hunks.map((h, i) => <DiffBox key={i} ops={h} kind={kind} label={`${label} · Stelle ${i + 1}/${hunks.length}`} netWd={netWd} />)}
     </>
   );
 }
@@ -632,6 +660,8 @@ function DiffBlock({ oldS, newS, label, kind = "edit" }: { oldS: string; newS: s
 // („neu" + „entfernt"), was keinen Sinn ergibt. Hier: ungepaarte Zu-/Abgänge nach Wort-
 // Ähnlichkeit paaren, echte Paare als Wort-Diff führen, sichtbar identische no-op-Paare verwerfen.
 function normTxt(s: string): string { return s.replace(/\s+/g, " ").trim(); }
+// Normierter Schlüssel eines (Liveblog-)Absatzes für Cross-Version-Dedup.
+function paraKey(t: string): string { return t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 120); }
 function jaccard(a: string, b: string): number {
   const A = new Set(a.toLowerCase().match(/\p{L}+|\p{N}+/gu) ?? []);
   const B = new Set(b.toLowerCase().match(/\p{L}+|\p{N}+/gu) ?? []);
@@ -700,7 +730,7 @@ function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: s
   );
 }
 
-function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
+function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<string> }) {
   const isEdit = s.change_kind === "edit";
   const isExt = s.change_kind === "extension";
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : isEdit ? "Stille Änderung" : "Geändert & erweitert";
@@ -745,9 +775,20 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
         // (in Dokument-Reihenfolge). So ist es logisch gesplittet statt eine große Textwand.
         let paras = (s.changes ?? []).filter((c) => c.new && !c.old).map((c) => (c.new ?? "").trim()).filter(Boolean);
         if (!paras.length && s.added) paras = [s.added.trim()];
+        // CROSS-VERSION-DEDUP: Liveblog-/Ticker-Einträge, die in einer FRÜHEREN Version schon
+        // gezeigt wurden (Re-Segmentierung lässt denselben Eintrag wiederkehren), hier raus —
+        // sonst sieht man dieselbe Meldung über viele Versionen doppelt (Art. 5830).
+        const total = paras.length;
+        if (dupKeys) paras = paras.filter((p) => !dupKeys.has(paraKey(p)));
+        const dropped = total - paras.length;
         const shown = paras.slice(0, 5);
         const more = paras.length - shown.length;
-        return shown.length ? (
+        if (!shown.length) {
+          return total > 0
+            ? <p className="faint" style={{ fontSize: 12.5 }}>Keine neuen Einträge — die {total} erfassten waren bereits in früheren Versionen.</p>
+            : null;
+        }
+        return (
           <>
             {shown.map((p, i) => (
               <div className="dq ext" key={i}>
@@ -756,12 +797,13 @@ function ChangeCard({ s, v }: { s: Snapshot; v: number }) {
               </div>
             ))}
             {more > 0 && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>+ {more} weiterer Abschnitt{more > 1 ? "e" : ""}</p>}
+            {dropped > 0 && <p className="faint" style={{ fontSize: 12, marginTop: 6 }}>({dropped} bereits in früheren Versionen gezeigt)</p>}
           </>
-        ) : null;
+        );
       })() : (
         <>
           {changes.map((c, i) =>
-            c.old && c.new ? <DiffBlock key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" />
+            c.old && c.new ? <DiffBlock key={i} oldS={c.old} newS={c.new} label="Geänderte Passage" netWd={s.word_delta} />
             : c.new ? (
               <div className="dq ext" key={i}>
                 <div className="dq-lbl"><span className="dq-pm add">+</span>Neu hinzugekommen</div>
