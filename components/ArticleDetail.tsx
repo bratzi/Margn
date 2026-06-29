@@ -581,6 +581,73 @@ function sealTruncatedTail(ops: Op[], netWd = 0): Op[] {
   if (tailWords <= Math.abs(netWd) + 6) return ops;
   return [...ops.slice(0, di), { t: " …", op: "trunc" }];
 }
+// Benachbarte gleichartige Segmente wieder verschmelzen (nach Umklassifizierungen).
+function mergeOps(ops: Op[]): Op[] {
+  const out: Op[] = [];
+  for (const r of ops) { const l = out[out.length - 1]; if (l && l.op === r.op) l.t += r.t; else out.push({ ...r }); }
+  return out;
+}
+// (1) Ein del + direkt folgendes ins/repl, die sich NUR im Whitespace unterscheiden, ist KEINE
+// sichtbare Änderung — typisch der Absatz-Join im Scraper, der ein Leerzeichen verschluckt
+// („…bänder. Sheriff" → „…bänder.Sheriff"). Als unverändert (eq) zeigen statt durchstreichen +
+// fast identisch wieder einfügen (genau das vom User verlangte „kein 90 %-Block-Pendeln").
+function mergeWhitespaceEdits(ops: Op[]): Op[] {
+  const strip = (s: string) => s.replace(/\s+/g, "");
+  const out: Op[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const cur = ops[i], nxt = ops[i + 1];
+    if (cur.op === "del" && nxt && (nxt.op === "ins" || nxt.op === "repl") && strip(cur.t) === strip(nxt.t)) {
+      out.push({ t: nxt.t, op: "eq" }); i++;
+    } else out.push(cur);
+  }
+  return mergeOps(out);
+}
+// (2) „Wort-Konfetti" einsammeln: Zwei WIRKLICH verschiedene, lange Passagen, die das Wort-LCS nur
+// an zufällig gleichen Mini-Wörtern („von", „ein", „der") verzahnt, als EINEN sauberen
+// durchgestrichenen Block + EINEN grünen Block zeigen — nicht Wort für Wort verschränkt. Greift NUR
+// bei langen, UNÄHNLICHEN Regionen zwischen echten Ankern; kleine/ähnliche Edits bleiben Wort-Diff.
+function collapseConfetti(ops: Op[]): Op[] {
+  const isAnchor = (o: Op) => o.op === "eq" && normTxt(o.t).length > 16;
+  const out: Op[] = []; let region: Op[] = [];
+  const flush = () => {
+    const changes = region.filter((o) => o.op !== "eq").length;
+    const tinyEqs = region.filter((o) => o.op === "eq").length;
+    const oldT = region.filter((o) => o.op === "eq" || o.op === "del").map((o) => o.t).join("");
+    const newT = region.filter((o) => o.op === "eq" || o.op === "ins" || o.op === "repl").map((o) => o.t).join("");
+    const big = oldT.length >= 120 || newT.length >= 120;
+    if (changes >= 2 && tinyEqs >= 1 && big && jaccard(normTxt(oldT), normTxt(newT)) < 0.6) {
+      if (oldT.trim()) out.push({ t: oldT, op: "del" });
+      if (newT.trim()) out.push({ t: newT, op: "ins" });
+    } else out.push(...region);
+    region = [];
+  };
+  for (const o of ops) {
+    if (isAnchor(o)) { if (region.length) flush(); out.push(o); }
+    else region.push(o);
+  }
+  if (region.length) flush();
+  return mergeOps(out);
+}
+// (3) Versatz am ANFANG versiegeln: Beginnt der Diff mit einem großen, REINEN del-Block VOR dem
+// ersten gemeinsamen Anker (das neue Snippet fängt schlicht später im selben Text an, weil die
+// erfassten Alt-/Neu-Fenster nicht bündig sind), ist dieser Text NICHT entfernt — er lag außerhalb
+// des erfassten Ausschnitts und steht im echten Artikel weiter oben. Darum „…" statt Durchstreichen
+// (User: „DARF UNTER KEINEN UMSTÄNDEN" als gelöscht erscheinen, was real noch da ist, Art. 567492).
+function sealMisalignedHead(ops: Op[]): Op[] {
+  const e = ops.findIndex((o) => o.op === "eq");
+  if (e <= 0) return ops;                                  // kein führender Block oder gar kein Anker
+  const head = ops.slice(0, e);
+  if (!head.every((o) => o.op === "del")) return ops;      // reiner Alt-Vorspann (kein neuer Text davor)
+  const headLen = head.reduce((s, o) => s + o.t.length, 0);
+  if (headLen < 100) return ops;                           // kleiner Vorspann = echte Änderung → zeigen
+  if (normTxt(ops[e].t).length < 24) return ops;           // der folgende Anker muss echt sein
+  return [{ t: "… ", op: "trunc" }, ...ops.slice(e)];
+}
+// Alle Aufräum-Schritte in fester Reihenfolge: erst Whitespace-Joins tilgen (vergrößert die echten
+// Anker), dann Konfetti zu Blöcken bündeln, dann Anfangs-/Schluss-Versatz versiegeln.
+function finalizeOps(ops: Op[], netWd = 0): Op[] {
+  return mergeOps(sealTruncatedTail(sealMisalignedHead(collapseConfetti(mergeWhitespaceEdits(ops))), netWd));
+}
 // Zeilen-Diff in „Hunks" zerlegen: zusammenhängende Änderungen + etwas Kontext = EIN Hunk.
 // Sind mehrere Änderungsstellen weit auseinander, entstehen mehrere Hunks → mehrere kleine
 // Boxen statt einer riesigen (User-Wunsch: „mehrere Boxen statt 1 großen, logisch gesplittet").
@@ -608,9 +675,9 @@ function trimHunk(h: Op[]): Op[] {
 // Eine einzelne Diff-Box — UNIFIED inline (wie Section 3 der Landingpage): EIN Textfluss,
 // Entferntes rot durchgestrichen + ausgegraut, Hinzugefügtes grün. KEINE Vorher/Jetzt-Spalten,
 // KEINE Schraffur auf dem Text — so wie echte Diff-Tools (und vom User explizit gewünscht).
-function DiffBox({ ops, label, kind, netWd = 0 }: { ops: Op[]; label: string; kind: string; netWd?: number }) {
-  const sealed = sealTruncatedTail(ops, netWd);
-  const changed = sealed.some((o) => o.op === "del" || o.op === "ins" || o.op === "repl");
+function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string }) {
+  // ops sind bereits durch finalizeOps aufgeräumt/versiegelt (siehe DiffBlock) — hier nur rendern.
+  const changed = ops.some((o) => o.op === "del" || o.op === "ins" || o.op === "repl");
   return (
     <div className={`dq ${kind}`}>
       <div className="dq-lbl"><span className="dq-pm">±</span>{label}</div>
@@ -618,7 +685,7 @@ function DiffBox({ ops, label, kind, netWd = 0 }: { ops: Op[]; label: string; ki
         <div className="dq-body"><span className="faint" style={{ fontSize: 12.5 }}>Unterschied außerhalb des erfassten Ausschnitts</span></div>
       ) : (
         <div className="dq-uni">
-          {sealed.map((o, i) =>
+          {ops.map((o, i) =>
             o.op === "skip" ? <span key={i} className="dq-uni-skip">{o.t}</span>
             : o.op === "trunc" ? <span key={i} className="dq-uni-skip" title="Text außerhalb des erfassten Ausschnitts (alte Fassung war gekürzt)">{o.t}</span>
             : o.op === "del" ? <del key={i} className="dq-uni-del">{o.t}</del>
@@ -635,22 +702,23 @@ function DiffBox({ ops, label, kind, netWd = 0 }: { ops: Op[]; label: string; ki
 // gesplittet statt einer riesigen Box.
 function DiffBlock({ oldS, newS, label, kind = "edit", netWd = 0 }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta"; netWd?: number }) {
   const big = oldS.length + newS.length > 600;
-  if (!big) return <DiffBox ops={inlineOps(oldS, newS)} label={label} kind={kind} netWd={netWd} />;
+  if (!big) return <DiffBox ops={finalizeOps(inlineOps(oldS, newS), netWd)} label={label} kind={kind} />;
   // METHODENWAHL: WORT-Diff bevorzugen (sauber, markiert nur die geänderten Wörter — auch bei
   // langen Bodys mit verstreuten kleinen Änderungen, Art. 443924). NUR bei KONFETTI (sehr viele
   // verstreute Blöcke, typisch für rollende Ticker mit wiederkehrenden Tokens) auf den ZEILEN-Diff
-  // zurückfallen. Das behebt „ganzer Absatz rot+grün", das der Zeilen-Diff dumpt, wenn er keine
-  // gemeinsamen Zeilen findet.
+  // zurückfallen. Anschließend räumt finalizeOps das Ergebnis auf: Whitespace-Joins tilgen,
+  // restliches Konfetti zu sauberen Blöcken bündeln, Anfangs-/Schluss-Versatz als „…" versiegeln —
+  // damit NIE ein Block durchgestrichen erscheint, der real noch im Artikel steht (Art. 567492).
   const wordOps = inlineOps(oldS, newS);
   const changeBlocks = wordOps.reduce((s, o) => s + (o.op !== "eq" ? 1 : 0), 0);
-  const ops = changeBlocks <= 40 ? wordOps : refineLineOps(lineOps(oldS, newS));
+  const ops = finalizeOps(changeBlocks <= 40 ? wordOps : refineLineOps(lineOps(oldS, newS)), netWd);
   const hunks = toHunks(ops).map(trimHunk);
   if (hunks.length <= 1) {
-    return <DiffBox ops={hunks[0] ?? ops} label={label} kind={kind} netWd={netWd} />;
+    return <DiffBox ops={hunks[0] ?? ops} label={label} kind={kind} />;
   }
   return (
     <>
-      {hunks.map((h, i) => <DiffBox key={i} ops={h} kind={kind} label={`${label} · Stelle ${i + 1}/${hunks.length}`} netWd={netWd} />)}
+      {hunks.map((h, i) => <DiffBox key={i} ops={h} kind={kind} label={`${label} · Stelle ${i + 1}/${hunks.length}`} />)}
     </>
   );
 }
