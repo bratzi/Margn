@@ -1440,16 +1440,6 @@ async function upsertRenderedNode(sourceId: number, url: string, kind: Kind, dep
   return data.id;
 }
 
-// Kanten "von dieser Seite -> Links" speichern.
-async function addEdges(fromId: number, toUrls: string[]) {
-  const rows = toUrls.map((u) => pageId.get(u))
-    .filter((id): id is number => !!id && id !== fromId) // keine Self-Loops
-    .map((to) => ({ from_page_id: fromId, to_page_id: to }));
-  for (let i = 0; i < rows.length; i += 500) {
-    await sb.from("page_links").upsert(rows.slice(i, i + 500), { onConflict: "from_page_id,to_page_id", ignoreDuplicates: true });
-  }
-}
-
 // UNIFORME, kuratierungsfreie Feed-Entdeckung für JEDEN Verlag: Startseite + Hauptsektionen
 // anfahren und ALLE deklarierten <link rel="alternate"> RSS/Atom-Feeds ernten. Hintergrund: die
 // Verlage exponieren Artikel sehr unterschiedlich (Sitemap/Feed/Crawl). Tagesschau & Spiegel
@@ -1588,8 +1578,11 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
 
     if (!DRY_RUN) {
       try {
-        const fromId = await upsertRenderedNode(src.id, s.url, kind, s.depth);
-        if (links.length) { await ensureNodes(src.id, links, s.depth + 1); await addEdges(fromId, links); }
+        await upsertRenderedNode(src.id, s.url, kind, s.depth);
+        // NUR die Knoten (pages) anlegen — die Kanten-Tabelle page_links wird NICHT mehr befüllt:
+        // sie war write-only Ballast (nirgends gelesen) und der mit Abstand schnellste DB-Größen-
+        // Treiber (≈872k Zeilen / ~100 MB bei stündlichem Lauf) → frisst das 500-MB-Free-Limit.
+        if (links.length) await ensureNodes(src.id, links, s.depth + 1);
         // Artikel nur speichern, wenn WIRKLICH gerendert (sonst rendert analyze
         // ihn sauber nach — kein Speichern aus link-armem Roh-HTML).
         if (kind === "article" && article && didRender && MODE !== "structure") {
