@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel } from "@/lib/topics";
 import { fetchAllRows } from "@/lib/pgFetch";
@@ -118,6 +118,7 @@ export const useFilters = () => useContext(FilterContext)!;
 
 export default function FilterProvider({ children }: { children: React.ReactNode }) {
   const params = useSearchParams();
+  const pathname = usePathname();
   const [sources, setSources] = useState<Src[]>([]);
   const [active, setActive] = useState<Set<number>>(new Set());
   const [status, setStatus] = useState("all");
@@ -228,11 +229,23 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [corpusGen, setCorpusGen] = useState(0); // erhöht = Neuladen
   const [refreshing, setRefreshing] = useState(false);
   const [corpusLoadedAt, setCorpusLoadedAt] = useState<number | null>(null);
+  // EGRESS-Sparen: Den schweren Corpus (page_overview, ~10 MB) NUR auf den Seiten laden, die ihn
+  // auch auswerten (Dashboard + Edits). Landing/Detailseite brauchen ihn nicht — bisher zog ihn aber
+  // JEDER Seitenaufruf mit (FilterProvider liegt im Root-Layout).
+  const needsCorpus = pathname === "/articles" || pathname === "/articles/edits";
+  const corpusLoadedAtRef = useRef<number | null>(null); // Frische-Quelle (sofort aktuell, kein State-Lag)
+  const fetchedGenRef = useRef(-1);                       // für welche corpusGen zuletzt geladen wurde
+  const FRESH_MS = 10 * 60 * 1000;                        // jünger = kein erneuter Pull bei Navigation/Rückkehr
   // Refresh-Button: Daten neu ziehen, ohne die Seite zu laden (alter Bestand bleibt sichtbar,
   // bis der neue da ist → kein Flackern). reloadCorpus erhöht nur corpusGen → der Lade-Effekt feuert.
   const reloadCorpus = useCallback(() => { setRefreshing(true); setCorpusGen((g) => g + 1); }, []);
   useEffect(() => {
-    if (!sources.length) return;
+    if (!sources.length || !needsCorpus) return;
+    // Bei Navigation zurück ins Dashboard NICHT erneut ziehen, solange der Bestand frisch ist; ein
+    // erzwungenes Neuladen (Refresh-Button/Sichtbarkeit) bumpt corpusGen und lädt trotzdem.
+    const age = corpusLoadedAtRef.current ? Date.now() - corpusLoadedAtRef.current : Infinity;
+    if (corpusGen === fetchedGenRef.current && age < FRESH_MS) return;
+    fetchedGenRef.current = corpusGen;
     let cancelled = false;
     // Corpus auf max. 95 Tage (= größtes Preset + 5 Puffer) begrenzen.
     // Ohne Filter würden Archiv-Artikel (z.B. Le Monde bis 1945) die Zeilen­zahl
@@ -256,16 +269,24 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
       // Aggregation server-seitig (RPC), dann cap-frei.
       100000,
-    ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); setCorpusLoadedAt(Date.now()); setRefreshing(false); } })
+    ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); corpusLoadedAtRef.current = Date.now(); setCorpusLoadedAt(Date.now()); setRefreshing(false); } })
       .catch(() => { if (!cancelled) setRefreshing(false); });
     return () => { cancelled = true; };
-  }, [sources.length, corpusGen]);
-  // Der Scraper schreibt alle 2 h; ein 10-Minuten-Refresh hält die Zählungen aktuell,
-  // ohne bei jeder Filteränderung neu zu laden (Filtern bleibt rein clientseitig).
+  }, [sources.length, corpusGen, needsCorpus]);
+  // KEIN blindes Intervall-Polling mehr: ein vergessener Tab zog sonst ~10 MB ALLE 10 min
+  // (≈1,4 GB/Tag) — der mit Abstand größte Egress-Posten. Stattdessen nur nachladen, wenn der
+  // Nutzer zu einem SICHTBAREN Dashboard-Tab zurückkehrt UND der Bestand älter als FRESH_MS ist.
+  // Hintergrund-/vergessene Tabs kosten so gar nichts; der Refresh-Button bleibt für „sofort frisch".
   useEffect(() => {
-    const t = setInterval(() => setCorpusGen((g) => g + 1), 10 * 60 * 1000);
-    return () => clearInterval(t);
-  }, []);
+    if (!needsCorpus) return;
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      const age = corpusLoadedAtRef.current ? Date.now() - corpusLoadedAtRef.current : Infinity;
+      if (age > FRESH_MS) setCorpusGen((g) => g + 1);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [needsCorpus]);
 
   // Keyword → Artikel-IDs (zentral, damit Tabelle UND Analytics dieselbe Menge nutzen)
   const [kwIds, setKwIds] = useState<number[] | null>(null);

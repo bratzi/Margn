@@ -37,18 +37,25 @@ export default function NextRun() {
   }, []);
 
   // „läuft gerade": frische Daten in der DB (Pipeline rendert) → letzte Aktivität < 4 min.
+  // EGRESS-Sparen: NUR pollen, wenn der Tab sichtbar ist (vergessener Hintergrund-Tab = 0 Requests),
+  // und nur alle 60 s — die Pipeline läuft stündlich, häufiger muss der „läuft"-Indikator nicht sein.
   useEffect(() => {
     let cancelled = false;
+    let t: ReturnType<typeof setInterval> | null = null;
     const check = async () => {
+      if (document.visibilityState !== "visible") return;
       try {
         const { data } = await supabase.from("page_overview").select("last_seen").order("last_seen", { ascending: false }).limit(1);
         const ts = data?.[0]?.last_seen ? Date.parse(data[0].last_seen as string) : 0;
         if (!cancelled) setActive(ts > 0 && Date.now() - ts < 4 * 60 * 1000);
       } catch { /* offline/again later */ }
     };
-    check();
-    const t = setInterval(check, 30000);
-    return () => { cancelled = true; clearInterval(t); };
+    const start = () => { if (!t) { check(); t = setInterval(check, 60000); } };
+    const stop = () => { if (t) { clearInterval(t); t = null; } };
+    const onVis = () => (document.visibilityState === "visible" ? start() : stop());
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { cancelled = true; stop(); document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
   return (

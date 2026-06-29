@@ -32,6 +32,11 @@ begin
 end;
 $fn$;
 
+-- WICHTIG: prune_db ist SECURITY DEFINER (löscht an RLS vorbei). EXECUTE für public/anon/
+-- authenticated entziehen, sonst könnte jeder per /rest/v1/rpc/prune_db die Löschung auslösen.
+-- Nur der Owner (= pg_cron-Job) ruft sie auf.
+revoke execute on function public.prune_db() from public, anon, authenticated;
+
 -- Täglich um 03:17 UTC. cron.schedule ist idempotent (upsert nach jobname).
 create extension if not exists pg_cron;
 select cron.schedule('prune-db-daily', '17 3 * * *', 'select public.prune_db()');
