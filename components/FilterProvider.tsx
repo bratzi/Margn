@@ -232,7 +232,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // EGRESS-Sparen: Den schweren Corpus (page_overview, ~10 MB) NUR auf den Seiten laden, die ihn
   // auch auswerten (Dashboard + Edits). Landing/Detailseite brauchen ihn nicht — bisher zog ihn aber
   // JEDER Seitenaufruf mit (FilterProvider liegt im Root-Layout).
-  const needsCorpus = pathname === "/articles" || pathname === "/articles/edits";
+  const needsCorpus = pathname === "/articles" || pathname === "/articles/edits" || pathname === "/articles/keywords";
   const corpusLoadedAtRef = useRef<number | null>(null); // Frische-Quelle (sofort aktuell, kein State-Lag)
   const fetchedGenRef = useRef(-1);                       // für welche corpusGen zuletzt geladen wurde
   const FRESH_MS = 10 * 60 * 1000;                        // jünger = kein erneuter Pull bei Navigation/Rückkehr

@@ -7,17 +7,18 @@ import ThemeToggle from "@/components/ThemeToggle";
 import NextRun from "@/components/NextRun";
 import FilterControls from "@/components/FilterControls";
 import { useFilters } from "@/components/FilterProvider";
-import { Newspaper, FileDiff } from "@/components/icons";
+import { Newspaper, FileDiff, TrendingUp } from "@/components/icons";
 
 const NAV = [
   { href: "/articles", label: "Übersicht", icon: Newspaper },
   { href: "/articles/edits", label: "Silent Edits", icon: FileDiff },
+  { href: "/articles/keywords", label: "Keyword-Trends", icon: TrendingUp },
 ];
 
 export default function Sidebar() {
   const path = usePathname();
   const f = useFilters();
-  const showFilters = path === "/articles" || path === "/articles/edits";
+  const showFilters = path === "/articles" || path === "/articles/edits" || path === "/articles/keywords";
   const [drawer, setDrawer] = useState(false);
   // Desktop-Collapse: schmale Icon-Leiste. Persistiert.
   const [collapsed, setCollapsed] = useState(false);

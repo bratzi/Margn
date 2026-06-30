@@ -24,3 +24,4 @@ export const Plus = (p: P) => <S {...p}><circle cx="12" cy="12" r="10" /><path d
 export const Pencil = (p: P) => <S {...p}><path d="M21.2 5.4a2 2 0 0 0-2.6-2.6L4 11.4V20h8.6L21.2 5.4Z" /></S>;
 export const Network = (p: P) => <S {...p}><rect x="9" y="2" width="6" height="6" rx="1" /><rect x="2" y="16" width="6" height="6" rx="1" /><rect x="16" y="16" width="6" height="6" rx="1" /><path d="M12 8v4M12 12H5v4M12 12h7v4" /></S>;
 export const Folder = (p: P) => <S {...p}><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></S>;
+export const TrendingUp = (p: P) => <S {...p}><path d="M16 7h6v6" /><path d="m22 7-8.5 8.5-5-5L2 17" /></S>;
