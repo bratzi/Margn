@@ -294,6 +294,36 @@ export default function ArticleDetail({ id }: { id: number }) {
             </div>
           </DL>
 
+          {/* Verhaltensprofil — direkt unter den Eckdaten */}
+          {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
+            <DL h="Was die Daten verraten">
+              {profile.tiles.length > 0 && (
+                <div className="dprofile">
+                  {profile.tiles.map((t) => (
+                    <div className="dmetric" key={t.k}>
+                      <div className="k">{t.k}</div>
+                      <div className="v">{t.v}</div>
+                      {t.s && <div className="s">{t.s}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {profile.rev > 0 && profile.edit + profile.ext > 0 && (
+                <div className="dsplit">
+                  <div className="dsplit-bar">
+                    {profile.edit > 0 && <span className="seg-edit" style={{ flex: profile.edit }} />}
+                    {profile.ext > 0 && <span className="seg-ext" style={{ flex: profile.ext }} />}
+                  </div>
+                  <div className="dsplit-legend">
+                    <span className="le edit">{profile.edit} stille Änderung{profile.edit !== 1 ? "en" : ""}</span>
+                    <span className="le ext">{profile.ext} Erweiterung{profile.ext !== 1 ? "en" : ""}</span>
+                  </div>
+                </div>
+              )}
+              {profile.insight && <p className="dinsight">{profile.insight}</p>}
+            </DL>
+          )}
+
           <DL h="Scan-Verlauf">
             <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
               changeTimes={snaps.map((s) => s.captured_at)} />
@@ -386,36 +416,6 @@ export default function ArticleDetail({ id }: { id: number }) {
                   {(a.revision_count ?? 0) > 0 ? " dieser gehört dazu." : " dieser nicht."}
                 </p>
               )}
-            </DL>
-          )}
-
-          {/* Verhaltensprofil */}
-          {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
-            <DL h="Was die Daten verraten">
-              {profile.tiles.length > 0 && (
-                <div className="dprofile">
-                  {profile.tiles.map((t) => (
-                    <div className="dmetric" key={t.k}>
-                      <div className="k">{t.k}</div>
-                      <div className="v">{t.v}</div>
-                      {t.s && <div className="s">{t.s}</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {profile.rev > 0 && profile.edit + profile.ext > 0 && (
-                <div className="dsplit">
-                  <div className="dsplit-bar">
-                    {profile.edit > 0 && <span className="seg-edit" style={{ flex: profile.edit }} />}
-                    {profile.ext > 0 && <span className="seg-ext" style={{ flex: profile.ext }} />}
-                  </div>
-                  <div className="dsplit-legend">
-                    <span className="le edit">{profile.edit} stille Änderung{profile.edit !== 1 ? "en" : ""}</span>
-                    <span className="le ext">{profile.ext} Erweiterung{profile.ext !== 1 ? "en" : ""}</span>
-                  </div>
-                </div>
-              )}
-              {profile.insight && <p className="dinsight">{profile.insight}</p>}
             </DL>
           )}
 
@@ -573,12 +573,15 @@ function sealTruncatedTail(ops: Op[], netWd = 0): Op[] {
   const d = ops[di].t;
   if (/\s/.test(d.trim()) || /\s$/.test(d)) return ops;            // EIN Token, am Ende angeschnitten (kein Trenner danach)
   if (!ops[di + 1].t.trimStart().startsWith(d.trim())) return ops; // die Ergänzung setzt genau dieses Wort fort
-  // NUR versiegeln, wenn der Schwanz ein CAP-ARTEFAKT ist (alte Fassung gekürzt) und KEIN echter
-  // Zugewinn: der ins-Schwanz ist viel länger als das tatsächliche Body-Wachstum (word_delta).
-  // Sonst (echte Ergänzung, tailWörter ≈ +word_delta, z.B. Art. 19682 +305) den Text NORMAL zeigen
-  // statt fälschlich „…"/„nur Whitespace".
+  // NUR als echter Zugewinn ZEIGEN, wenn der Body überhaupt GEWACHSEN ist (netWd>0) UND der
+  // angeschnittene Schwanz ungefähr diesem Wachstum entspricht (echte Ergänzung, z.B. Art. 19682
+  // +305). Sonst — Body schrumpfte/stagnierte ODER der Schwanz ist viel länger als der Netto-
+  // Zuwachs — ist der Schwanz ein reines CAP-ARTEFAKT (alte Fassung mitten im Wort gekürzt) →
+  // versiegeln. (Fix: vorher `Math.abs(netWd)`; bei einem Edit MIT Wortverlust an anderer Stelle
+  // wurde der abgeschnittene Wortrest fälschlich stehengelassen → „EinsatzkrEinsatzkräfte…",
+  // Art. 343940 V12, word_delta=−6.)
   const tailWords = ops.slice(di + 1).reduce((s, o) => s + ((o.t.match(/\S+/g) ?? []).length), 0);
-  if (tailWords <= Math.abs(netWd) + 6) return ops;
+  if (netWd > 0 && tailWords <= netWd + 6) return ops;
   return [...ops.slice(0, di), { t: " …", op: "trunc" }];
 }
 // Benachbarte gleichartige Segmente wieder verschmelzen (nach Umklassifizierungen).
