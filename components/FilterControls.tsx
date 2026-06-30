@@ -27,10 +27,33 @@ export default function FilterControls() {
   const anyActive =
     f.activeArr.length !== f.sources.length || f.status !== "all" || f.paywall !== "all" ||
     f.author !== "all" || f.atype !== "all" || f.topics.length > 0 || f.subcats.length > 0 ||
-    f.keyword !== "all" || f.lang !== "all" || f.changed !== "all" || f.depth !== "all";
+    f.keyword !== "all" || f.lang !== "all" || f.changed !== "all" || f.depth !== "all" ||
+    f.search.trim().length > 0;
 
   return (
     <div className="filters">
+      {/* Vollumfassende Volltextsuche: Titel/URL/Teaser/Thema/Schlagwörter/Rubriken/Artikelinhalt.
+          Schränkt Tabelle UND Analytik ein (UND-verknüpft mit den übrigen Filtern). */}
+      <div className="fgroup">
+        <div className="fglabel">Volltextsuche</div>
+        <div className="fsearch">
+          <svg className="fsearch-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          <input type="search" value={f.search} onChange={(e) => f.setSearch(e.target.value)} spellCheck={false}
+            placeholder="Inhalt, Titel, Schlagwort, URL …" aria-label="Volltextsuche" />
+          {f.search && <button className="fsearch-x" onClick={() => f.setSearch("")} aria-label="Suche löschen" title="Suche löschen">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>}
+        </div>
+        {f.search.trim().length >= 2 && (
+          <div className="fsearch-hint">
+            {f.searchPending ? "sucht …"
+              : f.searchCount != null ? `${f.searchCount.toLocaleString("de-DE")}${f.searchCount >= 1200 ? "+" : ""} Treffer · durchsucht auch den Artikelinhalt`
+              : ""}
+          </div>
+        )}
+        {f.search.trim().length === 1 && <div className="fsearch-hint">mind. 2 Zeichen</div>}
+      </div>
+
       {anyActive && (
         <button className="freset-all" onClick={f.resetAll} title="Alle Filter auf Ausgangszustand">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>

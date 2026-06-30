@@ -1431,3 +1431,17 @@ a.art-title:hover { color: var(--accent); text-decoration: underline; }
 /* Tabelle: Begriff-Link */
 .kt-term-link { color: var(--ink); font-weight: 600; text-decoration: none; }
 .kt-term-link:hover { color: var(--accent); text-decoration: underline; }
+
+/* ---------- Volltextsuche im Filter-Panel ---------- */
+.fsearch { position: relative; display: flex; align-items: center; }
+.fsearch-ic { position: absolute; left: 9px; color: var(--faint); pointer-events: none; }
+.fsearch input { width: 100%; padding: 8px 28px 8px 31px; font: inherit; font-size: 12.5px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink);
+  outline: none; transition: border-color .14s, box-shadow .14s; -webkit-appearance: none; }
+.fsearch input::-webkit-search-cancel-button { display: none; }
+.fsearch input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-sub); }
+.fsearch input::placeholder { color: var(--faint); }
+.fsearch-x { position: absolute; right: 6px; width: 20px; height: 20px; display: inline-flex; align-items: center;
+  justify-content: center; border: 0; background: none; color: var(--faint); cursor: pointer; border-radius: 5px; }
+.fsearch-x:hover { color: var(--ink); background: var(--surface-2); }
+.fsearch-hint { font-size: 10.5px; color: var(--faint); margin-top: 5px; line-height: 1.45; }

@@ -80,6 +80,8 @@ type Ctx = {
   topics: string[]; toggleTopic: (t: string) => void; setTopics: (a: string[]) => void;
   subcats: string[]; toggleSubcat: (c: string) => void;
   keyword: string; setKeyword: (v: string) => void;
+  // Volltextsuche über alle Eigenschaften (Titel/URL/Teaser/Thema/Schlagwörter/Rubriken/Inhalt).
+  search: string; setSearch: (v: string) => void; searchPending: boolean; searchCount: number | null;
   lang: string; setLang: (v: string) => void;
   // Stille Änderungen (revision_count) — Kernfeature des Observatoriums
   changed: string; setChanged: (v: string) => void;
@@ -129,6 +131,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [subcats, setSubcats] = useState<string[]>([]);
   const [subOpts, setSubOpts] = useState<SubOpt[]>([]);
   const [keyword, setKeyword] = useState("all");
+  const [search, setSearch] = useState("");
   // Unterthemen bleiben beim Topic-Wechsel erhalten — sie sind über die Filter-Pills
   // jederzeit sichtbar und einzeln entfernbar.
   const toggleTopic = (t: string) => setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]);
@@ -297,7 +300,38 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       .then(({ data }) => { if (!cancelled) setKwIds((data ?? []).map((r: any) => r.article_id)); });
     return () => { cancelled = true; };
   }, [keyword]);
-  const kwIdSet = useMemo(() => (kwIds ? new Set(kwIds) : null), [kwIds]);
+
+  // VOLLTEXTSUCHE → Artikel-IDs: durchsucht serverseitig Titel/URL/Teaser/Thema/Schlagwörter/
+  // Rubriken UND den Artikelinhalt (RPC search_articles, trgm-indiziert). Entprellt; ein
+  // Kaltstart-500 wird einmal wiederholt. Die Treffer schränken — wie der Keyword-Filter —
+  // Tabelle UND Analytik ein (mit dem Keyword-Filter UND-verknüpft).
+  const [searchIds, setSearchIds] = useState<number[] | null>(null);
+  const [searchPending, setSearchPending] = useState(false);
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) { setSearchIds(null); setSearchPending(false); return; }
+    let cancelled = false;
+    setSearchPending(true);
+    const run = (attempt: number) => {
+      supabase.rpc("search_articles", { p_q: q, p_sources: active.size ? [...active] : null, p_limit: 1200 })
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) { if (attempt < 1) { setTimeout(() => run(attempt + 1), 500); return; } setSearchIds([]); setSearchPending(false); return; }
+          setSearchIds((data ?? []).map((r: any) => r.article_id)); setSearchPending(false);
+        });
+    };
+    const t = setTimeout(() => run(0), 280);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [search, active]);
+
+  // Keyword- UND Such-IDs zu EINER ID-Restriktion verschmelzen (Schnittmenge; null = keine).
+  const effKwIds = useMemo(() => {
+    if (kwIds == null) return searchIds;
+    if (searchIds == null) return kwIds;
+    const ss = new Set(searchIds); return kwIds.filter((x) => ss.has(x));
+  }, [kwIds, searchIds]);
+  const kwIdSet = useMemo(() => (effKwIds ? new Set(effKwIds) : null), [effKwIds]);
+  const searchCount = useMemo(() => (search.trim().length < 2 ? null : (searchIds?.length ?? null)), [search, searchIds]);
 
   // dynamische Topic-Optionen — aus dem Corpus, mit dem GLEICHEN Prädikat wie die Tabelle
   // (alle Filter außer Themen/Rubriken selbst). Zählt damit exakt das, was die Tabelle zeigt.
@@ -398,7 +432,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // Alle Filter auf Ausgangszustand (Quellen wieder alle aktiv).
   const resetAll = () => {
     setStatus("all"); setPaywall("all"); setAtype("all"); setAuthor("all");
-    setTopics([]); setSubcats([]); setKeyword("all"); setLang("all");
+    setTopics([]); setSubcats([]); setKeyword("all"); setSearch(""); setLang("all");
     setChanged("all"); setDepth("all"); setPinpoint(null);
     _setWindowDays(60); setRangeIdx({ from: 0, to: 59 }); _setTimeAxis("published");
     setActive(new Set(sources.map((s) => s.id)));
@@ -407,10 +441,11 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const value: Ctx = {
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
-    topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword, lang, setLang,
+    topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword,
+    search, setSearch, searchPending, searchCount, lang, setLang,
     changed, setChanged, depth, setDepth, resetAll,
     topicOpts, keywordOpts, subOpts, catTree,
-    corpus, corpusReady, reloadCorpus, refreshing, corpusLoadedAt, kwIds, kwIdSet, subPats,
+    corpus, corpusReady, reloadCorpus, refreshing, corpusLoadedAt, kwIds: effKwIds, kwIdSet, subPats,
     days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen,
     windowDays, setWindowDays, timeAxis, setTimeAxis, ready,
   };
