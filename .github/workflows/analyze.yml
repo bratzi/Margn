@@ -17,7 +17,9 @@ on:
       mode:
         type: choice
         default: pipeline
-        options: [pipeline, structure]
+        # loop = self-pacing Loop manuell (re)starten, wenn GitHub die Schedule-
+        # Slots droppt; teilt sich die 'pipeline-loop'-Lane mit den Cron-Laeufen.
+        options: [pipeline, structure, loop]
   push:
     paths:
       - ".github/pipeline.trigger"
@@ -26,9 +28,11 @@ on:
 # pro Gruppe max. 1 laufenden + 1 wartenden Lauf. Der laufende Loop blockiert ~5 h
 # die Lane, ein wartender Lauf uebernimmt nahtlos, sobald er endet -> luckenlose
 # stuendliche Kette, unabhaengig davon ob GitHub den naechsten Slot feuert.
-# Manuell / Push / woechentlich bekommen je eine eigene (run_id-)Lane -> laufen sofort.
+# Ein manueller "loop"-Dispatch nutzt DIESELBE Lane (kein Doppel-Loop) - Recovery,
+# wenn GitHub die Cron-Slots droppt. Push / mode=pipeline|structure / woechentlich
+# bekommen je eine eigene (run_id-)Lane -> laufen sofort und blockieren nichts.
 concurrency:
-  group: ${{ (github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') && 'pipeline-loop' || format('pipeline-{0}', github.run_id) }}
+  group: ${{ ((github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'loop')) && 'pipeline-loop' || format('pipeline-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -66,7 +70,7 @@ jobs:
       # Nachfolger. Ein Inline-Gate (Frische von articles.last_seen) verhindert
       # Doppel-Scrapes bei der Uebergabe.
       - name: hourly-loop
-        if: ${{ github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0' }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule != '23 5 * * 0') || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'loop') }}
         working-directory: scraper
         run: |
           set -uo pipefail   # KEIN -e: ein einzelner Scrape-Fehler darf den Loop nicht killen.
