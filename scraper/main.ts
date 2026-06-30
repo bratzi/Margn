@@ -26,39 +26,10 @@ const TIME_BUDGET_MS = Number(process.env.CRAWL_TIME_BUDGET_MS ?? 16 * 60 * 1000
 // Playwright-Minuten — das Rendern übernimmt der analyze-Job.
 const RENDER = process.env.CRAWL_RENDER !== "0";
 
-// Kuratierte Feeds für Quellen, deren Auto-Erkennung (robots.txt/Sitemap/<link>)
-// zu wenig hergibt. FAZ z.B. nennt keine Sitemap in robots.txt, hat aber ergiebige
-// RSS-Ressort-Feeds. Schlüssel = Host. Wird beim Crawl der Quelle mit eingereiht.
-const KNOWN_FEEDS: Record<string, string[]> = {
-  "www.faz.net": [
-    "https://www.faz.net/rss/aktuell/",
-    "https://www.faz.net/rss/aktuell/politik/",
-    "https://www.faz.net/rss/aktuell/wirtschaft/",
-    "https://www.faz.net/rss/aktuell/finanzen/",
-    "https://www.faz.net/rss/aktuell/feuilleton/",
-    "https://www.faz.net/rss/aktuell/gesellschaft/",
-    "https://www.faz.net/rss/aktuell/sport/",
-    "https://www.faz.net/rss/aktuell/wissen/",
-    "https://www.faz.net/rss/aktuell/technik-motor/",
-    "https://www.faz.net/rss/aktuell/karriere-hochschule/",
-    "https://www.faz.net/rss/aktuell/reise/",
-    "https://www.faz.net/rss/aktuell/rhein-main/",
-  ],
-  "www.n-tv.de": [
-    "https://www.n-tv.de/rss",
-    "https://www.n-tv.de/politik/rss",
-    "https://www.n-tv.de/wirtschaft/rss",
-    "https://www.n-tv.de/sport/rss",
-    "https://www.n-tv.de/panorama/rss",
-    "https://www.n-tv.de/technik/rss",
-    "https://www.n-tv.de/wissen/rss",
-    "https://www.n-tv.de/auto/rss",
-    "https://www.n-tv.de/reise/rss",
-    "https://www.n-tv.de/unterhaltung/rss",
-    "https://www.n-tv.de/ratgeber/rss",
-    "https://www.n-tv.de/der_tag/rss",
-  ],
-};
+// RETIRED (gleiche Behandlung aller Verlage): die früher kuratierten FAZ/n-tv-Ressort-Feeds
+// werden jetzt GENERISCH von discoverFeeds() entdeckt (deklarierte Feeds + probierte Sektions-
+// Feed-Konventionen wie `/rss/<ressort>/`, `<ressort>/rss`). Leer = keine Verlags-Sonderbehandlung.
+const KNOWN_FEEDS: Record<string, string[]> = {};
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 // RECENCY-FENSTER (VEREINHEITLICHT die Quellen): Verlage exponieren wild unterschiedlich viele
 // URLs (n-tv: Archiv über dichte Quervernetzung bis 2009; Tagesschau/FAZ: keine Sitemap → wenig).
@@ -1286,8 +1257,14 @@ function looksLikeArticle(url: string): boolean {
   const segs = path.replace(/\/+$/, "").split("/").filter(Boolean);
   if (segs.length < 2) return false;                                // Rubrik-Wurzel: /inland, /sport
   if (/\/$/.test(path)) return false;                               // Rubrik-Index: /politique/
-  // Artikel-Signal: lange Zahl-ID, Datumspfad /YYYY/MM/DD/ oder Slug-NNN.html
-  return /\d{5,}/.test(u) || /\/\d{4}\/\d{2}\/\d{2}\//.test(u) || /-\d+\.html?$/.test(u);
+  // Artikel-Signal: lange Zahl-ID, Datumspfad /YYYY/MM/DD/ oder Slug-NNN.html …
+  // … ODER eine HEX-Artikel-ID. WICHTIG (sonst „gleiche Exposition" verletzt): Spiegel
+  // (`slug-a-<UUID>`) und Bild (`slug-<24-Hex>`) tragen KEINE Zahl-ID — sie wurden bisher nur
+  // dann als Artikel erkannt, wenn die Hex-ID ZUFÄLLIG 5+ aufeinanderfolgende Ziffern enthielt;
+  // sonst fielen sie als „unknown" aus dem Render-Pool (≈3.200 Spiegel- + ≈4.000 Bild-Artikel).
+  return /\d{5,}/.test(u) || /\/\d{4}\/\d{2}\/\d{2}\//.test(u) || /-\d+\.html?$/.test(u)
+    || /-a-[0-9a-f]{8}-[0-9a-f]{4}-/i.test(u)              // Spiegel: …-a-<UUID>
+    || /-[0-9a-f]{24}(?:\.html?)?(?:$|[?#])/i.test(u);     // Bild: …-<24-Hex-ID>
 }
 
 // Positives Artikel-Signal: JSON-LD trägt einen Artikel-Typ ODER og:type=article.
@@ -1481,21 +1458,36 @@ async function discoverFeeds(src: Source): Promise<string[]> {
   const home = await fetchHtml(src.base_url);
   if (!home) return [];
   for (const f of extractFeedLinks(home, src.base_url)) feeds.add(f);
-  // Top-Sektionen aus der Startseite (gleiche Domain, kurzer Pfad, kein Artikel), je 1. Segment einmal.
+  // Top-Sektionen aus der Startseite (gleiche Domain, kurzer Pfad, kein Artikel). Nach GANZER
+  // Rubrik (1–2 Segmente) keyen, nicht nur nach dem 1. Segment — sonst fiele bei Verlagen mit
+  // /<basis>/<ressort>/-Struktur (FAZ: /aktuell/politik/) alles bis auf EINE Rubrik weg.
   const secs = new Map<string, string>();
   for (const link of sameDomainLinks(home, src.base_url, src.base_url)) {
     try {
       const segs = new URL(link).pathname.replace(/\/+$/, "").split("/").filter(Boolean);
       if (segs.length < 1 || segs.length > 2 || classifyUrl(link) === "article") continue;
-      if (!secs.has(segs[0])) secs.set(segs[0], `${origin}/${segs.join("/")}/`);
+      const key = segs.join("/");
+      if (!secs.has(key)) secs.set(key, `${origin}/${key}/`);
     } catch {}
   }
-  // Sektionsseiten (gedeckelt) parallel abklappern und ihre deklarierten Feeds ernten.
-  const found = await Promise.all([...secs.values()].slice(0, 24).map(async (u) => {
+  const secList = [...secs].slice(0, 30);
+  // a) Deklarierte <link rel=alternate>-Feeds der Sektionsseiten ernten.
+  const found = await Promise.all(secList.map(async ([, u]) => {
     const html = await fetchHtml(u);
     return html ? extractFeedLinks(html, u) : [];
   }));
   for (const fs of found) for (const f of fs) feeds.add(f);
+  // b) GENERISCH gängige Sektions-Feed-Konventionen probieren (kuratierungsfrei, ersetzt die
+  //    verlagsspezifischen KNOWN_FEEDS → gleiche Behandlung aller Verlage): n-tv `<ressort>/rss`,
+  //    Spiegel `<ressort>/index.rss`, Tagesschau `<ressort>/index~rss2.xml`, FAZ `/rss/<ressort>/`.
+  //    Nur Kandidaten übernehmen, die wirklich ein RSS/Atom-Feed zurückgeben.
+  const cand = new Set<string>();
+  for (const [key, u] of secList) { cand.add(`${u}rss`); cand.add(`${u}index.rss`); cand.add(`${u}index~rss2.xml`); cand.add(`${origin}/rss/${key}/`); }
+  const probed = await Promise.all([...cand].slice(0, 48).map(async (u) => {
+    const xml = await fetchXml(u);
+    return xml && /<(rss|feed)\b/i.test(xml) ? u : null;
+  }));
+  for (const u of probed) if (u) feeds.add(u);
   return [...feeds];
 }
 
@@ -1679,15 +1671,31 @@ async function analyzeBacklog() {
     sb.rpc("open_article_pages", { src_ids: activeIds }).order("id", { ascending: false })
   );
 
-  // Budget gleichmäßig über die Quellen verteilen (sonst frisst die größte Quelle alles).
-  const perSource = Math.ceil(MAX_PAGES / activeIds.length);
+  // Budget GEWICHTET nach offenem Rückstand verteilen (gleiche AUSBEUTE statt nur gleiches
+  // Budget): jede Quelle bekommt einen Sockel (FLOOR, deckt die laufende Aufnahme), der Rest
+  // proportional zum Rückstand → unter-exponierte Quellen mit großem unknown→article-Rückstand
+  // (Spiegel/Bild) holen auf, ohne die frischen Artikel der anderen zu verhungern. Das NEU-Budget
+  // wird auf (MAX_PAGES − Re-Scan-Anteil) gedeckelt, damit die Re-Scan-Reserve (stille Edits)
+  // garantiert bleibt — auch bei riesigem Rückstand.
+  const rescanShare0 = Number(process.env.CRAWL_RESCAN_SHARE ?? 0.2);
+  const newBudget = Math.max(activeIds.length, MAX_PAGES - Math.ceil(MAX_PAGES * rescanShare0));
+  const openCount = new Map<number, number>();
+  for (const p of open) openCount.set(p.source_id, (openCount.get(p.source_id) ?? 0) + 1);
+  const floorPer = Math.max(20, Math.floor(newBudget / (activeIds.length * 3)));
+  const cap = new Map<number, number>();
+  let assigned = 0;
+  for (const sid of activeIds) { const f = Math.min(openCount.get(sid) ?? 0, floorPer); cap.set(sid, f); assigned += f; }
+  const moreOf = (sid: number) => Math.max(0, (openCount.get(sid) ?? 0) - (cap.get(sid) ?? 0));
+  const totalMore = activeIds.reduce((s, sid) => s + moreOf(sid), 0) || 1;
+  const rest = Math.max(0, newBudget - assigned);
+  for (const sid of activeIds) cap.set(sid, (cap.get(sid) ?? 0) + Math.min(moreOf(sid), Math.floor(rest * moreOf(sid) / totalMore)));
   const bySrc = new Map<number, string[]>();
   for (const p of open) {
     const arr = bySrc.get(p.source_id) ?? bySrc.set(p.source_id, []).get(p.source_id)!;
-    if (arr.length < perSource) arr.push(p.url);
+    if (arr.length < (cap.get(p.source_id) ?? 0)) arr.push(p.url);
   }
   const batch = [...bySrc.values()].reduce((s, a) => s + a.length, 0);
-  console.log(`Offen (nicht gerendert): ${open.length} | dieser Lauf: ${batch} (max ${perSource}/Quelle)`);
+  console.log(`Offen (nicht gerendert): ${open.length} | dieser Lauf: ${batch} (gewichtet, Sockel ${floorPer}/Quelle, NEU-Budget ${newBudget})`);
 
   // Neue Artikel werden DIREKT gerendert und voll angereichert (Titel, Wörter, Datum,
   // Autoren, Keywords) — statt nur nackte URLs einzufügen. So kommen neue Artikel OHNE den
