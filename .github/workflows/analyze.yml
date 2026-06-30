@@ -2,13 +2,14 @@ name: pipeline
 on:
   schedule:
     # Seed-Slots: GitHubs Scheduler ist best-effort und verwirft/verzoegert Trigger
-    # (real oft 2-6 h Luecken, dann mehrere Slots auf einmal). Diese Slots STARTEN nur
-    # einen Lauf - die eigentliche Stuendlichkeit macht der Lauf selbst per Schlaf-Loop
-    # (siehe Step "hourly-loop"). Mehrere Slots/h sorgen dafuer, dass nach dem Ende
-    # eines Loops zeitnah ein Nachfolger in der Concurrency-Queue bereitsteht.
-    - cron: "7 * * * *"
-    - cron: "27 * * * *"
-    - cron: "47 * * * *"
+    # (real oft 2-6 h Luecken). Diese Slots STARTEN nur einen Lauf - die eigentliche
+    # Stuendlichkeit macht der Lauf selbst per Schlaf-Loop (siehe Step "hourly-loop").
+    # Ein wartender Lauf persistiert ueber die gesamte ~5h-Loop-Laufzeit in der Queue,
+    # daher reicht 1 Seed/h fuer die luekenlose Uebergabe; 2 Slots als Hedge gegen
+    # ausgelassene Slots. (Mehr Slots = nur mehr "cancelled"-Laeufe, kein Mehrwert,
+    # da pro Lane immer nur 1 wartender Lauf gehalten wird.)
+    - cron: "9 * * * *"
+    - cron: "39 * * * *"
     # Woechentlicher Struktur-Lauf (Seitenbaum) - eigene Lane, laeuft sofort.
     - cron: "23 5 * * 0"
   workflow_dispatch:
@@ -101,12 +102,17 @@ jobs:
           while true; do
             i=$((i+1))
             echo "===== Iteration $i  $(date -u +%H:%M) UTC ====="
-            if due; then
-              echo "-> faellig: discover + render"
+            # Frische-Gate NUR bei der ersten Iteration: sie verhindert den Doppel-
+            # Scrape beim Handover (Vorgaenger hat eben erst gescraped). Ab i>1 pact
+            # sich der Loop selbst exakt auf die volle Stunde, ein erneutes Gate wuerde
+            # wegen der ~30min Scrape-Dauer (last_seen ~:30) jede zweite Stunde
+            # faelschlich als "frisch" skippen -> nur alle 2h Daten statt stuendlich.
+            if [ "$i" -gt 1 ] || due; then
+              echo "-> scrape: discover + render"
               discover || echo "WARN: discover-Fehler, Loop laeuft weiter"
               render   || echo "WARN: render-Fehler, Loop laeuft weiter"
             else
-              echo "-> frisch (Uebergabe/Doppel vermieden), diese Stunde uebersprungen"
+              echo "-> frisch (Handover/Doppel vermieden), erste Iteration uebersprungen"
             fi
             now=$(date -u +%s)
             next=$(( (now/3600 + 1)*3600 ))   # naechste volle Stunde (UTC)
