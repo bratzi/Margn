@@ -412,6 +412,11 @@ function cleanBody(body: string, url: string, title: string | null, dek: string 
   let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
 
   if (/(^|\.)bild\.de$/.test(host)) {
+    // Kopf-Chrome: Bild klebt je Render mal <Überschrift><Bild-Caption>Foto: <Credit><DD.MM.YYYY
+    // - HH:MM Uhr> VOR den Lauftext → reine Phantom-Edits, deren Diff komplett versiegelt und dann
+    // „Unterschied außerhalb des erfassten Ausschnitts" zeigt (Art. 660677). Den GANZEN Vorspann
+    // bis einschließlich des führenden „Foto: … Uhr" am Kopf kappen (nur am Anfang, signaturgebunden).
+    b = b.replace(/^[\s\S]{0,500}?Foto:\s*[^]{0,90}?\d{1,2}\.\d{2}\.\d{4}\s*[-–—]\s*\d{1,2}:\d{2}\s*Uhr\s*/, "");
     const i = b.indexOf("Artikel weiterlesen");
     if (i >= 0 && i < 700) b = b.slice(i + "Artikel weiterlesen".length);
     b = b.replace(/\bFoto:[^]{0,90}?\d{1,2}\.\d{2}\.\d{4}\s*[-–—]\s*\d{1,2}:\d{2}\s*Uhr/g, " ")
