@@ -3,16 +3,16 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-// Zeitplan (UTC, GitHub-Actions-Cron in .github/workflows/analyze.yml):
-//   Pipeline (Discovery + Render in EINEM Job):  "23 * * * *"
-//     → STÜNDLICH um :23 (Repo public → Actions gratis/unbegrenzt; :23 ist ruhiger als :00).
-//   (scrape.yml-Cron ist AUS = nur manuell; structure läuft separat nur wöchentlich.)
+// Zeitplan (UTC, GitHub-Actions in .github/workflows/analyze.yml):
+//   Pipeline (Discovery + Render in EINEM Job): self-pacing Loop, scrapt STÜNDLICH um :10.
+//     → bewusst NICHT zur vollen Stunde (:00). Seed-Cron :10/:40 startet nur den Loop.
+//   (structure läuft separat nur wöchentlich.)
 // WICHTIG: GitHub-Cron ist best-effort — der echte Start kann sich um Minuten verzögern
 // oder ein Slot ganz ausfallen. Angezeigt wird der GEPLANTE Zeitpunkt, keine Garantie.
 function nextPipeline(): Date {
   const now = new Date();
   const c = new Date(now);
-  c.setUTCMinutes(23, 0, 0);                      // :23 der aktuellen Stunde
+  c.setUTCMinutes(10, 0, 0);                      // :10 der aktuellen Stunde
   if (c.getTime() <= now.getTime()) c.setUTCHours(c.getUTCHours() + 1); // schon vorbei → nächste Stunde
   return c;
 }
@@ -59,7 +59,7 @@ export default function NextRun() {
   }, []);
 
   return (
-    <div className="nextrun nextrun-multi" title={"Automatik (UTC): Pipeline (Discovery + Render) stündlich um :23. GitHub-Cron ist best-effort — der Start kann sich verzögern oder ausfallen, der Wert ist der GEPLANTE Zeitpunkt. Badge „läuft“ = aktuell frische Daten erkannt."}>
+    <div className="nextrun nextrun-multi" title={"Automatik: Pipeline (Discovery + Render) stündlich um :10 (bewusst nicht zur vollen Stunde). GitHub-Cron ist best-effort — der Start kann sich verzögern oder ausfallen, der Wert ist der GEPLANTE Zeitpunkt. Badge „läuft“ = aktuell frische Daten erkannt."}>
       <div className="nr-head">
         <span>Automatik</span>
         {active && <span className="nr-live"><i />läuft</span>}

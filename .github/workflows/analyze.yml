@@ -3,13 +3,14 @@ on:
   schedule:
     # Seed-Slots: GitHubs Scheduler ist best-effort und verwirft/verzoegert Trigger
     # (real oft 2-6 h Luecken). Diese Slots STARTEN nur einen Lauf - die eigentliche
-    # Stuendlichkeit macht der Lauf selbst per Schlaf-Loop (siehe Step "hourly-loop").
+    # Stuendlichkeit macht der Lauf selbst per Schlaf-Loop (siehe Step "hourly-loop"),
+    # der bewusst zur :10 statt zur vollen Stunde scrapt (Vorgabe: nicht :00).
     # Ein wartender Lauf persistiert ueber die gesamte ~5h-Loop-Laufzeit in der Queue,
-    # daher reicht 1 Seed/h fuer die luekenlose Uebergabe; 2 Slots als Hedge gegen
-    # ausgelassene Slots. (Mehr Slots = nur mehr "cancelled"-Laeufe, kein Mehrwert,
-    # da pro Lane immer nur 1 wartender Lauf gehalten wird.)
-    - cron: "9 * * * *"
-    - cron: "39 * * * *"
+    # daher reicht 1 Seed/h fuer die luekenlose Uebergabe; 2 Slots (:10/:40, 30 min
+    # auseinander) als Hedge gegen ausgelassene Slots. (Mehr Slots = nur mehr
+    # "cancelled"-Laeufe, kein Mehrwert, da pro Lane immer nur 1 wartender Lauf gehalten wird.)
+    - cron: "10 * * * *"
+    - cron: "40 * * * *"
     # Woechentlicher Struktur-Lauf (Seitenbaum) - eigene Lane, laeuft sofort.
     - cron: "23 5 * * 0"
   workflow_dispatch:
@@ -108,8 +109,8 @@ jobs:
             echo "===== Iteration $i  $(date -u +%H:%M) UTC ====="
             # Frische-Gate NUR bei der ersten Iteration: sie verhindert den Doppel-
             # Scrape beim Handover (Vorgaenger hat eben erst gescraped). Ab i>1 pact
-            # sich der Loop selbst exakt auf die volle Stunde, ein erneutes Gate wuerde
-            # wegen der ~30min Scrape-Dauer (last_seen ~:30) jede zweite Stunde
+            # sich der Loop selbst exakt auf :10 jeder Stunde, ein erneutes Gate wuerde
+            # wegen der ~30min Scrape-Dauer (last_seen ~:40) jede zweite Stunde
             # faelschlich als "frisch" skippen -> nur alle 2h Daten statt stuendlich.
             if [ "$i" -gt 1 ] || due; then
               echo "-> scrape: discover + render"
@@ -119,7 +120,9 @@ jobs:
               echo "-> frisch (Handover/Doppel vermieden), erste Iteration uebersprungen"
             fi
             now=$(date -u +%s)
-            next=$(( (now/3600 + 1)*3600 ))   # naechste volle Stunde (UTC)
+            # Ziel :10 nach der Stunde (NICHT zur vollen Stunde scrapen, User-Vorgabe).
+            next=$(( (now/3600)*3600 + 600 ))               # :10 dieser Stunde (UTC)
+            if [ "$next" -le "$now" ]; then next=$(( next + 3600 )); fi   # schon vorbei -> :10 naechste Stunde
             if [ "$next" -ge "$HORIZON" ]; then
               echo "Horizont erreicht -> Lauf endet, Nachfolger uebernimmt die Lane"
               break
