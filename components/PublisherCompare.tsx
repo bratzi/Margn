@@ -60,7 +60,7 @@ function DeltaPP({ cur, prev, baseOk }: { cur: number; prev: number; baseOk: boo
 export default function PublisherCompare() {
   const f = useFilters();
   const { sources, activeArr: activeSources, topics, days, rangeIdx } = f;
-  const [period, setPeriod] = useState<Period>("7d");
+  const [period, setPeriod] = useState<Period>("dyn");
   const nameById = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
 
   // Berechne curFrom/curTo/prevFrom/prevTo je nach Modus
