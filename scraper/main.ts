@@ -429,7 +429,7 @@ function extractLiveBlog(html: string): { body: string; count: number } | null {
 }
 
 // Normalisiert den extrahierten Body je Quelle (entfernt Nicht-Fließtext am Anfang).
-function cleanBody(body: string, url: string, title: string | null): string {
+function cleanBody(body: string, url: string, title: string | null, dek: string | null = null): string {
   let b = body;
   let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
 
@@ -475,6 +475,27 @@ function cleanBody(body: string, url: string, title: string | null): string {
     // 1) "Lesezeit: N Min." (Web-Komponente) inkl. evtl. direkt davorstehendem Datum/Uhrzeit als
     //    EINHEIT entfernen — durch Space ersetzen, damit Überschrift und Lede nicht verkleben.
     b = b.replace(/(?:\d{1,2}\.\d{2}\.\d{4},\s*\d{1,2}:\d{2}\s*(?:Uhr)?\s*)?Lesezeit:\s*\d+\s*Min\.?/g, " ");
+    // 1a) Ressort-Breadcrumb am Kopf: FAZ klebt je Render mal die Pfad-Ressorts VOR die Überschrift
+    //     (z.B. "/aktuell/feuilleton/debatten/…" → "FeuilletonDebatten<Überschrift>…") → sonst reine
+    //     Phantom-Edits (Art. 638248). Den Breadcrumb aus den URL-Segmenten bauen und am Start kappen.
+    try {
+      const segs = new URL(url).pathname.toLowerCase().split("/").filter(Boolean);
+      const rub = segs.filter((s, i) => i < segs.length - 1 && s !== "aktuell" && /^[a-zäöüß]{3,}$/.test(s));
+      if (rub.length) {
+        const crumb = rub.map((s) => s[0].toUpperCase() + s.slice(1)).join("").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        b = b.replace(new RegExp("^\\s*" + crumb, "i"), "");
+      }
+    } catch {}
+    // 1b) Content-Type-Label ("Gastbeitrag" etc.) + "Von <Autor>"-Byline, die FAZ zwischen Überschrift
+    //     und Lede klebt (je Render mal da, mal nicht) → Phantom-Edit. EXAKT am Lede-Anfang (description)
+    //     kappen, damit die Byline nicht in den echten Text hineingestrippt wird. Ohne dek: kein Eingriff.
+    if (dek) {
+      const anchor = decodeEntities(dek).replace(/\s+/g, " ").trim().slice(0, 40);
+      if (anchor.length >= 12) {
+        const esc = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        b = b.replace(new RegExp("(?:Gastbeitrag|Gastkommentar|Kommentar|Glosse|Reportage|Analyse|Interview|Leitartikel|Kolumne|Essay|Nachruf)?\\s*Von\\s+[\\s\\S]{0,80}?(?=" + esc + ")", ""), " ");
+      }
+    }
     // 2) Führender "[Ressort]FAZ+<Kicker> :"-Kopf (Ressort = ein großgeschriebenes Wort direkt davor).
     b = b.replace(/^\s*(?:[A-ZÄÖÜ][A-Za-zäöüß-]{2,20})?FAZ\+[^:]{0,80}:\s*/, "");
     // 3) Abschluss-Chrome am Ende abschneiden (wächst/wechselt je Scan → Phantom-Edits):
@@ -532,7 +553,7 @@ function chooseBody(rawText: string, renText: string, isLive: boolean): { text: 
   return (isLive || renMoreComplete) ? { text: renText, fromRendered: true } : { text: rawText, fromRendered: false };
 }
 
-function trackBody(html: string, url: string, rawHtml: string | null, art: { body: string } | null, metaIsLive: boolean, title: string | null = null): { body: string; isLive: boolean } | null {
+function trackBody(html: string, url: string, rawHtml: string | null, art: { body: string } | null, metaIsLive: boolean, title: string | null = null, dek: string | null = null): { body: string; isLive: boolean } | null {
   const live = extractLiveBlog(rawHtml ?? html);
   if (live) return { body: live.body, isLive: true }; // JSON-LD-Ticker ist sauber & vollständig → direkt nehmen
   // Zwei Kandidaten gewinnen lassen: Artikeltext aus ROH-HTML (vor JS) vs. aus gerendertem DOM.
@@ -541,8 +562,8 @@ function trackBody(html: string, url: string, rawHtml: string | null, art: { bod
   // „> 20 % mehr Text" hat und chooseBody ihn fälschlich als „vollständiger" wählt — obwohl das
   // „Mehr" nur Müll ist. Nach cleanBody schrumpft der gerenderte auf den echten Artikeltext, und
   // bei Gleichstand gewinnt das saubere Roh-HTML.
-  const rawText = rawHtml ? cleanBody(extractArticleText(rawHtml, url), url, title) : "";
-  const renText = cleanBody(art?.body ?? extractArticleText(html, url), url, title);
+  const rawText = rawHtml ? cleanBody(extractArticleText(rawHtml, url), url, title, dek) : "";
+  const renText = cleanBody(art?.body ?? extractArticleText(html, url), url, title, dek);
   if (!rawText && !renText) return null;
   const pick = chooseBody(rawText, renText, metaIsLive);
   return { body: pick.text, isLive: metaIsLive };
@@ -654,7 +675,7 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
     const { data: pr } = await sb.from("article_paras").select("paras").eq("article_id", articleId).maybeSingle();
     const raw: string[] = Array.isArray(pr?.paras) ? (pr!.paras as string[]) : [];
     if (raw.length) {
-      oldParasClean = normalizeParas(cleanBody(raw.join("\n\n"), url, newTitle));
+      oldParasClean = normalizeParas(cleanBody(raw.join("\n\n"), url, newTitle, metaNow?.description ?? null));
       prevFps = oldParasClean.map(fp);
       prevHash = fp(prevFps.join("|"));
     }
@@ -951,7 +972,7 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   }
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
-  const tb = trackBody(html, url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
+  const tb = trackBody(html, url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null, meta.description ?? null);
   if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
   return id;
 }
@@ -1884,7 +1905,7 @@ async function enrichArticles(sources: Source[]) {
           void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
-          const tb = trackBody(html, item.url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null);
+          const tb = trackBody(html, item.url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null, meta.description ?? null);
           if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, item.url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
