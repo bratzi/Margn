@@ -332,7 +332,14 @@ function extractMeta(html: string, url: string) {
     .map((c: string) => c.trim()).filter((c: string) => c.length > 1 && c.length < 80);
 
   const author_status = classifyAuthorStatus(authorList);
-  const topic = topicOf(categories, url);
+  // Themen-Klassifizierung aus der VERLAGSEIGENEN kanonischen URL (og:url / <link rel=canonical>),
+  // NICHT aus der gespeicherten `url`: bei n-tv ist letztere von canonUrl auf die section-lose
+  // Kurzform „idN.html" verkürzt → der Ressort-Pfad fehlt → topicOf liefert „sonstiges". og:url/
+  // canonical tragen die volle sektionierte URL (verifiziert). Generisch & sicher (Verlags-Canonical).
+  const canonHref = (/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i.exec(html)
+    ?? /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i.exec(html))?.[1] ?? "";
+  const classifyUrl = [metaContent(html, "og:url") ?? "", canonHref].find((u) => /^https?:\/\//i.test(u)) ?? url;
+  const topic = topicOf(categories, classifyUrl);
 
   return { title, description, og_image, published_at, published_precise, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, authors: authorList, keywords, categories };
 }
