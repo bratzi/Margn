@@ -2,6 +2,11 @@
 // auf ein gemeinsames kanonisches Thema. Reihenfolge = Priorität (spezifisch → allgemein).
 
 export const TOPICS: { key: string; label: string; rx: RegExp }[] = [
+  // Regional/Lokales ZUERST: verlagseigene Regionalressorts (Bild /regional/<Land>, FAZ Rhein-Main,
+  // Tagesschau /inland/regional/<Land>, n-tv /regionales/). Höchste Priorität, weil ein Regionalressort
+  // die Herkunft bestimmt (regionaler Sport/Politik/Kultur bleibt regional). Wortgrenzen verhindern
+  // Fehltreffer wie „Regionalliga"/„Lokalsport". NICHT unter Panorama vereinen (eigene Rubrik).
+  { key: "regional",  label: "Regional & Lokales", rx: /(\brhein-main\b|\bregionale?s?\b|\blokales?\b)/i },
   { key: "meinung",   label: "Meinung",            rx: /(meinung|kommentar|kolumne|standpunkt|gastbeitrag|debatte|leitartikel|opinion|id´?e?es|tribune|chronique|editorial|le-club|blogs?)/i },
   { key: "sport",     label: "Sport",              rx: /(sport|fussball|fußball|bundesliga|champions|tennis|olympia|formel ?1|football|rugby|cyclisme|basket|nba|wm-|em-|roland-garros|hooligan)/i },
   { key: "wirtschaft",label: "Wirtschaft",         rx: /(wirtschaft|finanz|boerse|börse|aktie|economie|économie|geld|unternehmen|konjunktur|handel|arbeitsmarkt|immobilien|steuer|verbraucher|emploi|argent|job|karriere|shopping-und-service)/i },
@@ -9,11 +14,11 @@ export const TOPICS: { key: string; label: string; rx: RegExp }[] = [
   { key: "wissen",    label: "Wissen & Klima",     rx: /(wissen|wissenschaft|forschung|science|sciences|klima|umwelt|natur|energie|weltraum|raumfahrt|planete|planète|biolog|physik|gesund.{0,3}umwelt|geschichte|histoire|campus|bildung|education|schule|universit)/i },
   { key: "gesundheit",label: "Gesundheit",         rx: /(gesundheit|medizin|sant[eé]|pflege|krankheit|psycholog|ern[aä]hrung|ratgeber.*gesund|tofu|dialyse|fitness|diaet|diät)/i },
   // Kultur inkl. Le-Monde-Rubriken (livres, cinema, arts, musiques) und Spiegel-Rezepte (effilee = Kultur/Genuss)
-  { key: "kultur",    label: "Kultur & Medien",    rx: /(kultur|culture|feuilleton|fotografie|kino|cinema|cinéma|film|musik|musiques?|literatur|livres?|buch|b[uü]cher|kunst|arts?|theater|medien|fernsehen|\btv\b|serie|streaming|festival|effilee|gastronom|le-gout|bande-dessinee)/i },
+  { key: "kultur",    label: "Kultur & Medien",    rx: /(kultur|culture|feuilleton|fotografie|unterhaltung|kino|cinema|cinéma|film|musik|musiques?|literatur|livres?|buch|b[uü]cher|kunst|\barts?\b|theater|medien|fernsehen|\btv\b|serie|streaming|festival|effilee|gastronom|le-gout|bande-dessinee)/i },
   { key: "reise",     label: "Reise",              rx: /(reise|travel|tourism|voyage|urlaub)/i },
   { key: "auto",      label: "Mobilität",          rx: /(auto|mobilit|motor|verkehr|bahn|luftfahrt|e-auto)/i },
   // Panorama inkl. Lokales (rhein-main, regional), Lifestyle (m-perso, vous, l-epoque), Tagesticker (der_tag), Produkt-/Ratgeber
-  { key: "panorama",  label: "Panorama & Gesellschaft", rx: /(panorama|gesellschaft|vermischt|leute|menschen|boulevard|unterhaltung|stars|royal|soci[eé]t[eé]|faits-divers|justiz|kriminal|regional|lokales|aus-aller-welt|rhein-main|der[-_]tag|tagesthemen|produkt-check|ratgeber|besser-leben|m-perso|m-le-mag|\bvous\b|l-epoque|epoque|le-gout-du-monde|specials|disparitions|religions?|tagesschau|\bstil\b|familie|famille|lifestyle|deinspiegel|dein-spiegel|ticker|infografik|panorama)/i },
+  { key: "panorama",  label: "Panorama & Gesellschaft", rx: /(panorama|gesellschaft|vermischt|leute|menschen|boulevard|stars|royal|soci[eé]t[eé]|faits-divers|justiz|kriminal|aus-aller-welt|der[-_]tag|tagesthemen|produkt-check|ratgeber|besser-leben|m-perso|m-le-mag|\bvous\b|l-epoque|epoque|le-gout-du-monde|specials|disparitions|religions?|tagesschau|\bstil\b|familie|famille|lifestyle|deinspiegel|dein-spiegel|ticker|infografik)/i },
   // Politik inkl. Le-Monde-Faktencheck (les-decodeurs) + Tagesschau-Faktenfinder/Investigativ, Länder-Rubriken
   { key: "politik",   label: "Politik",            rx: /(politik|inland|ausland|international|europa|amerika|asien|afrika|ozeanien|nahost|naher-osten|ukraine|wahl|bundestag|einspruch|politique|étranger|etranger|\bmonde\b|gouvernement|election|les-decodeurs|decodeurs|faktenfinder|faktencheck|investigativ|immigration|midterms|presidentielle|correspondents?)/i },
 ];

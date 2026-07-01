@@ -9,7 +9,7 @@ export const PUB_COLORS = ["#3D63DD", "#1A7F55", "#CF4035", "#B0790C", "#0C8F86"
 export const TOPIC_COLORS: Record<string, string> = {
   politik: "#CF4035", wirtschaft: "#B0790C", sport: "#3D63DD",
   kultur: "#8B5CF6", wissen: "#0C8F86", digital: "#0E7490",
-  panorama: "#1A7F55", gesundheit: "#D6457A", reise: "#E07020",
+  panorama: "#1A7F55", regional: "#6B8E23", gesundheit: "#D6457A", reise: "#E07020",
   auto: "#666666", meinung: "#999999", sonstiges: "#CCCCCC",
 };
 type ChartMode = "publishers" | "topics";

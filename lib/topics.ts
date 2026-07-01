@@ -7,6 +7,7 @@ export const TOPIC_LABEL: Record<string, string> = {
   wissen: "Wissen & Klima",
   digital: "Digital & Technik",
   panorama: "Panorama & Gesellschaft",
+  regional: "Regional & Lokales",
   gesundheit: "Gesundheit",
   reise: "Reise",
   auto: "Mobilität",
