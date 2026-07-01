@@ -1543,9 +1543,18 @@ async function discoverFeeds(src: Source): Promise<string[]> {
   //    verlagsspezifischen KNOWN_FEEDS → gleiche Behandlung aller Verlage): n-tv `<ressort>/rss`,
   //    Spiegel `<ressort>/index.rss`, Tagesschau `<ressort>/index~rss2.xml`, FAZ `/rss/<ressort>/`.
   //    Nur Kandidaten übernehmen, die wirklich ein RSS/Atom-Feed zurückgeben.
+  //    WICHTIG: NEBEN den Homepage-Sektionen auch eine feste Ressort-Liste probieren — manche
+  //    Ressorts sind NICHT von der Startseite verlinkt (Tagesschau verlinkt „Sport" auf sportschau.de
+  //    → /sport/ wurde nie als Sektion erkannt → /sport/index~rss2.xml nie geprobt → Sport-Lücke).
+  //    Existiert der Feed nicht, kostet der Probe-404 nur einen billigen Fetch.
+  const STANDARD_SECTIONS = ["sport", "politik", "wirtschaft", "wissen", "wissenschaft", "kultur", "panorama", "gesellschaft", "inland", "ausland", "digital", "netzwelt", "technik", "gesundheit", "reise", "auto", "meinung", "finanzen", "feuilleton"];
+  // Standard-Ressorts ZUERST (damit sie sicher im Probe-Budget landen), dann die Homepage-Sektionen.
+  const secForFeeds = new Map<string, string>();
+  for (const key of STANDARD_SECTIONS) secForFeeds.set(key, `${origin}/${key}/`);
+  for (const [k, v] of secs) if (!secForFeeds.has(k)) secForFeeds.set(k, v);
   const cand = new Set<string>();
-  for (const [key, u] of secList) { cand.add(`${u}rss`); cand.add(`${u}index.rss`); cand.add(`${u}index~rss2.xml`); cand.add(`${origin}/rss/${key}/`); }
-  const probed = await Promise.all([...cand].slice(0, 48).map(async (u) => {
+  for (const [key, u] of secForFeeds) { cand.add(`${u}rss`); cand.add(`${u}index.rss`); cand.add(`${u}index~rss2.xml`); cand.add(`${origin}/rss/${key}/`); }
+  const probed = await Promise.all([...cand].slice(0, 140).map(async (u) => {
     const xml = await fetchXml(u);
     return xml && /<(rss|feed)\b/i.test(xml) ? u : null;
   }));
