@@ -346,7 +346,11 @@ function extractMeta(html: string, url: string) {
   // erscheint. Trägt die gespeicherte URL schon ein Ressort (Bild/FAZ/Spiegel/Tagesschau) → null,
   // das Frontend leitet die Rubrik dann direkt aus der URL ab.
   const secCount = (u: string) => { try { const s = new URL(u).pathname.toLowerCase().replace(/\/+$/, "").split("/").filter(Boolean); return s.slice(0, Math.max(0, s.length - 1)).filter((x) => !/^\d+$/.test(x) && !/-\d{4,}/.test(x)).length; } catch { return 0; } };
-  const rubric = [ogUrl, canonHref].find((u) => /^https?:\/\//i.test(u) && secCount(u) > secCount(url)) ?? null;
+  // NUR wenn die gespeicherte URL GAR KEIN Ressort trägt (n-tv `idN.html`, secCount 0). Sonst null →
+  // Frontend leitet aus der URL ab. WICHTIG: bei Syndication (Tagesschau→sr.de/mdr.de) hat die
+  // QUELL-og:url zwar mehr Segmente, ist aber die falsche (fremde) Rubrik → die eigene /inland/
+  // regional/<Land>/-URL bleibt maßgeblich, darum kein „mehr Segmente"-Vergleich.
+  const rubric = secCount(url) === 0 ? ([ogUrl, canonHref].find((u) => /^https?:\/\//i.test(u) && secCount(u) > 0) ?? null) : null;
 
   return { title, description, og_image, published_at, published_precise, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, rubric, authors: authorList, keywords, categories };
 }

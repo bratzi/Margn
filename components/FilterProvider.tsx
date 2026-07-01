@@ -31,9 +31,34 @@ const CANON_CATS: { key: string; label: string; words: string[] }[] = [
   { key: "medien",        label: "Medien",               words: ["medien", "médias", "media", "presse", "press", "fernsehen", "television"] },
 ];
 
+// Deutsche Bundesländer als eigene Rubrik-Ebene: damit „Regional" NICHT alle Länder in einen Topf
+// wirft, sondern je Bundesland eine Unterkategorie zeigt — verlagsübergreifend gebündelt (Bild
+// /regional/niedersachsen/, n-tv /regionales/niedersachsen/, Tagesschau /inland/regional/…).
+// Reihenfolge: zusammengesetzte VOR einfachen Namen (Sachsen-Anhalt vor Sachsen etc.).
+const BUNDESLAENDER: { key: string; label: string; m: string[] }[] = [
+  { key: "baden-wuerttemberg", label: "Baden-Württemberg", m: ["baden wuerttemberg", "baden wurttemberg"] },
+  { key: "bayern", label: "Bayern", m: ["bayern"] },
+  { key: "berlin-brandenburg", label: "Berlin & Brandenburg", m: ["berlin und brandenburg"] },
+  { key: "mecklenburg-vorpommern", label: "Mecklenburg-Vorpommern", m: ["mecklenburg vorpommern", "mecklenburgvorpommern"] },
+  { key: "nordrhein-westfalen", label: "Nordrhein-Westfalen", m: ["nordrhein westfalen", "nordrheinwestfalen"] },
+  { key: "rheinland-pfalz", label: "Rheinland-Pfalz", m: ["rheinland pfalz", "rheinlandpfalz"] },
+  { key: "sachsen-anhalt", label: "Sachsen-Anhalt", m: ["sachsen anhalt", "sachsenanhalt"] },
+  { key: "schleswig-holstein", label: "Schleswig-Holstein", m: ["schleswig holstein", "schleswigholstein"] },
+  { key: "brandenburg", label: "Brandenburg", m: ["brandenburg"] },
+  { key: "niedersachsen", label: "Niedersachsen", m: ["niedersachsen"] },
+  { key: "thueringen", label: "Thüringen", m: ["thueringen", "thuringen"] },
+  { key: "bremen", label: "Bremen", m: ["bremen"] },
+  { key: "hamburg", label: "Hamburg", m: ["hamburg"] },
+  { key: "hessen", label: "Hessen", m: ["hessen"] },
+  { key: "saarland", label: "Saarland", m: ["saarland"] },
+  { key: "sachsen", label: "Sachsen", m: ["sachsen"] },
+  { key: "berlin", label: "Berlin", m: ["berlin"] },
+];
 function stripAccents(s: string) { return s.normalize("NFD").replace(/[̀-ͯ]/g, ""); }
 function toCanonKey(rawLabel: string): string | null {
-  const norm = stripAccents(rawLabel.toLowerCase()).replace(/[^a-z ]/g, " ");
+  const norm = stripAccents(rawLabel.toLowerCase()).replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+  // Bundesland zuerst → „Regional · Sachsen" gruppiert unter „Sachsen", nicht unter „Regional".
+  for (const bl of BUNDESLAENDER) if (bl.m.some((x) => norm.includes(x))) return bl.key;
   const words = norm.split(/\s+/).filter(Boolean);
   for (const cat of CANON_CATS) {
     if (cat.words.some((w) => words.includes(w) || norm.includes(w))) return cat.key;
@@ -42,7 +67,7 @@ function toCanonKey(rawLabel: string): string | null {
   return first ?? null;
 }
 function canonLabel(key: string, fallback: string): string {
-  return CANON_CATS.find((c) => c.key === key)?.label ?? fallback;
+  return BUNDESLAENDER.find((b) => b.key === key)?.label ?? CANON_CATS.find((c) => c.key === key)?.label ?? fallback;
 }
 
 // Generische Pfad-Wrapper, die KEINE inhaltliche Rubrik sind.
