@@ -6,7 +6,7 @@ export const TOPICS: { key: string; label: string; rx: RegExp }[] = [
   // Tagesschau /inland/regional/<Land>, n-tv /regionales/). Höchste Priorität, weil ein Regionalressort
   // die Herkunft bestimmt (regionaler Sport/Politik/Kultur bleibt regional). Wortgrenzen verhindern
   // Fehltreffer wie „Regionalliga"/„Lokalsport". NICHT unter Panorama vereinen (eigene Rubrik).
-  { key: "regional",  label: "Regional & Lokales", rx: /(\brhein-main\b|\bregionale?s?\b|\blokales?\b)/i },
+  { key: "regional",  label: "Regional & Lokales", rx: /(\brhein-main\b|\bregionale?s?\b|\bregionalnachrichten\b|\blokales?\b|\baus-den-regionen\b)/i },
   { key: "meinung",   label: "Meinung",            rx: /(meinung|kommentar|kolumne|standpunkt|gastbeitrag|debatte|leitartikel|opinion|id´?e?es|tribune|chronique|editorial|le-club|blogs?)/i },
   { key: "sport",     label: "Sport",              rx: /(sport|fussball|fußball|bundesliga|champions|tennis|olympia|formel ?1|football|rugby|cyclisme|basket|nba|wm-|em-|roland-garros|hooligan)/i },
   { key: "wirtschaft",label: "Wirtschaft",         rx: /(wirtschaft|finanz|boerse|börse|aktie|economie|économie|geld|unternehmen|konjunktur|handel|arbeitsmarkt|immobilien|steuer|verbraucher|emploi|argent|job|karriere|shopping-und-service)/i },
