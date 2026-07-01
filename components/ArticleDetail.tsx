@@ -181,7 +181,8 @@ export default function ArticleDetail({ id }: { id: number }) {
   // Verhaltensprofil: abgeleitete, „auf den ersten Blick unsichtbare" Kennzahlen.
   const profile = useMemo(() => {
     if (!a) return null;
-    const pub = a.published_at ? Date.parse(a.published_at) : NaN;
+    const pubEff = effPublished(a.published_at, a.first_seen);
+    const pub = pubEff ? Date.parse(pubEff) : NaN;
     const fs = a.first_seen ? Date.parse(a.first_seen) : NaN;
     const sc = a.scan_count ?? 0;
     const st = (a.scan_times ?? []).map((s) => Date.parse(s)).filter((n) => !Number.isNaN(n)).sort((x, y) => x - y);
@@ -282,8 +283,12 @@ export default function ArticleDetail({ id }: { id: number }) {
           <DL h="Eckdaten">
             <div className="statrow">
               {a.published_at ? (
-                <Stat k="Veröffentlicht" v={fmtDate(a.published_at)}
-                  sub={a.first_seen ? `Erfasst ${timeDelta(a.published_at, a.first_seen)} später` : undefined} />
+                <Stat k="Veröffentlicht" v={fmtDate(effPublished(a.published_at, a.first_seen))}
+                  sub={a.first_seen
+                    ? (Date.parse(a.published_at) > Date.parse(a.first_seen)
+                      ? "auf Erstsichtung datiert (Verlagsdatum lag danach)"
+                      : `Erfasst ${timeDelta(a.published_at, a.first_seen)} später`)
+                    : undefined} />
               ) : (
                 <Stat k="Veröffentlicht" v="Kein Datum vom Verlag" sub={a.first_seen ? `Erster Scan: ${fmtDate(a.first_seen)}` : undefined} />
               )}
@@ -362,7 +367,7 @@ export default function ArticleDetail({ id }: { id: number }) {
             <div className="chist">
               <ChistAnchor kind="pub"
                 label={a.published_at ? "Veröffentlicht" : "Erstmals erfasst"}
-                time={a.published_at ?? a.first_seen}
+                time={effPublished(a.published_at, a.first_seen) ?? a.first_seen}
                 sub={a.published_at ? "Erstfassung des Verlags" : "Kein Verlagsdatum — erster Scan"} />
               {snaps.length === 0 ? (
                 <div className="chist-none">
@@ -651,6 +656,27 @@ function sealMisalignedHead(ops: Op[]): Op[] {
 function finalizeOps(ops: Op[], netWd = 0): Op[] {
   return mergeOps(sealTruncatedTail(sealMisalignedHead(collapseConfetti(mergeWhitespaceEdits(ops))), netWd));
 }
+// Am Zeichen-Cap abgeschnittener Alt-Text: `oldS` endet mit einem Wortfragment (≥4 Buchstaben),
+// dessen vollständige Form (ein längeres Wort mit gleichem Präfix) in `newS` vorkommt → der
+// gespeicherte Alt-Body war gekappt (2000/8000-Cap), das Fragment ist ein Kappungs-Artefakt, KEIN
+// echter Textverlust. Verlagsübergreifend (Bild/n-tv/… Einzel-Mega-Absätze, s. capParas). Gibt das
+// abzuschneidende Fragment zurück; das Präfix-in-`newS`-Kriterium schließt vollständige Endwörter aus.
+function truncatedFrag(oldS: string, newS: string): string | null {
+  if (oldS.length < 200 || /[…\s]$/u.test(oldS)) return null;
+  const m = oldS.match(/\p{L}{4,}$/u);
+  if (!m) return null;
+  const frag = m[0].toLowerCase();
+  const words = newS.toLowerCase().match(/\p{L}+/gu) ?? [];
+  return words.some((w) => w.length > frag.length && w.startsWith(frag)) ? m[0] : null;
+}
+// „Veröffentlicht" kann NIE nach dem ersten Scan liegen — wir sahen den Artikel ja bereits. Ein
+// späteres Verlagsdatum ist eine Vorwärts-Fehldatierung (die Backward-Klemme im Scraper ließ pubdate
+// über first_seen hinauswandern). Fürs Display auf first_seen klemmen, damit die Zeitachse stimmt
+// (sonst erscheint eine „stille Änderung" VOR der Veröffentlichung). Verlagsübergreifend.
+function effPublished(pub: string | null, firstSeen: string | null): string | null {
+  if (pub && firstSeen && Date.parse(pub) > Date.parse(firstSeen)) return firstSeen;
+  return pub;
+}
 // Zeilen-Diff in „Hunks" zerlegen: zusammenhängende Änderungen + etwas Kontext = EIN Hunk.
 // Sind mehrere Änderungsstellen weit auseinander, entstehen mehrere Hunks → mehrere kleine
 // Boxen statt einer riesigen (User-Wunsch: „mehrere Boxen statt 1 großen, logisch gesplittet").
@@ -704,17 +730,22 @@ function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string 
 // Lange Body-Texte (Ticker/Liveblog/Riesenabsatz) = Zeilen-Diff, in MEHRERE Boxen je Änderungsstelle
 // gesplittet statt einer riesigen Box.
 function DiffBlock({ oldS, newS, label, kind = "edit", netWd = 0 }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta"; netWd?: number }) {
-  const big = oldS.length + newS.length > 600;
-  if (!big) return <DiffBox ops={finalizeOps(inlineOps(oldS, newS), netWd)} label={label} kind={kind} />;
+  // Kappungs-Schwanz abfangen: angeschnittenes Endwort aus oldS strippen + neutrales „…" anhängen,
+  // statt ein halbes Wort („beko", „Arbe") als „gelöscht" zu zeigen. Greift für ALLE Verlage.
+  const frag = truncatedFrag(oldS, newS);
+  const oldE = frag ? oldS.slice(0, oldS.length - frag.length).replace(/\s+$/u, "") : oldS;
+  const seal = (ops: Op[]): Op[] => (frag ? mergeOps([...ops, { t: " …", op: "trunc" }]) : ops);
+  const big = oldE.length + newS.length > 600;
+  if (!big) return <DiffBox ops={seal(finalizeOps(inlineOps(oldE, newS), netWd))} label={label} kind={kind} />;
   // METHODENWAHL: WORT-Diff bevorzugen (sauber, markiert nur die geänderten Wörter — auch bei
   // langen Bodys mit verstreuten kleinen Änderungen, Art. 443924). NUR bei KONFETTI (sehr viele
   // verstreute Blöcke, typisch für rollende Ticker mit wiederkehrenden Tokens) auf den ZEILEN-Diff
   // zurückfallen. Anschließend räumt finalizeOps das Ergebnis auf: Whitespace-Joins tilgen,
   // restliches Konfetti zu sauberen Blöcken bündeln, Anfangs-/Schluss-Versatz als „…" versiegeln —
   // damit NIE ein Block durchgestrichen erscheint, der real noch im Artikel steht (Art. 567492).
-  const wordOps = inlineOps(oldS, newS);
+  const wordOps = inlineOps(oldE, newS);
   const changeBlocks = wordOps.reduce((s, o) => s + (o.op !== "eq" ? 1 : 0), 0);
-  const ops = finalizeOps(changeBlocks <= 40 ? wordOps : refineLineOps(lineOps(oldS, newS)), netWd);
+  const ops = seal(finalizeOps(changeBlocks <= 40 ? wordOps : refineLineOps(lineOps(oldE, newS)), netWd));
   const hunks = toHunks(ops).map(trimHunk);
   if (hunks.length <= 1) {
     return <DiffBox ops={hunks[0] ?? ops} label={label} kind={kind} />;
