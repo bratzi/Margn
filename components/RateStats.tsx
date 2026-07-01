@@ -37,6 +37,15 @@ export default function RateStats() {
   // Fadenkreuz-Cursor (vertikale + horizontale Linie + x/y-Wert), SVG-Koordinaten. rAF-gedrosselt.
   const [cross, setCross] = useState<{ x: number; y: number } | null>(null);
   const crossRaf = useRef<number | null>(null);
+  // „Jetzt"-Marker: aktuelle Uhrzeit, aktualisiert sich ~alle 30 s → die Linie läuft mit.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = () => setNowMs(Date.now());
+    const id = setInterval(tick, 30000);
+    const onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
   const [containerW, setContainerW] = useState(0);
   // dens = Pixel pro Bucket (Stauchen ↔ Strecken). null = automatisch an Containerbreite anpassen.
   const [dens, setDens] = useState<number | null>(null);
@@ -246,6 +255,25 @@ export default function RateStats() {
     return out;
   }, [buckets, unit]);
 
+  // Position der „Jetzt"-Linie: aktuelle Zeit auf die Bucket-Achse projiziert (fraktionaler
+  // Bucket-Index → X). null, wenn „jetzt" außerhalb des sichtbaren Zeitraums liegt.
+  const nowX = useMemo(() => {
+    if (buckets.length === 0) return null;
+    const first = Date.parse(buckets[0]);
+    const stepMs = unit === "minute" ? 60000 : unit === "hour" ? 3600000 : unit === "day" ? 86400000 : 604800000;
+    const lastStart = Date.parse(buckets[buckets.length - 1]);
+    if (nowMs < first || nowMs > lastStart + stepMs) return null;
+    // Bucket finden, in den „jetzt" fällt, dann innerhalb interpolieren (DST-sicher via Nachbar-Delta).
+    let i = 0;
+    while (i < buckets.length - 1 && Date.parse(buckets[i + 1]) <= nowMs) i++;
+    const bi = Date.parse(buckets[i]);
+    const biNext = i < buckets.length - 1 ? Date.parse(buckets[i + 1]) : bi + stepMs;
+    const frac = i + Math.min(1, Math.max(0, (nowMs - bi) / Math.max(1, biNext - bi)));
+    // „jetzt" liegt im laufenden (letzten, Teil-)Bucket → frac kann NB-1 übersteigen und würde
+    // rechts aus dem Plot laufen (weggeclippt). Auf die rechte Plotkante klemmen (= Vorderkante).
+    return X(Math.min(frac, NB - 1));
+  }, [buckets, nowMs, unit, naturalWidth, NB]);
+
   // Alle Labels in LOKALER Zeit des Endnutzers.
   const fmtAxis = (iso: string) => {
     const d = new Date(iso);
@@ -275,12 +303,21 @@ export default function RateStats() {
     else if (unit === "day") end.setUTCDate(end.getUTCDate() + 1);
     else end.setUTCDate(end.getUTCDate() + 7);
     end.setUTCSeconds(end.getUTCSeconds() - 1); // inklusives Ende
+    // Relativ vs. Absolut filtern UNTERSCHIEDLICH:
+    //  • Rel.: der Dot = Artikel PRO Zeiteinheit → Fenster = genau dieses eine Bucket.
+    //  • Abs.: der Dot = KUMULIERTER Stand (displaySeries resettet je Lokaltag) → Fenster =
+    //    ab Tagesbeginn bis zu diesem Bucket, damit die Tabelle ALLE bis hier gezählten
+    //    Artikel zeigt (nicht nur das eine Bucket).
+    const from = timeFormat === "abs"
+      ? new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0)
+      : start;
     f.setPinpoint({
-      from: start.toISOString(), to: end.toISOString(),
+      from: from.toISOString(), to: end.toISOString(),
       ...(s.sid != null ? { sourceId: s.sid } : {}),
       ...(s.topic != null ? { topic: s.topic } : {}),
-      label: `${s.label} · ${fmtFull(buckets[idx])}`,
-      ...(timeFormat === "abs" ? { limit: 1 } : {}),
+      label: timeFormat === "abs"
+        ? `${s.label} · kumuliert bis ${fmtFull(buckets[idx])}`
+        : `${s.label} · ${fmtFull(buckets[idx])}`,
     });
     // sanft zur Tabelle scrollen, damit die Wirkung sichtbar ist
     requestAnimationFrame(() => document.querySelector(".dt-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" }));
@@ -542,6 +579,17 @@ export default function RateStats() {
                     stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                     vectorEffect="non-scaling-stroke" />
                 ))}
+
+                {/* „Jetzt"-Marker: dezente vertikale Linie an der aktuellen Uhrzeit, läuft mit. */}
+                {nowX != null && (
+                  <g className="rate-now" pointerEvents="none">
+                    <line className="rate-now-line" x1={nowX} y1={PAD_T} x2={nowX} y2={PAD_T + CH} vectorEffect="non-scaling-stroke" />
+                    <g transform={`translate(${nowX - 3}, ${PAD_T + 1})`}>
+                      <rect className="rate-now-chip" x={-30} y={0} width={30} height={12} rx={3} vectorEffect="non-scaling-stroke" />
+                      <text className="rate-now-txt" x={-15} y={9} textAnchor="middle">jetzt</text>
+                    </g>
+                  </g>
+                )}
 
                 {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot */}
                 {showDots && displaySeries.map((s) => s.vals.map((v, i) => {
