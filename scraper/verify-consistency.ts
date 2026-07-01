@@ -13,7 +13,7 @@ const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_
 const BASE: FilterSnapshot = {
   status: "all", paywall: "all", atype: "all", author: "all",
   topics: [], lang: "all", changed: "all", depth: "all",
-  rangeFrom: null, rangeTo: null,
+  rangeFrom: null, rangeTo: null, timeAxis: "published",
 };
 
 const day = (offset: number) => {

@@ -821,9 +821,16 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   await sb.from("article_paras").upsert({ article_id: articleId, paras: capParas(paras) }, { onConflict: "article_id" });
 }
 
-// Absatzliste speicherschonend kappen (große Liveblogs): max 400 Absätze, je 2000 Zeichen.
+// Absatzliste speicherschonend kappen (große Liveblogs): max 400 Absätze, je 8000 Zeichen.
+// Der Per-Absatz-Cap ist die DIFF-BASELINE: liegt eine spätere Änderung JENSEITS des Caps,
+// ist die alte Fassung dort abgeschnitten → der Frontend-Diff kann sie nicht zeigen und meldet
+// „Unterschied außerhalb des erfassten Ausschnitts". 62 % der Artikel sind Einzel-Mega-Absätze
+// (Bild/n-tv rendern den ganzen Text als EIN <p>) und liefen am alten 2000er-Cap an. 8000
+// deckt ~p99 der echten Bodylängen ab (Wachstum der Tabelle ~+11 MB, DB bleibt < 500 MB) und
+// schützt zugleich vor Ausreißern (Riesen-Liveblogs). Greift für FUTURE-Edits: die Baseline
+// wird beim nächsten Re-Scan je Artikel mit dem größeren Cap neu abgelegt.
 function capParas(paras: string[]): string[] {
-  return paras.slice(-400).map((p) => p.slice(0, 2000));
+  return paras.slice(-400).map((p) => p.slice(0, 8000));
 }
 
 // Token-Ähnlichkeit (Jaccard) zum Paaren geänderter Absätze.
@@ -838,9 +845,11 @@ function similarity(a: string, b: string): number {
 //  {old,new} = geänderter Absatz (Wort-Diff im Frontend), {new} = neu, {old} = entfernt.
 type Change = { old?: string; new?: string };
 // Bei einem GEÄNDERTEN Absatz nur die tatsächlich abweichende Stelle (mit Kontext) speichern.
-// Sonst zeigt ein Riesen-Absatz, dessen Änderung jenseits von 1500 Zeichen liegt, identischen
-// Anfangstext → scheinbar „leerer" stiller Edit. Gemeinsamen Prä-/Suffix abschneiden.
-function diffRegion(o: string, n: string, ctx = 140, cap = 1500): [string, string] {
+// Der Cap begrenzt das GESPEICHERTE Diff-Fenster; er sitzt um die Änderung herum (start=p−ctx),
+// nicht ab Textanfang → auch eine Änderung tief im Body wird erfasst, solange die Baseline sie
+// enthält (siehe capParas). 4000 (vorher 1500) gibt großen Änderungspassagen Platz, ohne dass
+// gemeinsamer Prä-/Suffix mitgespeichert wird (der wird abgeschnitten).
+function diffRegion(o: string, n: string, ctx = 140, cap = 4000): [string, string] {
   const minL = Math.min(o.length, n.length);
   let p = 0; while (p < minL && o[p] === n[p]) p++;
   let so = o.length - 1, sn = n.length - 1;
