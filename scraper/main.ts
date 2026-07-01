@@ -340,7 +340,15 @@ function extractMeta(html: string, url: string) {
   const ogUrl = metaContent(html, "og:url") ?? "";
   const topic = topicOf(categories, [url, ogUrl, canonHref].filter((u) => /^https?:\/\//i.test(u)));
 
-  return { title, description, og_image, published_at, published_precise, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, authors: authorList, keywords, categories };
+  // rubric = ressorttragende URL für die Unterkategorien-Hierarchie im Frontend. NUR nötig, wenn die
+  // gespeicherte URL selbst kein Ressort trägt (n-tv `idN.html`) → dann die sektionierte og:url/
+  // canonical, damit der Verlags-Ressort-Baum (z.B. Regional → Baden-Württemberg) auch für n-tv
+  // erscheint. Trägt die gespeicherte URL schon ein Ressort (Bild/FAZ/Spiegel/Tagesschau) → null,
+  // das Frontend leitet die Rubrik dann direkt aus der URL ab.
+  const secCount = (u: string) => { try { const s = new URL(u).pathname.toLowerCase().replace(/\/+$/, "").split("/").filter(Boolean); return s.slice(0, Math.max(0, s.length - 1)).filter((x) => !/^\d+$/.test(x) && !/-\d{4,}/.test(x)).length; } catch { return 0; } };
+  const rubric = [ogUrl, canonHref].find((u) => /^https?:\/\//i.test(u) && secCount(u) > secCount(url)) ?? null;
+
+  return { title, description, og_image, published_at, published_precise, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, rubric, authors: authorList, keywords, categories };
 }
 
 // Autoren-Status: 'named' (echte Person), 'anonymous' (Redaktion/Agentur/Eigenname), 'none' (keiner).

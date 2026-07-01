@@ -27,12 +27,12 @@ export type CorpusRow = {
   paywalled: boolean | null; language: string | null;
   published_at: string | null; discovered_at: string | null; last_seen: string | null;
   word_count: number | null; revision_count: number | null; edit_count: number | null;
-  scan_count: number | null;
+  scan_count: number | null; rubric: string | null;
 };
 
 export const CORPUS_COLS =
   "id,article_id,source_id,url,ptype,topic,author_status,paywalled,language," +
-  "published_at,discovered_at,last_seen,word_count,revision_count,edit_count,scan_count";
+  "published_at,discovered_at,last_seen,word_count,revision_count,edit_count,scan_count,rubric";
 
 // Zeitachse: nach welchem Zeitstempel gefiltert/gebucketet wird.
 //  - "published": wann der Verlag den Artikel veröffentlicht hat (Publikations-Timing).
@@ -119,7 +119,8 @@ export function applyServerFilters(q: any, f: FilterSnapshot, subPats: string[],
   } else if (f.rangeTo) {
     q = q.or(`published_at.lte.${f.rangeTo},and(published_at.is.null,discovered_at.lte.${f.rangeTo})`);
   }
-  if (subPats.length) q = q.or(subPats.map((s) => `url.ilike.%/${s}/%`).join(","));
+  // Rubrik-Muster gegen URL ODER die sektionierte `rubric`-Spalte (n-tv idN.html trägt kein Ressort).
+  if (subPats.length) q = q.or(subPats.flatMap((s) => [`url.ilike.%/${s}/%`, `rubric.ilike.%/${s}/%`]).join(","));
   if (kwIds) q = q.in("article_id", kwIds.length ? kwIds : [-1]);
   return q;
 }
@@ -162,7 +163,8 @@ export function makeMatcher(
       if (toMs !== null && ms > toMs) return false;
     }
     if (!skip.topics && pats.length) {
-      const u = r.url.toLowerCase();
+      // Rubrik steckt bei n-tv in `rubric` (sektionierte URL), sonst in der URL.
+      const u = (r.url + " " + (r.rubric ?? "")).toLowerCase();
       if (!pats.some((p) => u.includes(p))) return false;
     }
     if (kwIdSet) { if (r.article_id == null || !kwIdSet.has(r.article_id)) return false; }

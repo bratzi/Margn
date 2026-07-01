@@ -363,7 +363,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     for (const r of corpus) {
       if (!active.has(r.source_id)) continue;
       if (!match(r)) continue;
-      const rubric = urlRubric(r.url);
+      // Ressort-Baum: bei n-tv trägt die gespeicherte URL (idN.html) kein Ressort → dann die
+      // sektionierte `rubric`-URL (og:url/canonical, vom Scraper gespeichert) nutzen.
+      const rubric = urlRubric(r.rubric || r.url);
       if (!rubric) continue;
       const topic = r.topic ?? "sonstiges";
       if (!agg.has(topic)) agg.set(topic, new Map());
