@@ -1,16 +1,18 @@
 name: pipeline
 on:
   schedule:
-    # Seed-Slots: GitHubs Scheduler ist best-effort und verwirft/verzoegert Trigger
-    # (real oft 2-6 h Luecken). Diese Slots STARTEN nur einen Lauf - die eigentliche
-    # Stuendlichkeit macht der Lauf selbst per Schlaf-Loop (siehe Step "hourly-loop"),
-    # der bewusst zur :10 statt zur vollen Stunde scrapt (Vorgabe: nicht :00).
-    # Ein wartender Lauf persistiert ueber die gesamte ~5h-Loop-Laufzeit in der Queue,
-    # daher reicht 1 Seed/h fuer die luekenlose Uebergabe; 2 Slots (:10/:40, 30 min
-    # auseinander) als Hedge gegen ausgelassene Slots. (Mehr Slots = nur mehr
-    # "cancelled"-Laeufe, kein Mehrwert, da pro Lane immer nur 1 wartender Lauf gehalten wird.)
+    # EIN Seed-Slot pro Stunde. GitHubs Scheduler ist best-effort und verwirft/
+    # verzoegert Trigger (real oft 2-6 h Luecken). Dieser Slot STARTET nur einen
+    # Lauf - die eigentliche Stuendlichkeit macht der Lauf selbst per Schlaf-Loop
+    # (Step "hourly-loop"), der bewusst zur :10 statt zur vollen Stunde scrapt
+    # (Vorgabe: nicht :00). Ein wartender Lauf persistiert ueber die GESAMTE
+    # ~5h-Loop-Laufzeit in der Queue -> ein einziger Seed/h genuegt fuer die
+    # luekenlose Uebergabe. Jeder weitere Seed, der waehrend des laufenden Loops
+    # feuert, wird vom naechsten sofort verdraengt (-> "cancelled"): 2 Slots
+    # (:10/:40) verdoppelten nur die cancelled-Laeufe in der Liste ohne Mehrwert,
+    # da die Lane ohnehin nie mehr als 1 laufenden + 1 wartenden Lauf haelt.
+    # Faellt ein :10-Slot mal aus, bleibt der Vorgaenger-Wartelauf trotzdem stehen.
     - cron: "10 * * * *"
-    - cron: "40 * * * *"
     # Woechentlicher Struktur-Lauf (Seitenbaum) - eigene Lane, laeuft sofort.
     - cron: "23 5 * * 0"
   workflow_dispatch:
