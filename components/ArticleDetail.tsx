@@ -108,7 +108,10 @@ export default function ArticleDetail({ id }: { id: number }) {
         const s = [...arr].sort((x, y) => x - y); const m = Math.floor(s.length / 2);
         return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
       };
-      const pctBelow = (arr: number[], v: number) => arr.length ? Math.round((arr.filter((x) => x < v).length / arr.length) * 100) : 0;
+      // Anteil der Peers strikt unter v. Deckel bei 99 %: der Artikel selbst steckt in arr, kann also
+      // nie „länger als 100 %" sein (das las sich absurd) — und die abgeleiteten Radar-Achsen maxen
+      // damit nicht mehr exakt auf den Außenring aus.
+      const pctBelow = (arr: number[], v: number) => arr.length ? Math.min(99, Math.round((arr.filter((x) => x < v).length / arr.length) * 100)) : 0;
 
       // Quelle: Wortzahl + Revisionen in EINER Abfrage.
       const { data: srcRows } = await supabase.from("page_overview")
@@ -299,36 +302,6 @@ export default function ArticleDetail({ id }: { id: number }) {
             </div>
           </DL>
 
-          {/* Verhaltensprofil — direkt unter den Eckdaten */}
-          {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
-            <DL h="Was die Daten verraten">
-              {profile.tiles.length > 0 && (
-                <div className="dprofile">
-                  {profile.tiles.map((t) => (
-                    <div className="dmetric" key={t.k}>
-                      <div className="k">{t.k}</div>
-                      <div className="v">{t.v}</div>
-                      {t.s && <div className="s">{t.s}</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {profile.rev > 0 && profile.edit + profile.ext > 0 && (
-                <div className="dsplit">
-                  <div className="dsplit-bar">
-                    {profile.edit > 0 && <span className="seg-edit" style={{ flex: profile.edit }} />}
-                    {profile.ext > 0 && <span className="seg-ext" style={{ flex: profile.ext }} />}
-                  </div>
-                  <div className="dsplit-legend">
-                    <span className="le edit">{profile.edit} stille Änderung{profile.edit !== 1 ? "en" : ""}</span>
-                    <span className="le ext">{profile.ext} Erweiterung{profile.ext !== 1 ? "en" : ""}</span>
-                  </div>
-                </div>
-              )}
-              {profile.insight && <p className="dinsight">{profile.insight}</p>}
-            </DL>
-          )}
-
           <DL h="Scan-Verlauf">
             <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
               changeTimes={snaps.map((s) => s.captured_at)} />
@@ -359,6 +332,36 @@ export default function ArticleDetail({ id }: { id: number }) {
                 ))}
               </div>
               {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
+            </DL>
+          )}
+
+          {/* Verhaltensprofil — direkt über dem Änderungsverlauf */}
+          {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
+            <DL h="Was die Daten verraten">
+              {profile.tiles.length > 0 && (
+                <div className="dprofile">
+                  {profile.tiles.map((t) => (
+                    <div className="dmetric" key={t.k}>
+                      <div className="k">{t.k}</div>
+                      <div className="v">{t.v}</div>
+                      {t.s && <div className="s">{t.s}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {profile.rev > 0 && profile.edit + profile.ext > 0 && (
+                <div className="dsplit">
+                  <div className="dsplit-bar">
+                    {profile.edit > 0 && <span className="seg-edit" style={{ flex: profile.edit }} />}
+                    {profile.ext > 0 && <span className="seg-ext" style={{ flex: profile.ext }} />}
+                  </div>
+                  <div className="dsplit-legend">
+                    <span className="le edit">{profile.edit} stille Änderung{profile.edit !== 1 ? "en" : ""}</span>
+                    <span className="le ext">{profile.ext} Erweiterung{profile.ext !== 1 ? "en" : ""}</span>
+                  </div>
+                </div>
+              )}
+              {profile.insight && <p className="dinsight">{profile.insight}</p>}
             </DL>
           )}
 
