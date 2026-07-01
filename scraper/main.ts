@@ -556,7 +556,7 @@ type PrevState = { title: string | null; content_hash: string | null; para_fps: 
 
 // Spalten der `articles`-Basistabelle, die wir je Scan vergleichen, um UNSICHTBARE Edits zu
 // finden. Müssen in BEIDEN prev-Selects (saveArticleFull + analyzeBacklog) mitgelesen werden.
-const PREV_COLS = "title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at,description,og_image,author_status,topic";
+const PREV_COLS = "title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at,first_seen,description,og_image,author_status,topic";
 
 type MetaNow = { description: string | null; og_image: string | null; paywalled: boolean | null; author_status: string | null; topic: string | null };
 type MetaEdit = { field: string; old: string | null; new: string | null };
@@ -961,6 +961,14 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   if (meta.published_precise && meta.published_at && (prev as any)?.published_at
       && Date.parse(meta.published_at) < Date.parse((prev as any).published_at)) {
     meta.published_at = (prev as any).published_at;
+  }
+  // …aber auch NIE nach der Ersterfassung: wir haben den Artikel ja schon gesehen. Die Nie-Rückwärts-
+  // Klemme oben lässt pubdate sonst über first_seen hinausdriften (Verlag re-datiert vorwärts /
+  // „Aktualisiert" als published fehlgelesen) → im Änderungsverlauf erschiene ein Edit VOR der
+  // „Veröffentlichung" (unmöglich). Obere Schranke = first_seen (bzw. jetzt beim Erstkontakt).
+  if (meta.published_at) {
+    const seenCap = (prev as any)?.first_seen ?? new Date().toISOString();
+    if (Date.parse(meta.published_at) > Date.parse(seenCap)) meta.published_at = seenCap;
   }
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
