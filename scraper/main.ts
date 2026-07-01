@@ -144,6 +144,27 @@ function parseJsonLd(html: string): any[] {
   return out;
 }
 
+// Ressort-Baum aus der BreadcrumbList (JSON-LD, Schema.org) — der verlässlichste verlagsübergreifende
+// Ressort-Träger, AUCH wenn er nicht in der URL steht (n-tv idN.html, Bild/FAZ-Kurz-URLs, dpa-Importe).
+// Jeder Verlag liefert die Brotkrume: [Verlagsname, Ressort, (Unterressort…), Artikeltitel].
+// Wir schneiden das ERSTE (Verlags-/Startseiten-Label) und das LETZTE (= Artikelüberschrift) ab →
+// übrig bleibt der reine Ressort-Pfad ("Feuilleton", "Sport", "Politik"), der in topicOf einfließt.
+function breadcrumbSections(html: string, ld: any[]): string[] {
+  const bc = ld.find((d) => d && typeIncludes(d["@type"], "BreadcrumbList"));
+  const items = Array.isArray(bc?.itemListElement) ? bc.itemListElement : [];
+  const names = items
+    .slice()
+    .sort((a: any, b: any) => (Number(a?.position ?? 0) - Number(b?.position ?? 0)))
+    .map((e: any) => (typeof e?.name === "string" ? e.name : e?.item?.name))
+    .filter((s: any): s is string => typeof s === "string" && s.trim().length > 0)
+    .map((s: string) => s.trim());
+  // Erstes = Verlags-/Startseiten-Label, Letztes = Artikeltitel → beide raus.
+  const mid: string[] = names.slice(1, -1);
+  // Reine Navigations-/Verlagslabels ohne Ressort-Bedeutung verwerfen (sind kein Thema).
+  const NOISE = /^(startseite|home|accueil|übersicht|uebersicht|aktuell|news|newsticker|importe?|incoming|dpa|afp|reuters|sid|kna|epd|agenturmeldungen|mehr|alle|artikel|article|faz\.net|bild|der spiegel|spiegel|tagesschau|n-tv|ntv|le monde)$/i;
+  return mid.filter((s: string) => !NOISE.test(s));
+}
+
 // @type kann String ODER Array sein ("NewsArticle" vs. ["NewsArticle","Report"]).
 function typeIncludes(t: any, needle: string): boolean {
   if (typeof t === "string") return t.includes(needle);
@@ -297,20 +318,27 @@ function extractMeta(html: string, url: string) {
 
   const keywords = extractKeywords(html, article);
 
-  // Kategorien
+  // Kategorien = articleSection/article:section PLUS Ressort-Baum aus der BreadcrumbList.
+  // Der Breadcrumb-Pfad ist das verlagsübergreifende Ressort-Signal, das die (bei n-tv/Bild/FAZ
+  // oft ressortlose) URL nicht trägt → topicOf klassifiziert damit deutlich mehr Artikel korrekt.
   const catRaw = article.articleSection ?? metaContent(html, "article:section") ?? "";
-  const categories: string[] = (typeof catRaw === "string" ? catRaw.split(/[,;|]/) : catRaw)
+  const secCats: string[] = (typeof catRaw === "string" ? catRaw.split(/[,;|]/) : catRaw)
     .map((c: string) => c.trim()).filter((c: string) => c.length > 1 && c.length < 80);
+  const categories: string[] = [...new Set([...secCats, ...breadcrumbSections(html, ld)])]
+    .filter((c) => c.length > 1 && c.length < 80);
 
   const author_status = classifyAuthorStatus(authorList);
-  // Themen-Klassifizierung aus der VERLAGSEIGENEN kanonischen URL (og:url / <link rel=canonical>),
-  // NICHT aus der gespeicherten `url`: bei n-tv ist letztere von canonUrl auf die section-lose
-  // Kurzform „idN.html" verkürzt → der Ressort-Pfad fehlt → topicOf liefert „sonstiges". og:url/
-  // canonical tragen die volle sektionierte URL (verifiziert). Generisch & sicher (Verlags-Canonical).
+  // Themen-Klassifizierung aus dem Ressort-Pfad — MEHRERE URL-Kandidaten in Prioritätsreihenfolge:
+  //   1) die gespeicherte/gecrawlte `url` (trägt bei den meisten Verlagen die Rubrik; bei
+  //      Tagesschau-Regional /inland/regional/… zeigt og:url auf die MDR/NDR-Quelle mit REGION-
+  //      statt Ressort-Pfad → gespeicherte URL zuerst),
+  //   2) og:url und 3) <link rel=canonical> (retten n-tv, dessen gespeicherte URL von canonUrl auf
+  //      die ressortlose Kurzform idN.html verkürzt ist — die volle Sektion steckt in og:url).
+  // topicOf nimmt die erste URL, die eine Rubrik trägt; erst danach die Kategorien/Breadcrumb-Ressorts.
   const canonHref = (/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i.exec(html)
     ?? /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i.exec(html))?.[1] ?? "";
-  const classifyUrl = [metaContent(html, "og:url") ?? "", canonHref].find((u) => /^https?:\/\//i.test(u)) ?? url;
-  const topic = topicOf(categories, classifyUrl);
+  const ogUrl = metaContent(html, "og:url") ?? "";
+  const topic = topicOf(categories, [url, ogUrl, canonHref].filter((u) => /^https?:\/\//i.test(u)));
 
   return { title, description, og_image, published_at, published_precise, modified_at, paywalled, article_type, word_count, reading_min, lang_detected, author_status, topic, authors: authorList, keywords, categories };
 }
