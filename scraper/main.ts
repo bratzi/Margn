@@ -1263,17 +1263,30 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   // überschreiben. precise-sticky in saveArticleFull/enrich schützt den Wert beim Render.
   const dated = list.filter((u) => pubDates.has(u));
   if (dated.length && !DRY_RUN) {
-    const writeDates = async (urls: string[], ignoreDuplicates: boolean) => {
+    // (1) NEUE Stubs anlegen — MIT provisorischem Ressort aus der URL. Sonst hätten
+    //     noch-nicht-gerenderte Artikel topic=NULL und verfälschen die Themen-/Agenda-Verteilung
+    //     (leere Kategorie). `ignoreDuplicates` = DO NOTHING → bestehende (gerenderte) Zeilen und
+    //     ihr Topic bleiben unangetastet. Der Render verfeinert das Topic später (og:url/Breadcrumb).
+    const insertStubs = async (urls: string[]) => {
+      for (let i = 0; i < urls.length; i += 200) {
+        await sb.from("articles").upsert(
+          urls.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), published_at: pubDates.get(url)!.at, topic: topicOf([], url) })),
+          { onConflict: "url", ignoreDuplicates: true },
+        );
+      }
+    };
+    // (2) Präzises Datum NUR auf bestehende Zeilen überschreiben (kein topic → Render-Topic bleibt).
+    const overwriteDates = async (urls: string[]) => {
       for (let i = 0; i < urls.length; i += 200) {
         await sb.from("articles").upsert(
           urls.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), published_at: pubDates.get(url)!.at })),
-          { onConflict: "url", ignoreDuplicates },
+          { onConflict: "url", ignoreDuplicates: false },
         );
       }
     };
     try {
-      await writeDates(dated.filter((u) => pubDates.get(u)!.precise), false);  // publication_date → überschreibt
-      await writeDates(dated.filter((u) => !pubDates.get(u)!.precise), true);  // nur lastmod → nur neue Zeilen
+      await insertStubs(dated);                                            // neue Stubs: URL-Topic + Datum
+      await overwriteDates(dated.filter((u) => pubDates.get(u)!.precise)); // publication_date → überschreibt (nur Datum)
     } catch (e) { console.error("SITEMAP-DATUM-FEHLER:", src.base_url, (e as Error).message); }
   }
   console.log(`Sitemaps ${src.base_url}: ${files} Dateien gelesen, ${list.length} Artikel-URLs markiert (${dated.length} mit Datum)`);
