@@ -1520,18 +1520,40 @@ async function upsertRenderedNode(sourceId: number, url: string, kind: Kind, dep
   return data.id;
 }
 
+// Begrenzte Parallelität + kleine Pause je Task — WAF-freundlich (kein Request-Burst).
+async function mapLimited<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length); let idx = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (idx < items.length) { const i = idx++; out[i] = await fn(items[i]); await sleep(120); }
+  }));
+  return out;
+}
+
 // UNIFORME, kuratierungsfreie Feed-Entdeckung für JEDEN Verlag: Startseite + Hauptsektionen
 // anfahren und ALLE deklarierten <link rel="alternate"> RSS/Atom-Feeds ernten. Hintergrund: die
 // Verlage exponieren Artikel sehr unterschiedlich (Sitemap/Feed/Crawl). Tagesschau & Spiegel
 // deklarieren JE SEKTION einen eigenen Feed (`/inland/…rss2.xml`, `/sport/index.rss`) → so bekommt
 // jeder Verlag dieselbe breite Sektions-Abdeckung, die bisher nur FAZ/n-tv kuratiert (KNOWN_FEEDS)
-// hatten — ohne Kuratierung, ohne Qualitätsverlust (Artikel werden normal extrahiert). Billig
-// (nur HTTP, keine Renders). Sektions-Fetches parallel. KNOWN_FEEDS bleibt als Sicherungs-Supplement.
+// hatten — ohne Kuratierung, ohne Qualitätsverlust. KNOWN_FEEDS bleibt als Sicherungs-Supplement.
+//
+// ⚠️ WAF-LEHRE (02.–04.07.26): das Proben von ~140 Kandidaten als PARALLEL-BURST in JEDEM
+// stündlichen Lauf hat die Bot-Erkennung von FAZ (Block ab 02.07. 10:11) und Bild (ab 04.07.
+// 15:12) getriggert → ALLE Plain-HTTP-Fetches (Feeds, Sitemaps, Sektionsseiten) liefen ins
+// Leere, Discovery = 0 neue Artikel. Darum jetzt: (1) Ergebnis-CACHE in sources.feeds
+// (jsonb) + feeds_checked_at — Feed-Layouts ändern sich selten, Neu-Proben nur alle 7 Tage;
+// (2) Probes GEDROSSELT (conc 4 + Pause) statt 140 parallel; (3) bei Fetch-Blockade den
+// alten Cache NIE mit leerem Ergebnis überschreiben (sonst 7 Tage Discovery-Loch nach Unblock).
+const FEEDS_TTL_MS = 7 * 864e5;
 async function discoverFeeds(src: Source): Promise<string[]> {
   let origin = ""; try { origin = new URL(src.base_url).origin; } catch { return []; }
+  const { data: srow } = await sb.from("sources").select("feeds,feeds_checked_at").eq("id", src.id).maybeSingle();
+  const cached: string[] = Array.isArray((srow as any)?.feeds) ? ((srow as any).feeds as string[]) : [];
+  const checkedAt = (srow as any)?.feeds_checked_at ? Date.parse((srow as any).feeds_checked_at) : 0;
+  if (cached.length && Date.now() - checkedAt < FEEDS_TTL_MS) return cached;
+
   const feeds = new Set<string>();
   const home = await fetchHtml(src.base_url);
-  if (!home) return [];
+  if (!home) return cached; // Startseite nicht lesbar (Block/Ausfall) → alten Stand nutzen, Cache unangetastet
   for (const f of extractFeedLinks(home, src.base_url)) feeds.add(f);
   // Top-Sektionen aus der Startseite (gleiche Domain, kurzer Pfad, kein Artikel). Nach GANZER
   // Rubrik (1–2 Segmente) keyen, nicht nur nach dem 1. Segment — sonst fiele bei Verlagen mit
@@ -1546,11 +1568,11 @@ async function discoverFeeds(src: Source): Promise<string[]> {
     } catch {}
   }
   const secList = [...secs].slice(0, 30);
-  // a) Deklarierte <link rel=alternate>-Feeds der Sektionsseiten ernten.
-  const found = await Promise.all(secList.map(async ([, u]) => {
+  // a) Deklarierte <link rel=alternate>-Feeds der Sektionsseiten ernten (gedrosselt, kein Burst).
+  const found = await mapLimited(secList, 4, async ([, u]) => {
     const html = await fetchHtml(u);
     return html ? extractFeedLinks(html, u) : [];
-  }));
+  });
   for (const fs of found) for (const f of fs) feeds.add(f);
   // b) GENERISCH gängige Sektions-Feed-Konventionen probieren (kuratierungsfrei, ersetzt die
   //    verlagsspezifischen KNOWN_FEEDS → gleiche Behandlung aller Verlage): n-tv `<ressort>/rss`,
@@ -1567,12 +1589,21 @@ async function discoverFeeds(src: Source): Promise<string[]> {
   for (const [k, v] of secs) if (!secForFeeds.has(k)) secForFeeds.set(k, v);
   const cand = new Set<string>();
   for (const [key, u] of secForFeeds) { cand.add(`${u}rss`); cand.add(`${u}index.rss`); cand.add(`${u}index~rss2.xml`); cand.add(`${origin}/rss/${key}/`); }
-  const probed = await Promise.all([...cand].slice(0, 140).map(async (u) => {
+  for (const f of feeds) cand.delete(f); // schon bekannt → nicht erneut anfassen
+  const probed = await mapLimited([...cand].slice(0, 140), 4, async (u) => {
     const xml = await fetchXml(u);
     return xml && /<(rss|feed)\b/i.test(xml) ? u : null;
-  }));
+  });
   for (const u of probed) if (u) feeds.add(u);
-  return [...feeds];
+
+  const result = [...feeds];
+  // Cache pflegen: nur mit substanziellem Ergebnis überschreiben; lieferte der (teil-blockierte)
+  // Lauf nichts, alten Stand behalten und nur den Zeitstempel setzen (kein stündliches Re-Proben).
+  if (!DRY_RUN) {
+    if (result.length) await sb.from("sources").update({ feeds: result, feeds_checked_at: new Date().toISOString() }).eq("id", src.id);
+    else await sb.from("sources").update({ feeds_checked_at: new Date().toISOString() }).eq("id", src.id);
+  }
+  return result.length ? result : cached;
 }
 
 // Rekursiver, begrenzter Chromium-Crawl einer Quelle.
