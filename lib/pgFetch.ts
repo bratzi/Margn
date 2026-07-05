@@ -13,28 +13,47 @@ export async function fetchAllRows<T>(
   pageQ: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
   maxRows = 30000,
 ): Promise<T[]> {
-  const { count } = await countQ();
-  const nPages = Math.min(Math.ceil(maxRows / 1000), Math.max(1, Math.ceil((count ?? 0) / 1000)));
+  // Count MIT Retry und hartem Fehler: fiele er still auf null zurück, würde nur EINE Seite
+  // (1000 Zeilen) geladen und als Erfolg gemeldet — Charts zeigten dann ~2 % der Daten.
+  let count: number | null = null;
+  for (let attempt = 0; attempt < RETRY; attempt++) {
+    try { count = (await countQ()).count ?? null; } catch { count = null; }
+    if (count !== null) break;
+    if (attempt < RETRY - 1) await new Promise((res) => setTimeout(res, 350 * (attempt + 1)));
+  }
+  if (count === null) throw new Error("fetchAllRows: Count nicht ermittelbar");
+  const nPages = Math.min(Math.ceil(maxRows / 1000), Math.max(1, Math.ceil(count / 1000)));
 
-  const fetchPage = async (from: number, to: number): Promise<T[]> => {
+  const fetchPage = async (from: number, to: number): Promise<T[] | null> => {
     for (let attempt = 0; attempt < RETRY; attempt++) {
-      const r = await pageQ(from, to);
-      if (!r.error && r.data) return r.data as T[];
+      try {
+        const r = await pageQ(from, to);
+        if (!r.error && r.data) return r.data as T[];
+      } catch {} // Netzwerk-Reject zählt wie ein PostgREST-Fehler: erneut versuchen
       if (attempt < RETRY - 1) await new Promise((res) => setTimeout(res, 350 * (attempt + 1)));
     }
-    console.error(`fetchAllRows: Seite ${from}–${to} nach ${RETRY} Versuchen fehlgeschlagen`);
-    return [];
+    return null;
   };
 
-  const out: T[] = [];
+  const pages: (T[] | null)[] = new Array(nPages).fill(null);
   for (let i = 0; i < nPages; i += BATCH_SIZE) {
-    const batch = Array.from(
+    await Promise.all(Array.from(
       { length: Math.min(BATCH_SIZE, nPages - i) },
-      (_, j) => fetchPage((i + j) * 1000, (i + j) * 1000 + 999),
-    );
-    const results = await Promise.all(batch);
-    for (const rows of results) out.push(...rows);
+      (_, j) => fetchPage((i + j) * 1000, (i + j) * 1000 + 999).then((rows) => { pages[i + j] = rows; }),
+    ));
   }
+  // Nachputz-Runde: ausgefallene Seiten einzeln SERIELL nachholen — der parallele Burst ist
+  // die häufigste Ausfallursache. Bleibt danach ein Loch, wird geworfen statt ein
+  // unvollständiger Bestand als Erfolg gemeldet (der Aufrufer behält dann die alten Daten).
+  for (let i = 0; i < nPages; i++) {
+    if (pages[i] === null) pages[i] = await fetchPage(i * 1000, i * 1000 + 999);
+    if (pages[i] === null) {
+      console.error(`fetchAllRows: Seite ${i * 1000}–${i * 1000 + 999} endgültig fehlgeschlagen`);
+      throw new Error("fetchAllRows: unvollständig");
+    }
+  }
+  const out: T[] = [];
+  for (const rows of pages) out.push(...(rows as T[]));
   return out;
 }
 

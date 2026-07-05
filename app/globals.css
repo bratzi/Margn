@@ -149,6 +149,9 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .refresh-btn:disabled { cursor: default; opacity: .75; }
 .refresh-ico { flex-shrink: 0; }
 .refresh-btn.is-loading .refresh-ico { animation: refresh-spin .8s linear infinite; }
+/* Letzter Ladeversuch gescheitert (alter Bestand bleibt sichtbar) — Klick versucht es erneut */
+/* :hover-Variante mit, sonst gewinnt die Hover-Regel (höhere Spezifität) direkt nach dem Klick */
+.refresh-btn.is-error, .refresh-btn.is-error:hover:not(:disabled) { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--line)); background: var(--red-sub); }
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
 @media (max-width: 560px) { .refresh-btn span { display: none; } .refresh-btn { padding: 6px; } }
 

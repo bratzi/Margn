@@ -123,8 +123,9 @@ type Ctx = {
   // Gemeinsamer Datenbestand für ALLE Analytics-Komponenten (eine Wahrheit, ein Prädikat).
   corpus: CorpusRow[]; corpusReady: boolean;
   // Manuelles Nachladen der Daten (Refresh-Button) — ohne Seiten-Reload. refreshing = Ladevorgang
-  // läuft; corpusLoadedAt = Zeitstempel des letzten erfolgreichen Ladens.
-  reloadCorpus: () => void; refreshing: boolean; corpusLoadedAt: number | null;
+  // läuft; corpusLoadedAt = Zeitstempel des letzten erfolgreichen Ladens; corpusError = letzter
+  // Ladeversuch (inkl. Auto-Wiederholung) ist gescheitert, alter Bestand wird weiter angezeigt.
+  reloadCorpus: () => void; refreshing: boolean; corpusLoadedAt: number | null; corpusError: boolean;
   // Keyword-Filter: Artikel-IDs des gewählten Keywords (null = kein Keyword-Filter aktiv)
   kwIds: number[] | null; kwIdSet: Set<number> | null;
   // Aufgelöste URL-Muster der gewählten Sub-Rubriken (kanonisch → roh, mehrsprachig)
@@ -256,6 +257,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [corpusReady, setCorpusReady] = useState(false);
   const [corpusGen, setCorpusGen] = useState(0); // erhöht = Neuladen
   const [refreshing, setRefreshing] = useState(false);
+  const [corpusError, setCorpusError] = useState(false);
   const [corpusLoadedAt, setCorpusLoadedAt] = useState<number | null>(null);
   // EGRESS-Sparen: Den schweren Corpus (page_overview, ~10 MB) NUR auf den Seiten laden, die ihn
   // auch auswerten (Dashboard + Edits). Landing/Detailseite brauchen ihn nicht — bisher zog ihn aber
@@ -284,7 +286,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     // Deckt BEIDE Zeitachsen ab: kürzlich veröffentlicht ODER kürzlich gescannt ("zuletzt gesehen").
     // Sonst fehlten auf der Scan-Achse ältere, aber heute noch online/gescannte Artikel.
     const corpusFilter = `published_at.gte.${cf},and(published_at.is.null,discovered_at.gte.${cf}),last_seen.gte.${cf}`;
-    fetchAllRows<CorpusRow>(
+    const load = () => fetchAllRows<CorpusRow>(
       () => supabase.from("page_overview").select("id", { count: "exact", head: true })
         .in("ptype", ALLOWED_PTYPES).or(corpusFilter),
       // WICHTIG: nach dem EINDEUTIGEN PK `id` paginieren, nicht nach
@@ -297,8 +299,30 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
       // Aggregation server-seitig (RPC), dann cap-frei.
       100000,
-    ).then((rows) => { if (!cancelled) { setCorpus(rows); setCorpusReady(true); corpusLoadedAtRef.current = Date.now(); setCorpusLoadedAt(Date.now()); setRefreshing(false); } })
-      .catch(() => { if (!cancelled) setRefreshing(false); });
+    );
+    // Ein Klick = bis zu zwei komplette Versuche: fetchAllRows wirft jetzt bei jedem Loch
+    // (statt still unvollständig zu liefern), ein transienter Aussetzer wird also hier
+    // abgefangen statt vom Nutzer per Mehrfach-Klick. Scheitern beide: alter Bestand bleibt
+    // sichtbar, corpusError signalisiert es dem Button.
+    (async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const rows = await load();
+          if (cancelled) return;
+          // Dedupe nach id: Offset-Pagination auf id desc verschiebt bei gleichzeitigen
+          // Inserts (stündlicher Scrape) die Seitengrenzen → einzelne Zeilen kämen doppelt.
+          const seen = new Set<number>();
+          const uniq = rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+          setCorpus(uniq); setCorpusReady(true); setCorpusError(false);
+          corpusLoadedAtRef.current = Date.now(); setCorpusLoadedAt(Date.now()); setRefreshing(false);
+          return;
+        } catch {
+          if (cancelled) return;
+          if (attempt === 0) await new Promise((res) => setTimeout(res, 1200));
+        }
+      }
+      if (!cancelled) { setCorpusError(true); setRefreshing(false); }
+    })();
     return () => { cancelled = true; };
   }, [sources.length, corpusGen, needsCorpus]);
   // KEIN blindes Intervall-Polling mehr: ein vergessener Tab zog sonst ~10 MB ALLE 10 min
@@ -472,7 +496,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     search, setSearch, searchPending, searchCount, lang, setLang,
     changed, setChanged, depth, setDepth, resetAll,
     topicOpts, keywordOpts, subOpts, catTree,
-    corpus, corpusReady, reloadCorpus, refreshing, corpusLoadedAt, kwIds: effKwIds, kwIdSet, subPats,
+    corpus, corpusReady, reloadCorpus, refreshing, corpusLoadedAt, corpusError, kwIds: effKwIds, kwIdSet, subPats,
     days, rangeIdx, setRangeIdx: setRangeIdxClearPin, rangeFrom, rangeTo, pinpoint, setPinpoint, trfOpen, setTrfOpen,
     windowDays, setWindowDays, timeAxis, setTimeAxis, ready,
   };

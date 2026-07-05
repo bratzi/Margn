@@ -158,16 +158,18 @@ export default function ArticleDashboard() {
         <h1>Übersicht</h1>
         <div className="topbar-right">
           <button
-            className={`refresh-btn ${f.refreshing ? "is-loading" : ""}`}
+            className={`refresh-btn ${f.refreshing ? "is-loading" : ""} ${f.corpusError && !f.refreshing ? "is-error" : ""}`}
             onClick={() => { f.reloadCorpus(); loadRows(); }}
             disabled={f.refreshing}
-            title="Daten neu laden — ohne die Seite neu zu laden"
+            title={f.corpusError && !f.refreshing
+              ? "Letztes Laden fehlgeschlagen — angezeigt wird der vorherige Stand. Klick versucht es erneut."
+              : "Daten neu laden — ohne die Seite neu zu laden"}
             aria-label="Daten aktualisieren"
           >
             <svg className="refresh-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
             </svg>
-            <span>{f.refreshing ? "Lädt…" : "Aktualisieren"}</span>
+            <span>{f.refreshing ? "Lädt…" : f.corpusError ? "Erneut versuchen" : "Aktualisieren"}</span>
           </button>
           <span className="live"><span className="live-dot" /> Live · {updatedAt ? updatedAt.toLocaleTimeString("de-DE") : "…"}</span>
         </div>
