@@ -31,7 +31,7 @@ const TYPE_LABEL: Record<string, string> = {
   news: "Nachricht", opinion: "Meinung", analysis: "Analyse", liveblog: "Liveblog", timeline: "Timeline-Artikel",
   review: "Rezension", reportage: "Reportage", interactive: "Interaktiv", interview: "Interview",
 };
-const META_LABEL: Record<string, string> = { description: "Teaser", og_image: "Bild", topic: "Ressort", paywalled: "Paywall", author_status: "Autor" };
+const META_LABEL: Record<string, string> = { description: "Teaser", topic: "Ressort", paywalled: "Paywall", author_status: "Autor" };
 const AUTHOR_STATUS_LABEL: Record<string, string> = { named: "namentlich", anonymous: "Redaktion/Agentur", none: "kein Autor" };
 
 function fmtDate(iso: string | null) {
@@ -240,8 +240,8 @@ export default function ArticleDetail({ id }: { id: number }) {
     const seen = new Set<string>();
     return snaps.map((s) => {
       const before = new Set(seen);
-      const paras = (s.changes ?? []).filter((c) => c.new && !c.old).map((c) => (c.new ?? "").trim()).filter(Boolean);
-      const own = paras.length ? paras : (s.added ? [s.added.trim()] : []);
+      const paras = (s.changes ?? []).filter((c) => c.new && !c.old).map((c) => decodeEntities(c.new ?? "").trim()).filter(Boolean);
+      const own = paras.length ? paras : (s.added ? [decodeEntities(s.added).trim()] : []);
       for (const p of own) seen.add(paraKey(p));
       return before;
     });
@@ -274,14 +274,13 @@ export default function ArticleDetail({ id }: { id: number }) {
           <div className="cat-chips">{categories.map((x) => <span key={x} className="cat-chip">{x}</span>)}</div>
         </div>
       )}
-      {/* 2-spaltig: LINKS (2/3) der Artikel selbst — Bild, Eckdaten, Scan, Schlagwörter, Autoren,
+      {/* 2-spaltig: LINKS (2/3) der Artikel selbst — Eckdaten, Scan, Schlagwörter, Autoren,
           Seitenbaum, dann GANZ UNTEN der Änderungsverlauf. RECHTS (1/3) margns Analyse — Link,
-          Radar, Einordnung, Profil, Echo. */}
+          Radar, Einordnung, Profil, Echo. Verlagsbilder (og_image) werden aus
+          Urheberrechtsgründen NIRGENDS eingebunden. */}
       <div className="d-grid">
         {/* Linke Spalte (breit): das Stück + seine Fakten */}
         <aside className="d-aside">
-          {a.og_image && <div className="d-hero"><img src={a.og_image} alt="" /></div>}
-
           {/* Eckdaten (Zeit/Umfang/Sprache) */}
           <DL h="Eckdaten">
             <div className="statrow">
@@ -552,15 +551,29 @@ function lineOps(oldS: string, newS: string): Op[] {
   }
   return ops;
 }
-// Eine GEÄNDERTE Zeile (entfernt + direkt danach ergänzt, hohe Wort-Ähnlichkeit) als
-// Wort-Diff verfeinern → man sieht die geänderten Wörter statt der ganzen roten/grünen Zeile.
+// GEÄNDERTE Passagen zwischen zwei unveränderten Zeilen als Wort-Diff verfeinern. WICHTIG:
+// über den ganzen LAUF (alle del- + alle ins-Zeilen der Region gebündelt), nicht Zeile-für-Zeile —
+// der Zeilen-LCS findet bei leicht redigierten Absätzen oft KEINE exakt gleiche Zeile, und eine
+// 1:1-Paarung einzelner Zeilen greift dann nie. Ergebnis war ein ~2000-Zeichen-Block, der komplett
+// durchgestrichen und fast identisch wieder eingefügt wurde (Art. 1084636 V1/V3). Erst wenn die
+// gebündelten Alt-/Neu-Texte wirklich UNÄHNLICH sind, bleiben es zwei saubere Blöcke.
 function refineLineOps(ops: Op[]): Op[] {
   const out: Op[] = [];
-  for (let i = 0; i < ops.length; i++) {
-    const cur = ops[i], nxt = ops[i + 1];
-    if (cur.op === "del" && nxt && nxt.op === "ins" && jaccard(normTxt(cur.t), normTxt(nxt.t)) >= 0.5) {
-      out.push(...inlineOps(cur.t, nxt.t)); i++;
-    } else out.push(cur);
+  let i = 0;
+  while (i < ops.length) {
+    if (ops[i].op === "eq") { out.push(ops[i]); i++; continue; }
+    let j = i; const dels: string[] = [], inss: string[] = [];
+    while (j < ops.length && ops[j].op !== "eq") {
+      if (ops[j].op === "del") dels.push(ops[j].t); else inss.push(ops[j].t);
+      j++;
+    }
+    const oldT = dels.join(""), newT = inss.join("");
+    if (oldT && newT && jaccard(normTxt(oldT), normTxt(newT)) >= 0.4) out.push(...inlineOps(oldT, newT));
+    else {
+      if (oldT) out.push({ t: oldT, op: "del" });
+      if (newT) out.push({ t: newT, op: "ins" });
+    }
+    i = j;
   }
   return out;
 }
@@ -589,7 +602,9 @@ function sealTruncatedTail(ops: Op[], netWd = 0): Op[] {
   // wurde der abgeschnittene Wortrest fälschlich stehengelassen → „EinsatzkrEinsatzkräfte…",
   // Art. 343940 V12, word_delta=−6.)
   const tailWords = ops.slice(di + 1).reduce((s, o) => s + ((o.t.match(/\S+/g) ?? []).length), 0);
-  if (netWd > 0 && tailWords <= netWd + 6) return ops;
+  // Echter Zugewinn: zeigen — aber OHNE das angeschnittene Alt-Fragment. Die Ergänzung beginnt
+  // mit genau diesem Wort, ein durchgestrichenes „e" vor grünem „einigen…" ist reiner Cap-Müll.
+  if (netWd > 0 && tailWords <= netWd + 6) return [...ops.slice(0, di), ...ops.slice(di + 1)];
   return [...ops.slice(0, di), { t: " …", op: "trunc" }];
 }
 // Benachbarte gleichartige Segmente wieder verschmelzen (nach Umklassifizierungen).
@@ -654,10 +669,33 @@ function sealMisalignedHead(ops: Op[]): Op[] {
   if (normTxt(ops[e].t).length < 24) return ops;           // der folgende Anker muss echt sein
   return [{ t: "… ", op: "trunc" }, ...ops.slice(e)];
 }
+// (4) Versatz am ENDE versiegeln — das Gegenstück zu sealMisalignedHead und die Ursache der vom
+// User gemeldeten „mehrfach gelöschten" Passagen (Art. 453089): Bei rollenden Artikeln (oben kommt
+// täglich ein Eintrag dazu) rutscht hinten Text aus dem 1500/2000-Zeichen-Erfassungsfenster.
+// Der Diff endet dann nach dem letzten Anker mit einem GROSSEN del-Block plus höchstens einem
+// Mini-ins (dem am Cap angeschnittenen Anfang desselben Textes, z.B. „Achte…"). Dieser Text ist
+// NICHT gelöscht — er steht im Artikel weiter unten. Erkennen: das Mini-ins ist ein PRÄFIX des
+// del-Blocks (die Fenster überlappen exakt dort), UND die Wort-Bilanz des Scans widerspricht
+// einem Verlust dieser Größe. Ein ECHTER Schluss-Wegfall (netWd entsprechend negativ) bleibt rot.
+function sealMisalignedTail(ops: Op[], netWd = 0): Op[] {
+  let e = -1;
+  for (let i = ops.length - 1; i >= 0; i--) if (ops[i].op === "eq" && normTxt(ops[i].t).length >= 24) { e = i; break; }
+  if (e < 0 || e === ops.length - 1) return ops;
+  const tail = ops.slice(e + 1);
+  if (tail.some((o) => o.op === "trunc")) return ops;      // bereits versiegelt
+  const oldT = tail.filter((o) => o.op === "eq" || o.op === "del").map((o) => o.t).join("");
+  const newT = tail.filter((o) => o.op === "eq" || o.op === "ins" || o.op === "repl").map((o) => o.t).join("");
+  if (oldT.length < 120 || normTxt(newT).length > 40) return ops;
+  const a = normTxt(oldT).toLowerCase(), b = normTxt(newT).toLowerCase();
+  if (b && !a.startsWith(b)) return ops;                   // Neu-Rest muss den Alt-Block fortsetzen (Fenster-Überlapp)
+  const lostWords = (oldT.match(/\S+/g) ?? []).length;
+  if (netWd < 0 && -netWd >= lostWords / 2) return ops;    // Verlust in dieser Größenordnung real → zeigen
+  return [...ops.slice(0, e + 1), { t: " …", op: "trunc" }];
+}
 // Alle Aufräum-Schritte in fester Reihenfolge: erst Whitespace-Joins tilgen (vergrößert die echten
 // Anker), dann Konfetti zu Blöcken bündeln, dann Anfangs-/Schluss-Versatz versiegeln.
 function finalizeOps(ops: Op[], netWd = 0): Op[] {
-  return mergeOps(sealTruncatedTail(sealMisalignedHead(collapseConfetti(mergeWhitespaceEdits(ops))), netWd));
+  return mergeOps(sealTruncatedTail(sealMisalignedTail(sealMisalignedHead(collapseConfetti(mergeWhitespaceEdits(ops))), netWd), netWd));
 }
 // Am Zeichen-Cap abgeschnittener Alt-Text: `oldS` endet mit einem Wortfragment (≥4 Buchstaben),
 // dessen vollständige Form (ein längeres Wort mit gleichem Präfix) in `newS` vorkommt → der
@@ -733,6 +771,7 @@ function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string 
 // Lange Body-Texte (Ticker/Liveblog/Riesenabsatz) = Zeilen-Diff, in MEHRERE Boxen je Änderungsstelle
 // gesplittet statt einer riesigen Box.
 function DiffBlock({ oldS, newS, label, kind = "edit", netWd = 0 }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta"; netWd?: number }) {
+  oldS = decodeEntities(oldS); newS = decodeEntities(newS);
   // Kappungs-Schwanz abfangen: angeschnittenes Endwort aus oldS strippen + neutrales „…" anhängen,
   // statt ein halbes Wort („beko", „Arbe") als „gelöscht" zu zeigen. Greift für ALLE Verlage.
   const frag = truncatedFrag(oldS, newS);
@@ -765,6 +804,18 @@ function DiffBlock({ oldS, newS, label, kind = "edit", netWd = 0 }: { oldS: stri
 // („neu" + „entfernt"), was keinen Sinn ergibt. Hier: ungepaarte Zu-/Abgänge nach Wort-
 // Ähnlichkeit paaren, echte Paare als Wort-Diff führen, sichtbar identische no-op-Paare verwerfen.
 function normTxt(s: string): string { return s.replace(/\s+/g, " ").trim(); }
+// Roh mitgescrapte HTML-Entities (&nbsp; &amp; …) VOR dem Diffen auflösen — sonst stehen sie als
+// sichtbarer Text im Diff („D.&nbsp;C.") und erzeugen falsche Wort-Unterschiede, wenn eine
+// Fassung die Entity trägt und die andere das echte Zeichen.
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&(?:nbsp|#160);/g, " ")
+    .replace(/&(?:quot|#34);/g, '"')
+    .replace(/&(?:apos|#39);/g, "'")
+    .replace(/&(?:lt|#60);/g, "<")
+    .replace(/&(?:gt|#62);/g, ">")
+    .replace(/&(?:amp|#38);/g, "&");
+}
 // Normierter Schlüssel eines (Liveblog-)Absatzes für Cross-Version-Dedup.
 function paraKey(t: string): string { return t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 120); }
 function jaccard(a: string, b: string): number {
@@ -785,9 +836,25 @@ function reconcileChanges(raw: Change[]): { items: Change[]; noopDropped: boolea
   let noopDropped = false;
   for (const p of paired) { if (normTxt(p.old!) === normTxt(p.new!)) noopDropped = true; else items.push(p); }
   const usedR = new Set<number>();
+  // Verschobene Erfassungsfenster paaren: Bei rollenden Artikeln (täglich neuer Eintrag oben,
+  // hinten rutscht Text aus dem Fenster) sind Zu- und Abgang DERSELBE Text, nur versetzt — mit
+  // langem gemeinsamem Anfang, aber wegen des ausgetauschten Rests einer Jaccard-Ähnlichkeit
+  // unter 0.4. Ungepaart ergäbe das zwei fast identische Textwände „neu" + „entfernt"
+  // (Art. 453089 V3) — darum zählt ein Präfix-Überlapp ab 80 Zeichen ebenfalls als Paar.
+  const prefixLen = (x: string, y: string) => {
+    const a = normTxt(x).toLowerCase(), b = normTxt(y).toLowerCase();
+    const n = Math.min(a.length, b.length); let i = 0;
+    while (i < n && a[i] === b[i]) i++;
+    return i;
+  };
   for (const a of adds) {
     let best = -1, bestSim = 0;
     rems.forEach((r, i) => { if (usedR.has(i)) return; const s = jaccard(a, r); if (s > bestSim) { bestSim = s; best = i; } });
+    if (best < 0 || bestSim < 0.4) {
+      let bestP = -1, bestPL = 0;
+      rems.forEach((r, i) => { if (usedR.has(i)) return; const l = prefixLen(a, r); if (l > bestPL) { bestPL = l; bestP = i; } });
+      if (bestPL >= 80) { best = bestP; bestSim = 1; }
+    }
     if (best >= 0 && bestSim >= 0.4) {
       usedR.add(best);
       if (normTxt(rems[best]) === normTxt(a)) noopDropped = true;   // sichtbar identisch → kein Sinn, weg
@@ -803,15 +870,6 @@ function MetaLine({ icon, children }: { icon: React.ReactNode; children: React.R
 }
 function MetaEditView({ m }: { m: MetaEdit }) {
   if (m.field === "description" && m.old && m.new) return <DiffBlock oldS={m.old} newS={m.new} label="Teaser geändert" kind="meta" />;
-  if (m.field === "og_image") return (
-    <div className="chist-block">
-      <div className="lbl">Vorschaubild getauscht</div>
-      <div className="chist-imgs">
-        <figure className="old"><figcaption>Vorher</figcaption>{m.old ? <img src={m.old} alt="" /> : <span className="faint">—</span>}</figure>
-        <figure className="new"><figcaption>Jetzt</figcaption>{m.new ? <img src={m.new} alt="" /> : <span className="faint">—</span>}</figure>
-      </div>
-    </div>
-  );
   if (m.field === "topic") return <MetaLine icon={<Folder />}>Ressort verschoben — <b>{topicLabel(m.old ?? "")}</b> → <b>{topicLabel(m.new ?? "")}</b></MetaLine>;
   if (m.field === "paywalled") {
     const activated = m.new === "true";
@@ -835,13 +893,18 @@ function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: s
   );
 }
 
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + " …" : s);
+
 function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<string> }) {
   const isEdit = s.change_kind === "edit";
   const isExt = s.change_kind === "extension";
   const kindLabel = s.change_kind === "extension" ? "Erweiterung" : isEdit ? "Stille Änderung" : "Geändert & erweitert";
   const Icon = isEdit ? Pencil : Plus;
   const cls = s.change_kind === "extension" ? "ok" : isEdit ? "lock" : "wait";
-  const { items: allChanges, noopDropped } = reconcileChanges((s.changes ?? []).filter((c) => c.old || c.new));
+  const { items: allChanges, noopDropped } = reconcileChanges(
+    (s.changes ?? []).filter((c) => c.old || c.new)
+      .map((c) => ({ old: c.old ? decodeEntities(c.old) : undefined, new: c.new ? decodeEntities(c.new) : undefined }))
+  );
   // Nur die größten Passagen zeigen (Länge der Änderung), der Rest als Hinweis — nicht jeder Absatz.
   const changes = [...allChanges].sort((a, b) => ((b.old?.length ?? 0) + (b.new?.length ?? 0)) - ((a.old?.length ?? 0) + (a.new?.length ?? 0))).slice(0, 3);
   const moreChanges = allChanges.length - changes.length;
@@ -854,7 +917,10 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
   const removedParas = allChanges.filter((c) => c.old && !c.new).length;
   const titleChanged = !!(s.title_old && s.title_new);
   const dateChanged = realDateShift(s.pubdate_old, s.pubdate_new);
-  const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field);
+  // Bild-Wechsel (og_image) NICHT anzeigen — Verlagsbilder einzubinden ist urheberrechtlich
+  // heikel. Nur wenn die Karte sonst KOMPLETT leer wäre, ein bildloser Hinweis.
+  const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field && m.field !== "og_image");
+  const imageSwapped = (s.meta_edits ?? []).some((m) => m && m.field === "og_image");
   return (
     <div className={`chist-card ${s.change_kind}`}>
       <div className="chist-head">
@@ -878,8 +944,8 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
       {isExt ? (() => {
         // Neu hinzugekommenes NICHT als ein Riesenblock — jeder hinzugefügte Absatz = eigene Box
         // (in Dokument-Reihenfolge). So ist es logisch gesplittet statt eine große Textwand.
-        let paras = (s.changes ?? []).filter((c) => c.new && !c.old).map((c) => (c.new ?? "").trim()).filter(Boolean);
-        if (!paras.length && s.added) paras = [s.added.trim()];
+        let paras = (s.changes ?? []).filter((c) => c.new && !c.old).map((c) => decodeEntities(c.new ?? "").trim()).filter(Boolean);
+        if (!paras.length && s.added) paras = [decodeEntities(s.added).trim()];
         // CROSS-VERSION-DEDUP: Liveblog-/Ticker-Einträge, die in einer FRÜHEREN Version schon
         // gezeigt wurden (Re-Segmentierung lässt denselben Eintrag wiederkehren), hier raus —
         // sonst sieht man dieselbe Meldung über viele Versionen doppelt (Art. 5830).
@@ -898,7 +964,7 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
             {shown.map((p, i) => (
               <div className="dq ext" key={i}>
                 <div className="dq-lbl"><span className="dq-pm add">+</span>Neu hinzugekommen{shown.length > 1 ? ` · Abschnitt ${i + 1}` : ""}</div>
-                <div className="dq-body dq-add-body">{p.length > 560 ? p.slice(0, 560) + " …" : p}</div>
+                <div className="dq-body dq-add-body">{clip(p, 560)}</div>
               </div>
             ))}
             {more > 0 && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>+ {more} weiterer Abschnitt{more > 1 ? "e" : ""}</p>}
@@ -912,12 +978,12 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
             : c.new ? (
               <div className="dq ext" key={i}>
                 <div className="dq-lbl"><span className="dq-pm add">+</span>Neu hinzugekommen</div>
-                <div className="dq-body dq-add-body">{c.new!.length > 420 ? c.new!.slice(0, 420) + " …" : c.new}</div>
+                <div className="dq-body dq-add-body">{clip(c.new!, 420)}</div>
               </div>
             ) : (
               <div className="dq del-only" key={i}>
                 <div className="dq-lbl"><span className="dq-pm del">−</span>Entfernt</div>
-                <div className="dq-body dq-del-body">{c.old!.length > 420 ? c.old!.slice(0, 420) + " …" : c.old}</div>
+                <div className="dq-body dq-del-body">{clip(c.old!, 420)}</div>
               </div>
             )
           )}
@@ -927,7 +993,7 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
           {changes.length === 0 && !titleChanged && s.added && !noopDropped && (
             <div className={`dq ${isEdit ? "del-only" : "ext"}`}>
               <div className="dq-lbl"><span className={`dq-pm ${isEdit ? "del" : "add"}`}>{isEdit ? "±" : "+"}</span>{isEdit ? "Geänderte Passage" : "Neu hinzugekommen"}</div>
-              <div className={`dq-body ${isEdit ? "dq-del-body" : "dq-add-body"}`}>{s.added.length > 420 ? s.added.slice(0, 420) + " …" : s.added}</div>
+              <div className={`dq-body ${isEdit ? "dq-del-body" : "dq-add-body"}`}>{clip(decodeEntities(s.added), 420)}</div>
             </div>
           )}
           {/* no-op-Paar verworfen (Differenz lag außerhalb des erfassten Ausschnitts) → ehrlicher Hinweis statt zwei gleicher Textwände */}
@@ -936,6 +1002,9 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
           )}
           {changes.length === 0 && !titleChanged && !s.added && !dateChanged && !noopDropped && s.removed_count > 0 && (
             <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>− {s.removed_count} Passage(n) entfernt</p>
+          )}
+          {changes.length === 0 && !titleChanged && !s.added && !dateChanged && !noopDropped && s.removed_count === 0 && metaEdits.length === 0 && imageSwapped && (
+            <p className="faint" style={{ fontSize: 12.5, marginTop: 8 }}>Nur das Vorschaubild wurde getauscht (Verlagsbilder werden aus Urheberrechtsgründen nicht angezeigt).</p>
           )}
         </>
       )}

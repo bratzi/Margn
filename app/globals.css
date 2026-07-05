@@ -650,10 +650,6 @@ table.dt.dt-fit { width: max-content; }
 .cat-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: var(--accent); flex-shrink: 0; }
 .cat-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .cat-chip { font-size: 13.5px; font-weight: 600; padding: 5px 13px; border-radius: 99px; background: var(--surface); color: var(--ink); border: 1px solid var(--line-2); }
-.d-hero { border-radius: var(--r); overflow: hidden; margin-bottom: 20px; border: 1px solid var(--line); }
-.d-hero img { width: 100%; display: block; object-fit: cover; max-height: 360px; }
-/* In der Detail-Spalte dient das Bild nur der Orientierung → schmaler Banner, der Verlauf ist der Fokus. */
-.d-grid .d-aside .d-hero img { max-height: 168px; }
 .statbar { display: flex; gap: 28px; flex-wrap: wrap; padding: 16px 20px; }
 .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin-bottom: 3px; }
 .stat .v { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -807,21 +803,13 @@ table.dt.dt-fit { width: max-content; }
 .chist-ver.old .vlbl { color: var(--red); }
 .chist-ver.new { border-left: 3px solid var(--green); }
 .chist-ver.new .vlbl { color: var(--green); }
-/* Unsichtbare Metadaten-Edits (Teaser/Bild/Ressort/Paywall/Autor) */
+/* Unsichtbare Metadaten-Edits (Teaser/Ressort/Paywall/Autor) */
 .chist-chip.meta { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 42%, transparent); }
 .chist-meta { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding: 9px 13px; border-radius: 8px;
   font-size: 13px; line-height: 1.55; color: var(--muted); background: var(--teal-sub);
   border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent); }
 .chist-meta svg { position: relative; top: 2px; color: var(--teal); flex-shrink: 0; }
 .chist-meta b { color: var(--ink); font-weight: 600; }
-.chist-imgs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.chist-imgs figure { margin: 0; }
-.chist-imgs figcaption { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 5px; color: var(--faint); }
-.chist-imgs figure.old figcaption { color: var(--red); }
-.chist-imgs figure.new figcaption { color: var(--green); }
-.chist-imgs img { width: 100%; height: 120px; object-fit: cover; border-radius: 7px; border: 1px solid var(--line); display: block; }
-.chist-imgs figure.old img { border-left: 3px solid var(--red); }
-.chist-imgs figure.new img { border-left: 3px solid var(--green); }
 
 /* ---------- Diff je Version: Vorher | Jetzt nebeneinander, kompakt mit Platzhaltern ---------- */
 .dq { margin-top: 13px; border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 9px; overflow: hidden; background: var(--surface); }
