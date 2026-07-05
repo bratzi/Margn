@@ -4,10 +4,11 @@
 -- HINTERGRUND: Die DB lief Ende Juni 2026 auf 410/500 MB. Hauptursache war die write-only
 -- Kanten-Tabelle `page_links` (≈915k Zeilen / ~100 MB, nirgends gelesen) + ein toter 33-MB-
 -- ivfflat-Embedding-Index auf `article_versions` (Feature ungenutzt). Beides entfernt → 278 MB.
--- Damit es DAUERHAFT im Free-Tier bleibt (Korpus wächst ~9 MB/Tag), zusätzlich diese Retention:
---   (1) Karteileichen wegräumen: nie geänderte Artikel, die seit >45 Tagen nicht mehr gesehen
---       wurden. ON DELETE CASCADE entfernt paras/keywords/authors/categories/snapshots mit.
---       ALLE jemals geänderten Artikel (≥1 Snapshot) bleiben für immer — das ist der Kern-Wert.
+-- Damit es DAUERHAFT im Free-Tier bleibt (Korpus wächst ~10 MB/Tag, WM-Volumen), diese Retention:
+--   (1) Karteileichen wegräumen: nie geänderte Artikel, die seit >30 Tagen nicht mehr gesehen
+--       wurden (2026-07-05 von 45 auf 30 verschärft — bei ~2.200 Artikeln/Tag passt 45 T nicht
+--       dauerhaft in 500 MB). ON DELETE CASCADE entfernt paras/keywords/authors/categories/
+--       snapshots mit. ALLE jemals geänderten Artikel (≥1 Snapshot) bleiben für immer — Kern-Wert.
 --   (2) Dauer-Ticker/Liveblogs deckeln: je Artikel nur die 60 jüngsten Extension-Snapshots
 --       behalten (ein offener n-tv-Ticker hatte 571 → reine Re-Segmentierungs-Wiederholung).
 
@@ -19,7 +20,7 @@ as $fn$
 begin
   -- (1) Nie geänderte, alte Artikel löschen (Kinder via CASCADE).
   delete from articles a
-  where a.last_seen < now() - interval '45 days'
+  where a.last_seen < now() - interval '30 days'
     and not exists (select 1 from article_snapshots s where s.article_id = a.id);
 
   -- (2) Extension-Snapshots je Artikel auf die 60 jüngsten kappen.

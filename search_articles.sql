@@ -1,18 +1,17 @@
--- search_articles -- Vollumfassende Volltextsuche fuers Filter-Panel.
+-- search_articles -- Volltextsuche fuers Filter-Panel (Metadaten).
 --
--- Durchsucht JEDE Eigenschaft eines Artikels: Titel, URL (Rueckwaerts-/Link-Suche), Teaser
--- (description), Thema, Schlagwoerter, Rubriken (categories) UND den Artikelinhalt selbst
--- (article_paras.paras -- die gespeicherten Absaetze; article_versions.body_text ist quasi leer).
--- Gibt die Treffer-Artikel-IDs zurueck; das Frontend (FilterProvider) verschneidet sie mit dem
--- Keyword-Filter und schraenkt damit Tabelle UND Analytik ein (wie der Keyword-Filter).
+-- Durchsucht Titel, URL (Rueckwaerts-/Link-Suche), Teaser (description), Thema, Schlagwoerter
+-- und Rubriken (categories). Gibt die Treffer-Artikel-IDs zurueck; das Frontend (FilterProvider)
+-- verschneidet sie mit dem Keyword-Filter und schraenkt damit Tabelle UND Analytik ein.
 --
--- Performance: ILIKE '%q%' ueber alle Absaetze ist ohne Index ~7,5 s (anon-Timeout 3 s). Daher
--- pg_trgm-GIN-Indizes (s.u.) -> ~1 s. 'force_custom_plan' erzwingt pro Aufruf den Trgm-Plan.
+-- 2026-07-05: Die Suche im Artikelinhalt (article_paras) wurde ENTFERNT -- der dafuer noetige
+-- pg_trgm-GIN-Index war 52 MB (DB-Limit 500 MB, s. maintenance.sql) und die RPC lag mit
+-- paras-Branch bei ~5 s (> 3-s-anon-Timeout). Ohne paras-Branch reicht der Seq Scan ueber
+-- articles (description/topic sind nicht indiziert -- bewusst, kein weiterer Index).
 
 create extension if not exists pg_trgm;
-create index if not exists ix_article_paras_trgm on public.article_paras using gin ((paras::text) gin_trgm_ops);
-create index if not exists ix_articles_title_trgm  on public.articles using gin (title gin_trgm_ops);
-create index if not exists ix_articles_url_trgm    on public.articles using gin (url   gin_trgm_ops);
+-- url_trgm bleibt: wird vom Sub-Rubriken-Filter genutzt (filterCorpus url.ilike).
+create index if not exists ix_articles_url_trgm on public.articles using gin (url gin_trgm_ops);
 
 create or replace function public.search_articles(p_q text, p_sources bigint[] default null, p_limit int default 1200)
 returns table(article_id bigint)
@@ -32,7 +31,6 @@ as $func$
       or coalesce(a.topic, '') ilike pat.p
       or exists(select 1 from article_keywords ak join keywords k on k.id = ak.keyword_id where ak.article_id = a.id and k.term ilike pat.p)
       or exists(select 1 from article_categories ac join categories c on c.id = ac.category_id where ac.article_id = a.id and c.name ilike pat.p)
-      or exists(select 1 from article_paras p where p.article_id = a.id and p.paras::text ilike pat.p)
     )
   limit p_limit;
 $func$;

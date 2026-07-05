@@ -32,14 +32,15 @@ export default function FilterControls() {
 
   return (
     <div className="filters">
-      {/* Vollumfassende Volltextsuche: Titel/URL/Teaser/Thema/Schlagwörter/Rubriken/Artikelinhalt.
+      {/* Volltextsuche über die Metadaten: Titel/URL/Teaser/Thema/Schlagwörter/Rubriken.
+          (Artikelinhalt-Suche 2026-07-05 entfernt: 52-MB-Index + RPC-Timeout, s. search_articles.sql.)
           Schränkt Tabelle UND Analytik ein (UND-verknüpft mit den übrigen Filtern). */}
       <div className="fgroup">
         <div className="fglabel">Volltextsuche</div>
         <div className="fsearch">
           <svg className="fsearch-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
           <input type="search" value={f.search} onChange={(e) => f.setSearch(e.target.value)} spellCheck={false}
-            placeholder="Inhalt, Titel, Schlagwort, URL …" aria-label="Volltextsuche" />
+            placeholder="Titel, Teaser, Schlagwort, URL …" aria-label="Volltextsuche" />
           {f.search && <button className="fsearch-x" onClick={() => f.setSearch("")} aria-label="Suche löschen" title="Suche löschen">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>}
@@ -47,7 +48,7 @@ export default function FilterControls() {
         {f.search.trim().length >= 2 && (
           <div className="fsearch-hint">
             {f.searchPending ? "sucht …"
-              : f.searchCount != null ? `${f.searchCount.toLocaleString("de-DE")}${f.searchCount >= 1200 ? "+" : ""} Treffer · durchsucht auch den Artikelinhalt`
+              : f.searchCount != null ? `${f.searchCount.toLocaleString("de-DE")}${f.searchCount >= 1200 ? "+" : ""} Treffer in Titel, Teaser, Schlagwörtern & Rubriken`
               : ""}
           </div>
         )}

@@ -351,7 +351,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   }, [keyword]);
 
   // VOLLTEXTSUCHE → Artikel-IDs: durchsucht serverseitig Titel/URL/Teaser/Thema/Schlagwörter/
-  // Rubriken UND den Artikelinhalt (RPC search_articles, trgm-indiziert). Entprellt; ein
+  // Rubriken (RPC search_articles; Artikelinhalt-Suche 2026-07-05 entfernt, DB-Limit). Entprellt; ein
   // Kaltstart-500 wird einmal wiederholt. Die Treffer schränken — wie der Keyword-Filter —
   // Tabelle UND Analytik ein (mit dem Keyword-Filter UND-verknüpft).
   const [searchIds, setSearchIds] = useState<number[] | null>(null);
