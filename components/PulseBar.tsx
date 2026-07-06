@@ -72,7 +72,7 @@ export default function PulseBar() {
       topTopic: topTopic ? { key: topTopic[0], n: topTopic[1], sh: pct(topTopic[1], n) } : null,
     };
   }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
-      f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.timeAxis,
+      f.topics.join(","), f.lang, f.changed, f.depth, f.hideRegional, f.rangeFrom, f.rangeTo, f.timeAxis,
       f.subPats.join("|"), f.kwIdSet, nameById]);
 
   if (!f.corpusReady) {

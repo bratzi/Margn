@@ -5,6 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useFilters } from "@/components/FilterProvider";
 import { berlinDate } from "@/lib/filterCorpus";
+import { TOPICS_SANS_REGIONAL } from "@/lib/topics";
 import { PUB_COLORS } from "@/components/TimeRangeFilter";
 import FilterPills from "@/components/FilterPills";
 import TimeRangeFilter from "@/components/TimeRangeFilter";
@@ -118,14 +119,15 @@ export default function KeywordTrends() {
   // Zeitachse, Zeitraum). Keyword-Filter selbst greift hier NICHT — diese Seite vergleicht
   // ja alle Schlagwörter. Ein Kalt-Cache-Timeout wird einmal wiederholt.
   const nn = (v: string) => (v === "all" ? null : v);
-  const fetchKey = [f.activeArr.join(","), f.rangeFrom, f.rangeTo, f.timeAxis, f.topics.join(","), f.paywall, f.author, f.lang].join("|");
+  const fetchKey = [f.activeArr.join(","), f.rangeFrom, f.rangeTo, f.timeAxis, f.topics.join(","), f.hideRegional, f.paywall, f.author, f.lang].join("|");
   useEffect(() => {
     if (!f.activeArr.length) { setRaw([]); setLoading(false); return; }
     let cancelled = false;
     setLoading(true); setErr(false);
     const params = {
       p_sources: f.activeArr, p_from: f.rangeFrom, p_to: f.rangeTo, p_axis: f.timeAxis,
-      p_topics: f.topics.length ? f.topics : null,
+      // Ausgeblendetes Regional: positive Liste „alle außer regional" (die RPC kennt nur p_topics).
+      p_topics: f.topics.length ? f.topics : (f.hideRegional ? TOPICS_SANS_REGIONAL : null),
       p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_limit: 300,
     };
     const run = (attempt: number) => {

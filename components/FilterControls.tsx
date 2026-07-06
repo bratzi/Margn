@@ -28,7 +28,7 @@ export default function FilterControls() {
     f.activeArr.length !== f.sources.length || f.status !== "all" || f.paywall !== "all" ||
     f.author !== "all" || f.atype !== "all" || f.topics.length > 0 || f.subcats.length > 0 ||
     f.keyword !== "all" || f.lang !== "all" || f.changed !== "all" || f.depth !== "all" ||
-    f.search.trim().length > 0 || f.searchTerms.length > 0;
+    f.search.trim().length > 0 || f.searchTerms.length > 0 || !f.hideRegional;
 
   return (
     <div className="filters">
@@ -115,6 +115,17 @@ export default function FilterControls() {
           <option value="paywall">Paywall-Seite</option>
           <option value="timeline">Timeline / Liveblog</option>
         </select>
+      </div>
+
+      {/* Regional & Lokales: ~24 % des Volumens, erschlägt jede Verteilung → Default AUS,
+          zuschaltbar. Beim Ausblenden räumt der Provider eine Regional-Themenwahl mit ab. */}
+      <div className="fgroup">
+        <div className="fglabel">Regional &amp; Lokales</div>
+        <div className="seg fseg">
+          <button className={f.hideRegional ? "on" : ""} onClick={() => f.setHideRegional(true)} title="Regional-Meldungen aus allen Auswertungen ausblenden (Standard)">Ausgeblendet</button>
+          <button className={!f.hideRegional ? "on" : ""} onClick={() => f.setHideRegional(false)} title="Regional-Meldungen einbeziehen — dominieren das Volumen (~24 %)">Einbezogen</button>
+        </div>
+        {!f.hideRegional && <div className="fsearch-hint">Regional-Meldungen dominieren das Volumen und verzerren Themen-Verteilungen.</div>}
       </div>
 
       {/* Themen als scrollbare Multiselect-Toggle-Liste */}

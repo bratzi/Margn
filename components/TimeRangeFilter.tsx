@@ -43,7 +43,7 @@ export default function TimeRangeFilter() {
   // Balken exakt mit den Tabellen-Treffern des jeweiligen Tages überein.
   const corpusDeps = [f.corpus, f.corpusReady, days, f.timeAxis,
     f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
-    f.subPats.join("|"), f.kwIdSet] as const;
+    f.hideRegional, f.subPats.join("|"), f.kwIdSet] as const;
 
   const series = useMemo(() => {
     const snap = snapshotOf(f as any);

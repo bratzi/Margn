@@ -58,7 +58,7 @@ export default function TopicCards() {
       }))
       .sort((a, b) => b.articles - a.articles);
   }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
-      f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.timeAxis, f.kwIdSet]);
+      f.lang, f.changed, f.depth, f.hideRegional, f.rangeFrom, f.rangeTo, f.timeAxis, f.kwIdSet]);
 
   if (!rows.length) return null;
   const toggleOpen = (t: string) => setOpen((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });

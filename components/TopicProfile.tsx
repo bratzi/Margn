@@ -38,7 +38,7 @@ export default function TopicProfile() {
     }
     return out;
   }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
-      f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.timeAxis, f.kwIdSet]);
+      f.lang, f.changed, f.depth, f.hideRegional, f.rangeFrom, f.rangeTo, f.timeAxis, f.kwIdSet]);
 
   const activeSources = useMemo(() => f.sources.filter((s) => f.active.has(s.id)), [f.sources, f.active]);
   const colorById = useMemo(

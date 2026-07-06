@@ -106,7 +106,7 @@ export default function PublisherCompare() {
     }
     return { stats: [...cur.values()], prevMap: prev };
   }, [f.corpus, f.corpusReady, activeSources.join(","), topics.join(","), f.status, f.paywall,
-      f.atype, f.author, f.lang, f.changed, f.depth, f.timeAxis, f.subPats.join("|"), f.kwIdSet,
+      f.atype, f.author, f.lang, f.changed, f.depth, f.hideRegional, f.timeAxis, f.subPats.join("|"), f.kwIdSet,
       curFrom.getTime(), curTo.getTime(), prevFrom.getTime()]);
 
   if (!stats.length) return null;

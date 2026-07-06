@@ -187,7 +187,7 @@ export default function RateStats() {
     return { series: ser, total: tot };
   }, [chartMode, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
       f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
-      f.subPats.join("|"), f.kwIdSet]);
+      f.hideRegional, f.subPats.join("|"), f.kwIdSet]);
 
   const NB = buckets.length;
   const availW = (containerW > 0 ? containerW : VW) - PAD_L - PAD_R;

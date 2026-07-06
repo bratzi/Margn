@@ -80,10 +80,10 @@ export default function ArticleDashboard() {
       ? await q.order("published_at", { ascending: true }).limit(pinLimit)
       : await q.order(sortCol, { ascending: sortAsc }).range(page * PAGE, page * PAGE + PAGE - 1);
     setRows((data as Row[]) ?? []); setTotal(count ?? 0);
-  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.timeAxis, f.pinpoint?.sourceId, f.pinpoint?.topic, f.pinpoint?.limit, f.kwIds, f.keyword, f.subPats.join("|"), page, tableSort?.key, tableSort?.dir]);
+  }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth, f.hideRegional, f.rangeFrom, f.rangeTo, f.timeAxis, f.pinpoint?.sourceId, f.pinpoint?.topic, f.pinpoint?.limit, f.kwIds, f.keyword, f.subPats.join("|"), page, tableSort?.key, tableSort?.dir]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
-  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.rangeFrom, f.rangeTo, f.timeAxis, f.pinpoint?.sourceId, f.pinpoint?.topic, tableSort?.key, tableSort?.dir]);
+  useEffect(() => { setPage(0); }, [f.activeArr.join(","), f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.subPats.join("|"), f.keyword, f.lang, f.changed, f.depth, f.hideRegional, f.rangeFrom, f.rangeTo, f.timeAxis, f.pinpoint?.sourceId, f.pinpoint?.topic, tableSort?.key, tableSort?.dir]);
 
   useEffect(() => {
     const ids = rows.map((r) => r.article_id).filter(Boolean) as number[];

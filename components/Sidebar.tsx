@@ -53,13 +53,15 @@ export default function Sidebar() {
     changed: f.changed !== "all",
     depth: f.depth !== "all",
     search: f.search.trim().length >= 2 || f.searchTerms.length > 0,
+    regional: !f.hideRegional, // Einbeziehen = Abweichung vom Standard (ausgeblendet)
     range: !(f.rangeIdx.from === 0 && f.rangeIdx.to === f.days.length - 1) || !!f.pinpoint,
   };
   const activeCount =
     (ind.pub ? 1 : 0) + (ind.status ? 1 : 0) + (ind.paywall ? 1 : 0) +
     (ind.author ? 1 : 0) + (ind.atype ? 1 : 0) + (ind.topics ? 1 : 0) +
     (ind.subcats ? 1 : 0) + (ind.lang ? 1 : 0) + (ind.keyword ? 1 : 0) +
-    (ind.changed ? 1 : 0) + (ind.depth ? 1 : 0) + (ind.search ? 1 : 0) + (ind.range ? 1 : 0);
+    (ind.changed ? 1 : 0) + (ind.depth ? 1 : 0) + (ind.search ? 1 : 0) +
+    (ind.regional ? 1 : 0) + (ind.range ? 1 : 0);
 
   // Landingpage + Login sind full-bleed ohne App-Chrome.
   // WICHTIG: erst NACH allen Hooks returnen (Rules of Hooks — Layout persistiert über Routen).
@@ -112,6 +114,7 @@ export default function Sidebar() {
         if (ind.status) items.push({ id: "st", label: "Erfassungs-Filter", icon: I("M12 2v4M12 18v4M2 12h4M18 12h4") });
         if (ind.keyword) items.push({ id: "kw", label: "Keyword-Filter", icon: I("M4 9h16M4 15h16M10 3 8 21M16 3l-2 18") });
         if (ind.search) items.push({ id: "se", label: "Such-Filter", n: f.searchTerms.length > 1 ? f.searchTerms.length : undefined, icon: I("m21 21-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z") });
+        if (ind.regional) items.push({ id: "rg2", label: "inkl. Regional & Lokales", icon: I("M9 20 3 17V4l6 3m0 13 6-3m-6 3V7m6 10 6 3V7l-6-3m0 13V4M9 7l6-3") });
         if (ind.changed) items.push({ id: "ch", label: "Änderungs-Filter", icon: I("M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z") });
         if (ind.depth) items.push({ id: "dp", label: "Tiefe-Filter", icon: I("M4 6h16M4 12h10M4 18h6") });
         if (ind.lang) items.push({ id: "lg", label: "Sprach-Filter", icon: I("M2 12h20M12 2a15 15 0 0 1 0 20A15 15 0 0 1 12 2z") });

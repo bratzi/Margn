@@ -47,6 +47,9 @@ export type FilterSnapshot = {
   status: string; paywall: string; atype: string; author: string;
   topics: string[]; lang: string; changed: string; depth: string;
   rangeFrom: string | null; rangeTo: string | null; timeAxis: TimeAxis;
+  // „Regional & Lokales" ausblenden (Default AN): ~24 % des Gesamtvolumens sind Regional-
+  // Meldungen — sie erschlagen jede Themen-/Quellen-Verteilung. Per Filter zuschaltbar.
+  hideRegional: boolean;
 };
 
 type TimedRow = { published_at: string | null; discovered_at: string | null; last_seen?: string | null };
@@ -102,6 +105,8 @@ export function applyServerFilters(q: any, f: FilterSnapshot, subPats: string[],
   }
   if (f.author !== "all") q = q.eq("author_status", f.author);
   if (f.topics.length) q = q.in("topic", f.topics);
+  // NULL-Topics nicht mit ausschließen (topic <> 'regional' wäre für NULL falsy).
+  else if (f.hideRegional) q = q.or("topic.neq.regional,topic.is.null");
   if (f.lang !== "all") q = q.eq("language", f.lang);
   if (f.changed === "yes") q = q.gte("revision_count", 1);
   else if (f.changed === "no") q = q.or("revision_count.is.null,revision_count.eq.0");
@@ -138,6 +143,9 @@ export function makeMatcher(
   const pats = subPats.map((s) => `/${s.toLowerCase()}/`);
   return (r: CorpusRow) => {
     if (!ALLOWED_SET.has(r.ptype)) return false;
+    // Immer angewandt (auch bei skip.topics): ausgeblendetes Regional soll in KEINER
+    // Auswertung auftauchen — auch nicht in Themen-Karten/-Optionen.
+    if (f.hideRegional && r.topic === "regional") return false;
     // Erfassung — PostgREST-Semantik: NULL <= 1 ist NULL → Zeile fällt raus
     if (f.status === "new") { if (r.scan_count == null || r.scan_count > 1) return false; }
     else if (f.status === "rescanned") { if (r.scan_count == null || r.scan_count < 2) return false; }
@@ -178,5 +186,6 @@ export function snapshotOf(f: FilterSnapshot & Record<string, unknown>): FilterS
     status: f.status, paywall: f.paywall, atype: f.atype, author: f.author,
     topics: f.topics, lang: f.lang, changed: f.changed, depth: f.depth,
     rangeFrom: f.rangeFrom, rangeTo: f.rangeTo, timeAxis: (f.timeAxis as TimeAxis) ?? "published",
+    hideRegional: !!f.hideRegional,
   };
 }
