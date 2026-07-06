@@ -14,6 +14,7 @@ const BASE: FilterSnapshot = {
   status: "all", paywall: "all", atype: "all", author: "all",
   topics: [], lang: "all", changed: "all", depth: "all",
   rangeFrom: null, rangeTo: null, timeAxis: "published",
+  hideRegional: false, // Prüfskript testet die Rohmenge; der Regional-Toggle hat eigene Fälle verdient
 };
 
 const day = (offset: number) => {

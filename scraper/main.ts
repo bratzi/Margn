@@ -1514,6 +1514,15 @@ function isErrorPage(status: number, html: string): boolean {
 //  - Hub nur, wenn SUBSTANZIELLE Seite gerendert wurde UND kein Artikel-Signal UND keine Datums-Artikel-URL.
 //  - Artikel auch bei Paywall-Teaser, sofern JSON-LD Article-Signal ODER klare Datums-Artikel-URL vorliegt.
 const datedArticleUrl = (url: string) => /\/article\/\d{4}\/\d{2}\/\d{2}\//.test(url) || /\/\d{4}\/\d{2}\/\d{2}\//.test(url);
+// Index-/Übersichts-Form: Pfad endet auf „/" (Startseite, Rubrik-Wurzel, Kategorieseite).
+// Solche Seiten tragen oft das JSON-LD/og:type ihres TOP-ARTIKELS — das Signal allein darf
+// sie deshalb NIE zum Artikel machen: faz.net selbst + ~100 FAZ-Sektionsseiten liefen so als
+// „Artikel" mit der rotierenden Schlagzeilenliste als Body (319 Phantom-Edits; 06.07.
+// bereinigt, 109 Zeilen). looksLikeArticle lehnt diese Form längst ab — der signal-Zweig
+// unten umging das.
+function isIndexUrl(url: string): boolean {
+  try { return /\/$/.test(new URL(url).pathname); } catch { return true; }
+}
 function classifyRendered(url: string, html: string): { kind: Kind; article: { title: string; teaser: string; body: string } | null } {
   const byUrl = classifyUrl(url);
   if (byUrl !== "article" && byUrl !== "unknown") return { kind: byUrl, article: null };
@@ -1528,8 +1537,9 @@ function classifyRendered(url: string, html: string): { kind: Kind; article: { t
 
   const art = looksLikeArticle(url) ? asArticle(html, url) : null;
   if (art) return { kind: "article", article: art };
-  // Paywall-Teaser/Block: trotzdem Artikel, wenn JSON-LD oder Datums-URL es ausweist (Metadaten via extractMeta).
-  if (signal || strongUrl) return { kind: "article", article: null };
+  // Paywall-Teaser/Block: trotzdem Artikel, wenn JSON-LD oder Datums-URL es ausweist (Metadaten
+  // via extractMeta) — außer die URL hat Index-Form (s. isIndexUrl: Signal stammt vom Top-Artikel).
+  if (!isIndexUrl(url) && (signal || strongUrl)) return { kind: "article", article: null };
   return { kind: "section", article: null };
 }
 
@@ -2016,7 +2026,13 @@ async function analyzeBacklog() {
             else {
               const cls = classifyRendered(item.url, html);
               if (cls.kind === "article") { await saveArticleFull(item.sid, item.url, html, rawHtml); ok++; }
-              else { await sb.from("pages").update({ kind: cls.kind }).eq("url", item.url); }
+              else {
+                await sb.from("pages").update({ kind: cls.kind }).eq("url", item.url);
+                // Ent-Artikelisierung: eine evtl. schon angelegte articles-Zeile mit-löschen
+                // (sonst bleibt ein Phantom-Edit-Sammler stehen — die FAZ-Hubs überlebten so
+                // ihre Demotion; enrich löscht längst). FK-CASCADE räumt den Anhang ab.
+                await sb.from("articles").delete().eq("url", item.url);
+              }
             }
           }
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
