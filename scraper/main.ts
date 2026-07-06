@@ -451,6 +451,16 @@ function cleanBody(body: string, url: string, title: string | null, dek: string 
   let b = body;
   let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
 
+  // JSON-LD-Blobs, die als ROHTEXT in den extrahierten Body lecken ({"@context":"…schema.org"…},
+  // z.B. BreadcrumbList/VideoObject auf n-tv-Videoseiten, Art. 897305). Nie Fließtext → per
+  // Klammer-Zählung exakt entfernen (Regex kann geschachtelte Objekte nicht sauber bounden).
+  for (let i = b.indexOf('{"@context"'); i >= 0; i = b.indexOf('{"@context"', i)) {
+    let depth = 0, j = i;
+    for (; j < b.length; j++) { if (b[j] === "{") depth++; else if (b[j] === "}" && --depth === 0) { j++; break; } }
+    if (depth !== 0) break; // abgeschnittener Blob → nicht raten
+    b = b.slice(0, i) + " " + b.slice(j);
+  }
+
   if (/(^|\.)bild\.de$/.test(host)) {
     // Kopf-Chrome: Bild klebt je Render mal <Überschrift><Bild-Caption>Foto: <Credit><DD.MM.YYYY
     // - HH:MM Uhr> VOR den Lauftext → reine Phantom-Edits, deren Diff komplett versiegelt und dann
@@ -468,6 +478,19 @@ function cleanBody(body: string, url: string, title: string | null, dek: string 
     b = b.replace(/BILD[\s\S]{0,400}?Foto:\s*[^/]{1,90}\/\s*BILD/g, " ");
     // Übrige Bild-Credits anderer Agenturen (ohne /BILD-Endung).
     b = b.replace(/\bFoto:\s*[^/]{1,90}\/\s*(dpa[a-z-]*|AFP|Getty[^,. ]*|Reuters|AP|action ?press|imago|picture alliance|ddp|epd|Bildagentur[^,. ]*)\b\.?/gi, " ");
+    // Credits OHNE Slash-vor-Agentur-Muster, die beim Foto-Tausch mit-rotieren (Art. 1084636):
+    // "Foto: Getty Images via AFP" und "Foto: <Name>/ZUMA/SplashNews.com". KEIN \b vor "Foto" —
+    // Bild klebt die Caption an den Satz davor („BesucherFoto:"), da gibt es keine Wortgrenze.
+    b = b.replace(/Foto:\s*Getty Images(?:\s+via\s+AFP)?/g, " ")
+         .replace(/Foto:\s*[^/]{1,60}\/ZUMA\/[\w.]{1,40}?\.com/g, " ");
+    // Social-Embed-Consent-Platzhalter (X/Twitter/Instagram …): erscheint/verschwindet je Render
+    // → Phantom-Edits (Art. 1084636). Fester Start- + Endmarker, Länge gedeckelt.
+    b = b.replace(/An dieser Stelle findest du Inhalte aus [\s\S]{0,700}?Weitere Infos finden Sie hier\.?/g, " ");
+    // Rotierendes Kaufberater-/Deals-Widget hinter "+++" (Prime-Day-/Commerce-Seiten, Art.
+    // 265266: die Produktliste "<Produkt>10,29 EUR<Produkt>249,95 EUR…" wird je Scan ein-/
+    // ausgeblendet → ±45-W-Pendel). Den Preis-Lauf entfernen, das "+++" selbst bleibt (= die
+    // stabile Ohne-Widget-Variante). Liveblog-"+++"-Zeilen tragen keine EUR-Preise → unberührt.
+    b = b.replace(/(\+\+\+)((?:(?!\+\+\+)[\s\S]){0,400}?\d+,\d{2}\s*EUR)+/g, "$1");
   }
 
   if (/(^|\.)n-tv\.de$/.test(host)) {
@@ -487,8 +510,19 @@ function cleanBody(body: string, url: string, title: string | null, dek: string 
     // regionen zuerst, „Sachsen-Anhalt" vor „Sachsen").
     const REGION = /(?:Baden-Württemberg|Berlin & Brandenburg|Hamburg & Schleswig-Holstein|Mecklenburg-Vorpommern|Niedersachsen & Bremen|Nordrhein-Westfalen|Rheinland-Pfalz & Saarland|Sachsen-Anhalt|Sachsen|Thüringen|Bayern|Hessen)[A-ZÄÖÜ]/g;
     const hits: number[] = []; let mm: RegExpExecArray | null;
-    while ((mm = REGION.exec(b)) !== null) { hits.push(mm.index); if (hits.length > 3) break; }
-    if (hits.length >= 2 && hits[1] - hits[0] < 400) b = b.slice(0, hits[0]);
+    while ((mm = REGION.exec(b)) !== null) { hits.push(mm.index); if (hits.length > 40) break; }
+    // Ab dem ERSTEN DICHTEN PAAR kappen — nicht stur hits[0]/hits[1] prüfen: bei Regional-
+    // Artikeln ist der EIGENE Sektions-Präfix („SachsenZugausfälle …") Treffer Nr. 1 und liegt
+    // weit vor dem rotierenden Block am Ende → die alte Prüfung feuerte nie, der Artikel
+    // sammelte 24 Phantom-Edits durch rotierende Regional-Schlagzeilen (Art. 867391).
+    for (let i = 0; i + 1 < hits.length; i++) {
+      if (hits[i + 1] - hits[i] < 400) { b = b.slice(0, hits[i]); break; }
+    }
+    // Video-„Empfehlungen"-Karussell am Ende (rotiert je Scan → Dauer-Phantom-Edits, Art.
+    // 897305): „Empfehlungen<M:SS><Schlagzeile>…Mehr Inhalte anzeigen" bis zum Ende kappen.
+    const emp = b.search(/Empfehlungen\d{1,2}:\d{2}/);
+    if (emp > 0 && /Mehr Inhalte anzeigen\s*$/.test(b)) b = b.slice(0, emp);
+    b = b.replace(/Mehr Inhalte anzeigen\s*$/, " ");
   }
 
   if (/(^|\.)faz\.net$/.test(host)) {
