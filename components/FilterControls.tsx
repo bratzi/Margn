@@ -28,7 +28,7 @@ export default function FilterControls() {
     f.activeArr.length !== f.sources.length || f.status !== "all" || f.paywall !== "all" ||
     f.author !== "all" || f.atype !== "all" || f.topics.length > 0 || f.subcats.length > 0 ||
     f.keyword !== "all" || f.lang !== "all" || f.changed !== "all" || f.depth !== "all" ||
-    f.search.trim().length > 0;
+    f.search.trim().length > 0 || f.searchTerms.length > 0;
 
   return (
     <div className="filters">
@@ -40,19 +40,39 @@ export default function FilterControls() {
         <div className="fsearch">
           <svg className="fsearch-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
           <input type="search" value={f.search} onChange={(e) => f.setSearch(e.target.value)} spellCheck={false}
+            onKeyDown={(e) => {
+              // Enter übernimmt den Begriff als eigenständigen Such-Chip und leert das Feld
+              // für den nächsten — so lassen sich MEHRERE Suchen zugleich anwenden.
+              if (e.key === "Enter" && f.search.trim().length >= 2) { e.preventDefault(); f.addSearchTerm(f.search); f.setSearch(""); }
+            }}
             placeholder="Titel, Teaser, Schlagwort, URL …" aria-label="Volltextsuche" />
           {f.search && <button className="fsearch-x" onClick={() => f.setSearch("")} aria-label="Suche löschen" title="Suche löschen">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>}
         </div>
+        {f.searchTerms.length > 0 && (
+          <div className="fsearch-chips">
+            {f.searchTerms.map((t) => {
+              const n = f.termCounts.get(t);
+              return (
+                <button key={t} className="fchip" onClick={() => f.removeSearchTerm(t)} title={`Suche „${t}" entfernen`}>
+                  <span className="fchip-q">{t}</span>
+                  <span className="fchip-n">{n == null ? "…" : `${n.toLocaleString("de-DE")}${n >= 1200 ? "+" : ""}`}</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              );
+            })}
+          </div>
+        )}
         {f.search.trim().length >= 2 && (
           <div className="fsearch-hint">
             {f.searchPending ? "sucht …"
-              : f.searchCount != null ? `${f.searchCount.toLocaleString("de-DE")}${f.searchCount >= 1200 ? "+" : ""} Treffer in Titel, Teaser, Schlagwörtern & Rubriken`
+              : f.searchCount != null ? `${f.searchCount.toLocaleString("de-DE")}${f.searchCount >= 1200 ? "+" : ""} Treffer in Titel, Teaser, Schlagwörtern & Rubriken · ⏎ übernimmt als Filter`
               : ""}
           </div>
         )}
         {f.search.trim().length === 1 && <div className="fsearch-hint">mind. 2 Zeichen</div>}
+        {f.searchTerms.length > 1 && !f.search.trim() && <div className="fsearch-hint">Mehrere Begriffe wirken ODER-verknüpft (Treffer zu irgendeinem Begriff).</div>}
       </div>
 
       {anyActive && (

@@ -26,6 +26,7 @@ export default function FilterPills() {
   const prettyRaw = (c: string) => c.split("/").map((p) => p.replace(/[-_]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase())).join(" · ");
   for (const c of f.subcats) pills.push({ id: `sc-${c}`, label: `↳ ${subLabel.get(c) ?? prettyRaw(c)}`, on: () => f.toggleSubcat(c) });
   if (f.keyword !== "all") pills.push({ id: "kw", label: `#${f.keyword}`, on: () => f.setKeyword("all") });
+  for (const t of f.searchTerms) pills.push({ id: `search-${t}`, label: `🔎 „${t}"`, on: () => f.removeSearchTerm(t) });
   if (f.search.trim()) pills.push({ id: "search", label: `🔎 „${f.search.trim()}"`, on: () => f.setSearch("") });
   if (f.lang !== "all") pills.push({ id: "lg", label: f.lang === "de" ? "🇩🇪 DE" : "🇫🇷 FR", on: () => f.setLang("all") });
   const fullRange = f.rangeIdx.from === 0 && f.rangeIdx.to === f.days.length - 1;

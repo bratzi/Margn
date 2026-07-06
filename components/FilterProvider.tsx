@@ -107,6 +107,10 @@ type Ctx = {
   keyword: string; setKeyword: (v: string) => void;
   // Volltextsuche über alle Eigenschaften (Titel/URL/Teaser/Thema/Schlagwörter/Rubriken/Inhalt).
   search: string; setSearch: (v: string) => void; searchPending: boolean; searchCount: number | null;
+  // MEHRFACH-SUCHE: per Enter übernommene Begriffe. Jeder Begriff wird eigenständig gesucht,
+  // die Treffermengen sind ODER-verknüpft (Vereinigung) — mehrere Suchen zugleich anwenden.
+  searchTerms: string[]; addSearchTerm: (t: string) => void; removeSearchTerm: (t: string) => void;
+  termCounts: Map<string, number | null>;
   lang: string; setLang: (v: string) => void;
   // Stille Änderungen (revision_count) — Kernfeature des Observatoriums
   changed: string; setChanged: (v: string) => void;
@@ -158,6 +162,13 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [subOpts, setSubOpts] = useState<SubOpt[]>([]);
   const [keyword, setKeyword] = useState("all");
   const [search, setSearch] = useState("");
+  const [searchTerms, setSearchTerms] = useState<string[]>([]);
+  const addSearchTerm = useCallback((t: string) => {
+    const v = t.trim();
+    if (v.length < 2) return;
+    setSearchTerms((p) => (p.some((x) => x.toLowerCase() === v.toLowerCase()) ? p : [...p, v]));
+  }, []);
+  const removeSearchTerm = useCallback((t: string) => setSearchTerms((p) => p.filter((x) => x !== t)), []);
   // Unterthemen bleiben beim Topic-Wechsel erhalten — sie sind über die Filter-Pills
   // jederzeit sichtbar und einzeln entfernbar.
   const toggleTopic = (t: string) => setTopics((p) => p.includes(t) ? p.filter((x) => x !== t) : [...p, t]);
@@ -204,6 +215,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     try {
       const f = JSON.parse(localStorage.getItem("margn-filters") || "{}");
       if (f.status) setStatus(f.status);
+      if (Array.isArray(f.searchTerms)) setSearchTerms(f.searchTerms.filter((x: unknown) => typeof x === "string" && (x as string).length >= 2));
       if (f.paywall) setPaywall(f.paywall);
       if (f.atype) setAtype(f.atype);
       if (f.author) setAuthor(f.author);
@@ -242,10 +254,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!sources.length) return;
     try {
       localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis,
+        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, searchTerms,
       }));
     } catch {}
-  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, sources.length]);
+  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, searchTerms, sources.length]);
 
   const nn = (v: string) => (v === "all" ? null : v);
 
@@ -373,12 +385,46 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     return () => { cancelled = true; clearTimeout(t); };
   }, [search, active]);
 
+  // MEHRFACH-SUCHE: jeder Chip-Begriff wird eigenständig per RPC gesucht (parallel, mit einem
+  // Kaltstart-Retry wie die Live-Suche). Ergebnis je Begriff gecacht in termIds.
+  const [termIds, setTermIds] = useState<Map<string, number[]>>(new Map());
+  useEffect(() => {
+    if (!searchTerms.length) { setTermIds(new Map()); return; }
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(searchTerms.map(async (t): Promise<[string, number[]]> => {
+        for (let attempt = 0; ; attempt++) {
+          const { data, error } = await supabase.rpc("search_articles", { p_q: t, p_sources: active.size ? [...active] : null, p_limit: 1200 });
+          if (!error) return [t, (data ?? []).map((r: any) => r.article_id)];
+          if (attempt >= 1) return [t, []];
+          await new Promise((res) => setTimeout(res, 500));
+        }
+      }));
+      if (!cancelled) setTermIds(new Map(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [searchTerms.join(" "), active]);
+  // Trefferzahl je Chip (null = lädt noch) — fürs Chip-Label im Filterpanel.
+  const termCounts = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const t of searchTerms) m.set(t, termIds.has(t) ? termIds.get(t)!.length : null);
+    return m;
+  }, [searchTerms.join(" "), termIds]);
+  // Chips + Live-Eingabe wirken zusammen als EIN Such-Filter: ODER-verknüpft (Vereinigung).
+  const combinedSearchIds = useMemo(() => {
+    if (!searchTerms.length) return searchIds;
+    const u = new Set<number>();
+    for (const t of searchTerms) for (const id of termIds.get(t) ?? []) u.add(id);
+    if (searchIds) for (const id of searchIds) u.add(id);
+    return [...u];
+  }, [searchIds, termIds, searchTerms.join(" ")]);
+
   // Keyword- UND Such-IDs zu EINER ID-Restriktion verschmelzen (Schnittmenge; null = keine).
   const effKwIds = useMemo(() => {
-    if (kwIds == null) return searchIds;
-    if (searchIds == null) return kwIds;
-    const ss = new Set(searchIds); return kwIds.filter((x) => ss.has(x));
-  }, [kwIds, searchIds]);
+    if (kwIds == null) return combinedSearchIds;
+    if (combinedSearchIds == null) return kwIds;
+    const ss = new Set(combinedSearchIds); return kwIds.filter((x) => ss.has(x));
+  }, [kwIds, combinedSearchIds]);
   const kwIdSet = useMemo(() => (effKwIds ? new Set(effKwIds) : null), [effKwIds]);
   const searchCount = useMemo(() => (search.trim().length < 2 ? null : (searchIds?.length ?? null)), [search, searchIds]);
 
@@ -483,7 +529,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // Alle Filter auf Ausgangszustand (Quellen wieder alle aktiv).
   const resetAll = () => {
     setStatus("all"); setPaywall("all"); setAtype("all"); setAuthor("all");
-    setTopics([]); setSubcats([]); setKeyword("all"); setSearch(""); setLang("all");
+    setTopics([]); setSubcats([]); setKeyword("all"); setSearch(""); setSearchTerms([]); setLang("all");
     setChanged("all"); setDepth("all"); setPinpoint(null);
     _setWindowDays(60); setRangeIdx({ from: 0, to: 59 }); _setTimeAxis("published");
     setActive(new Set(sources.map((s) => s.id)));
@@ -493,7 +539,8 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
     topics, toggleTopic, setTopics, subcats, toggleSubcat, keyword, setKeyword,
-    search, setSearch, searchPending, searchCount, lang, setLang,
+    search, setSearch, searchPending, searchCount,
+    searchTerms, addSearchTerm, removeSearchTerm, termCounts, lang, setLang,
     changed, setChanged, depth, setDepth, resetAll,
     topicOpts, keywordOpts, subOpts, catTree,
     corpus, corpusReady, reloadCorpus, refreshing, corpusLoadedAt, corpusError, kwIds: effKwIds, kwIdSet, subPats,

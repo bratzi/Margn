@@ -155,6 +155,7 @@ export default function TimeRangeFilter() {
     return (
       <div className="trf trf-mini">
         <button className="rail-toggle" onClick={() => setTrfOpen(true)} title="Zeitstrahl aufklappen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 18V9M9 18V5M14 18v-7M19 18v-4" /></svg></button>
+        <span className="filter-tag">Filter</span>
         <span className="trf-mini-label">{TIME_AXIS_LABEL[f.timeAxis]}: <b>{rangeIdx.from === rangeIdx.to ? fmtDay(days[rangeIdx.from]) : `${fmtDay(days[rangeIdx.from])} – ${fmtDay(days[rangeIdx.to])}`}</b></span>
       </div>
     );
@@ -164,6 +165,7 @@ export default function TimeRangeFilter() {
     <div className="trf trf-open" style={{ height: h }}>
       <div className="trf-resize" onPointerDown={(e) => start("resize", e)} title="Höhe ziehen"><span /></div>
       <div className="trf-head">
+        <span className="filter-tag">Filter</span>
         <div className="trf-title">{f.timeAxis === "seen" ? "Zeitraum · Zuletzt gesehen" : "Veröffentlichungs-Zeitraum"} <span className="trf-range">{live.from === live.to ? fmtDay(days[live.from]) : `${fmtDay(days[live.from])} – ${fmtDay(days[live.to])}`}</span></div>
         <div className="seg seg-xs trf-axissel">
           <button className={f.timeAxis === "published" ? "on" : ""} onClick={() => f.setTimeAxis("published")} title="Nach Veröffentlichungsdatum des Verlags">Veröffentlicht</button>

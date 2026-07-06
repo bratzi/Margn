@@ -24,6 +24,12 @@
   --teal:  #0C8F86; --teal-sub:  rgba(12,143,134,.10);
   --info:  #3D63DD; --info-sub:  rgba(61,99,221,.10);
 
+  /* Filter-Flächen: EIN gemeinsamer Look für alles, was filtert (Sidebar-Panel + Zeitstrahl),
+     damit sich Filter optisch klar vom Dashboard-INHALT abheben. Leicht akzentgetönt;
+     löst sich über var(--accent)/var(--surface) automatisch für Light UND Dark auf. */
+  --filter-bg:   color-mix(in srgb, var(--accent) 4.5%, var(--surface));
+  --filter-line: color-mix(in srgb, var(--accent) 24%, var(--line-2));
+
   /* 4px-Raster */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s6:24px; --s8:32px;
   --r-sm:6px; --r:8px; --r-lg:12px;
@@ -87,7 +93,13 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
   border-right: 1px solid var(--line); position: sticky; top: 0; height: 100vh;
   display: flex; flex-direction: column; padding: 20px 14px; gap: 4px; overflow: hidden;
 }
-.sidebar .filters { flex: 1 1 auto; min-height: 80px; overflow-y: auto; overflow-x: hidden; margin: 2px -4px 0; padding: 0 4px; }
+/* Filter-Bereich als eigene, getönte Zone — hebt sich vom Navigations-/Inhaltsbereich ab. */
+.sidebar .filters {
+  flex: 1 1 auto; min-height: 80px; overflow-y: auto; overflow-x: hidden;
+  margin: 2px -4px 0; padding: 10px 10px 12px;
+  background: var(--filter-bg); border: 1px solid var(--filter-line); border-radius: var(--r-lg);
+}
+.nav-label-filter { color: var(--accent); }
 .sidebar .filters::-webkit-scrollbar { width: 7px; }
 .sidebar .filters::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -371,7 +383,10 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .pill:hover { background: var(--accent); color: white; border-color: var(--accent); }
 
 /* ---------- Zeit-Range-Filter (fix unten, volle Breite, höhenverstellbar) ---------- */
-.trf { position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 25; background: var(--surface); border-top: 1px solid var(--line-2); box-shadow: 0 -6px 24px rgba(0,0,0,.07); }
+/* Zeitstrahl = Filter-Fläche: gleiche Tönung + Rahmenfarbe wie das Filter-Panel der Sidebar,
+   damit klar ist, dass hier gefiltert wird — nicht Inhalt gezeigt. */
+.trf { position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 25; background: var(--filter-bg); border-top: 1px solid var(--filter-line); box-shadow: 0 -6px 24px rgba(0,0,0,.07); }
+.filter-tag { flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); background: var(--accent-sub); border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); border-radius: 5px; padding: 2px 7px 1px; }
 .trf-mini { display: flex; align-items: center; gap: 10px; padding: 9px 16px; }
 .trf-mini-label { font-size: 12.5px; color: var(--muted); }
 .trf-mini-label b { color: var(--ink); }
@@ -1441,3 +1456,13 @@ a.art-title:hover { color: var(--accent); text-decoration: underline; }
   justify-content: center; border: 0; background: none; color: var(--faint); cursor: pointer; border-radius: 5px; }
 .fsearch-x:hover { color: var(--ink); background: var(--surface-2); }
 .fsearch-hint { font-size: 10.5px; color: var(--faint); margin-top: 5px; line-height: 1.45; }
+/* Mehrfach-Suche: per Enter übernommene Begriffe als entfernbare Chips unter dem Suchfeld. */
+.fsearch-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.fchip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 7px 3px 9px;
+  font: inherit; font-size: 11.5px; font-weight: 600; color: var(--accent); cursor: pointer;
+  background: var(--accent-sub); border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); border-radius: 999px;
+  transition: background .12s, border-color .12s, color .12s; }
+.fchip:hover { border-color: var(--red); color: var(--red); background: var(--red-sub); }
+.fchip-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchip-n { font-weight: 700; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fchip svg { flex-shrink: 0; opacity: .75; }
