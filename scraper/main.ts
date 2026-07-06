@@ -1283,10 +1283,15 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   if (list.length && !DRY_RUN) {
     try {
       for (let i = 0; i < list.length; i += 200) {
+        const batch = list.slice(i, i + 200).map((url) => canonUrl(url));
         await sb.from("pages").upsert(
-          list.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), kind: "article", depth: 1 })),
+          batch.map((url) => ({ source_id: src.id, url, kind: "article", depth: 1 })),
           { onConflict: "url", ignoreDuplicates: true },
         );
+        // Link-Sichtung protokollieren: pages.last_seen = „zuletzt verlinkt/gelistet gesehen".
+        // ignoreDuplicates überspringt Bekanntes komplett — ohne diesen Bump wüsste niemand,
+        // dass ein alter Artikel noch geführt wird (Basis der Re-Scan-Stufe „noch verlinkt").
+        await sb.from("pages").update({ last_seen: new Date().toISOString() }).in("url", batch);
       }
     } catch (e) { console.error("SITEMAP-FEHLER:", src.base_url, (e as Error).message); }
   }
@@ -1532,14 +1537,28 @@ function classifyRendered(url: string, html: string): { kind: Kind; article: { t
 const pageId = new Map<string, number>(); // url -> pages.id (laufzeitweiter Cache)
 
 // Entdeckte Links als Knoten anlegen (nur neu; bestehende Klassifikation NICHT überschreiben).
+// ZUSÄTZLICH jede Artikel-Link-SICHTUNG protokollieren: pages.last_seen = „zuletzt verlinkt
+// gesehen". Vorher wurden bekannte URLs komplett übersprungen — niemand wusste, dass ein
+// alter Artikel noch auf Startseite/Ressorts steht, und hinter dem RESCAN_DAYS-Horizont
+// fiel er FÜR IMMER aus der Beobachtung (Art. 207366: 12 Tage ungescannt trotz
+// Startseiten-Platzierung). Der Bump ist die Basis der Re-Scan-Stufe „noch verlinkt".
+const bumpedThisRun = new Set<string>();
 async function ensureNodes(sourceId: number, urls: string[], depth: number) {
-  const fresh = [...new Set(urls.map(canonUrl))].filter((u) => !pageId.has(u));
-  if (!fresh.length) return;
-  const rows = fresh.map((url) => ({ source_id: sourceId, url, kind: classifyUrl(url), depth }));
-  await sb.from("pages").upsert(rows, { onConflict: "url", ignoreDuplicates: true });
-  for (let i = 0; i < fresh.length; i += 200) {
-    const { data } = await sb.from("pages").select("id,url").in("url", fresh.slice(i, i + 200));
-    for (const p of data ?? []) pageId.set(p.url, p.id);
+  const all = [...new Set(urls.map(canonUrl))];
+  const fresh = all.filter((u) => !pageId.has(u));
+  if (fresh.length) {
+    const rows = fresh.map((url) => ({ source_id: sourceId, url, kind: classifyUrl(url), depth }));
+    await sb.from("pages").upsert(rows, { onConflict: "url", ignoreDuplicates: true });
+    for (let i = 0; i < fresh.length; i += 200) {
+      const { data } = await sb.from("pages").select("id,url").in("url", fresh.slice(i, i + 200));
+      for (const p of data ?? []) pageId.set(p.url, p.id);
+    }
+  }
+  // Nur Artikel-Links, je Lauf einmal (Navigation/Hubs stehen auf jeder Seite → sparen).
+  const toBump = all.filter((u) => classifyUrl(u) === "article" && !bumpedThisRun.has(u));
+  for (const u of toBump) bumpedThisRun.add(u);
+  for (let i = 0; i < toBump.length; i += 200) {
+    await sb.from("pages").update({ last_seen: new Date().toISOString() }).in("url", toBump.slice(i, i + 200));
   }
 }
 
@@ -1696,10 +1715,13 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
         const depth = Math.min(s.depth + 1, MAX_DEPTH);
         try {
           for (let i = 0; i < arts.length; i += 200) {
+            const batch = arts.slice(i, i + 200).map((url) => canonUrl(url));
             await sb.from("pages").upsert(
-              arts.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), kind: "article", depth })),
+              batch.map((url) => ({ source_id: src.id, url, kind: "article", depth })),
               { onConflict: "url", ignoreDuplicates: true },
             );
+            // Link-Sichtung protokollieren (s. ensureNodes): Feed führt den Artikel noch.
+            await sb.from("pages").update({ last_seen: new Date().toISOString() }).in("url", batch);
           }
         } catch (e) { console.error("FEED-FEHLER:", s.url, (e as Error).message); }
       }
@@ -1917,6 +1939,27 @@ async function analyzeBacklog() {
       for (const t of tiers) {
         if (remaining <= 0) break;
         remaining -= await reserve(t.loH, t.hiH, t.dueH, Math.min(remaining, Math.ceil(rescanBudget * t.weight)));
+      }
+      // STUFE „NOCH VERLINKT" (altersUNabhängig): Artikel, die die Discovery kürzlich noch
+      // verlinkt sah (pages.last_seen — Startseite/Ressorts/Feeds/Sitemap, s. ensureNodes),
+      // deren letzter SCAN aber ≥24 h zurückliegt. Ohne diese Stufe fiel alles hinter dem
+      // RESCAN_DAYS-Horizont FÜR IMMER aus der Beobachtung — auch was der Verlag weiter
+      // prominent führt (Art. 207366: 12 Tage ungescannt trotz Startseiten-Platzierung;
+      // Messung 06.07.: ~75 solcher Artikel allein auf den 5 Startseiten). Nebeneffekt:
+      // schützt lebendige Artikel vor der 30-Tage-Retention (löscht nach articles.last_seen).
+      // Kadenz 1×/Tag genügt — das heiße Edit-Fenster decken die Alters-Stufen ab.
+      if (remaining > 0) {
+        const { data, error } = await sb.rpc("linked_stale_articles", {
+          src_ids: activeIds,
+          seen_since: new Date(now - 26 * H).toISOString(),
+          due_before: new Date(now - 24 * H).toISOString(),
+          lim: remaining + 100,
+        });
+        if (error) console.error("RE-SCAN-VERLINKT-FEHLER:", error.message);
+        for (const r of (data ?? []) as any[]) {
+          if (remaining <= 0) break;
+          if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); remaining--; }
+        }
       }
       // Sicherheitsnetz: Restbudget mit dem global Überfälligsten im Gesamtfenster füllen
       // (alte Strategie) — verhindert brachliegendes Budget in ruhigen Läufen.
