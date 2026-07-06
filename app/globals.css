@@ -88,17 +88,14 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 
 /* ---------- App shell ---------- */
 .app { display: flex; min-height: 100vh; }
+/* Das GANZE Sidebar-Panel in der Filter-Tönung (gleiche Fläche wie der Zeitstrahl unten) —
+   so grenzt sich der komplette Steuer-/Filterbereich klar vom Dashboard-INHALT ab. */
 .sidebar {
-  width: var(--sidebar-w); flex-shrink: 0; background: var(--sidebar);
-  border-right: 1px solid var(--line); position: sticky; top: 0; height: 100vh;
+  width: var(--sidebar-w); flex-shrink: 0; background: var(--filter-bg);
+  border-right: 1px solid var(--filter-line); position: sticky; top: 0; height: 100vh;
   display: flex; flex-direction: column; padding: 20px 14px; gap: 4px; overflow: hidden;
 }
-/* Filter-Bereich als eigene, getönte Zone — hebt sich vom Navigations-/Inhaltsbereich ab. */
-.sidebar .filters {
-  flex: 1 1 auto; min-height: 80px; overflow-y: auto; overflow-x: hidden;
-  margin: 2px -4px 0; padding: 10px 10px 12px;
-  background: var(--filter-bg); border: 1px solid var(--filter-line); border-radius: var(--r-lg);
-}
+.sidebar .filters { flex: 1 1 auto; min-height: 80px; overflow-y: auto; overflow-x: hidden; margin: 2px -4px 0; padding: 0 4px; }
 .nav-label-filter { color: var(--accent); }
 .sidebar .filters::-webkit-scrollbar { width: 7px; }
 .sidebar .filters::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
