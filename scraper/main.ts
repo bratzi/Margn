@@ -630,7 +630,7 @@ type PrevState = { title: string | null; content_hash: string | null; para_fps: 
 
 // Spalten der `articles`-Basistabelle, die wir je Scan vergleichen, um UNSICHTBARE Edits zu
 // finden. Müssen in BEIDEN prev-Selects (saveArticleFull + analyzeBacklog) mitgelesen werden.
-const PREV_COLS = "title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at,first_seen,description,og_image,author_status,topic";
+const PREV_COLS = "title,content_hash,para_fps,body_words,extension_count,edit_count,revision_count,article_type,scan_count,scan_times,paywalled,published_at,modified_at,first_seen,description,og_image,author_status,topic";
 
 type MetaNow = { description: string | null; og_image: string | null; paywalled: boolean | null; author_status: string | null; topic: string | null };
 type MetaEdit = { field: string; old: string | null; new: string | null };
@@ -743,8 +743,10 @@ async function trackChanges(articleId: number, prev: PrevState, newTitle: string
   // Als unsichtbare Änderung mit-tracken. ≥60 s Differenz, damit Format-/Sekundenjitter nicht zählt.
   // WICHTIG (alle Verlage): gegen den ZULETZT von der SEITE gemeldeten Wert prüfen (letztes
   // Snapshot-`pubdate_new`), NICHT gegen die kanonische `published_at`. Sonst feuert eine STABILE
-  // Quellen-Uneinigkeit (Sitemap-Zeit ≠ Seiten-Zeit; Discovery setzt published_at je Lauf zurück)
-  // bei JEDEM Scan erneut → identisch aussehende Pseudo-„Datums-Edits".
+  // Quellen-Uneinigkeit (Sitemap-Zeit ≠ Seiten-Zeit) bei JEDEM Scan erneut → identisch
+  // aussehende Pseudo-„Datums-Edits". newPub ist bei Verlags-Bumps der ROHE Seitenwert
+  // (s. freezePubDate) — so bleibt das Re-Dating im Verlauf sichtbar, obwohl published_at
+  // eingefroren ist.
   let pubBaseline = prevPub;
   if (!!prevPub && !!newPub && Math.abs(Date.parse(newPub) - Date.parse(prevPub)) >= 60000) {
     const { data: lastPd } = await sb.from("article_snapshots")
@@ -1005,6 +1007,40 @@ function isStaleForArchive(meta: { published_at: string | null; published_precis
   return Number.isFinite(freshest) && (Date.now() - freshest) / 864e5 > ARTICLE_MAX_AGE_DAYS;
 }
 
+// published_at ist nach der Erstbefüllung EINGEFROREN. Verlage re-datieren Timelines, Podcast-
+// Folgen, Deals und Evergreens laufend („Datums-Bump") — ohne Freeze erschienen sie im Dashboard
+// immer wieder als neu veröffentlicht und das Original ginge verloren (FAZ-Reisewarnungen:
+// +8 Monate verschluckt). Vorwärts gemeldete Seiten-Daten wandern nach modified_at („Aktualisiert"
+// auf der Detailseite); rückwärts gemeldete sind meist Misextraktion (Mehrfach-Datums-Signale,
+// v.a. n-tv) und werden verworfen. Nur die autoritative News-Sitemap darf nach FRÜHER verfeinern
+// (RPC apply_sitemap_dates, LEAST). Rückgabe = Datum fürs Snapshot-Tracking: beim Vorwärts-Bump
+// der ROHE Seitenwert, damit trackChanges das Re-Dating als „Datum still geändert" protokolliert,
+// sonst der kanonische. Genutzt in saveArticleFull + enrich.
+function freezePubDate(meta: ReturnType<typeof extractMeta>, prev: any): string | null {
+  const pageRaw = meta.published_precise ? meta.published_at : null;
+  let track = meta.published_at ?? null;
+  if (prev?.published_at) {
+    if (pageRaw && Date.parse(pageRaw) > Date.parse(prev.published_at) + 60000) {
+      if (!meta.modified_at || Date.parse(pageRaw) > Date.parse(meta.modified_at)) meta.modified_at = pageRaw;
+      track = pageRaw;
+    } else {
+      track = prev.published_at;
+    }
+    meta.published_at = prev.published_at;
+  } else if (meta.published_at) {
+    // Erstbefüllung: nie NACH der Ersterfassung (der Artikel existierte ja schon; sonst erschiene
+    // im Verlauf ein Edit VOR der „Veröffentlichung") — obere Schranke first_seen bzw. jetzt.
+    const seenCap = prev?.first_seen ?? new Date().toISOString();
+    if (Date.parse(meta.published_at) > Date.parse(seenCap)) meta.published_at = seenCap;
+    track = meta.published_at;
+  }
+  // modified_at nie durch NULL/Älteres ersetzen — Seiten melden dateModified nicht bei jedem
+  // Scan, und ein einmal erfasster Bump soll nicht wieder verschwinden.
+  if (prev?.modified_at && (!meta.modified_at || Date.parse(meta.modified_at) < Date.parse(prev.modified_at)))
+    meta.modified_at = prev.modified_at;
+  return track;
+}
+
 async function saveArticleFull(sourceId: number, url: string, html: string, rawHtml: string | null = null) {
   const discoveredUrl = url;
   url = canonUrl(url); // n-tv-Ticker-Varianten → Kanonik, damit prev/upsert/Tracking konsistent EINE Zeile treffen
@@ -1026,28 +1062,11 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
     return null;
   }
   meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
-  // Präzises Datum (z.B. aus News-Sitemap) NICHT durch den URL-Mittags-Notnagel überschreiben.
-  if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
-  // published_at NIE RÜCKWÄRTS wandern lassen: viele Seiten (v.a. n-tv) tragen mehrere Datums-
-  // Signale (datePublished, „Aktualisiert", Ticker-Erstmeldung) → extractMeta zieht je Scan mal
-  // ein FRÜHERES → sonst Rückwärts-Datums-Phantome (vom Display via realDateShift versteckt, aber
-  // Snapshot-/Edit-Müll). Ein Erscheinungsdatum geht nicht rückwärts → auf den jüngeren Wert klemmen.
-  if (meta.published_precise && meta.published_at && (prev as any)?.published_at
-      && Date.parse(meta.published_at) < Date.parse((prev as any).published_at)) {
-    meta.published_at = (prev as any).published_at;
-  }
-  // …aber auch NIE nach der Ersterfassung: wir haben den Artikel ja schon gesehen. Die Nie-Rückwärts-
-  // Klemme oben lässt pubdate sonst über first_seen hinausdriften (Verlag re-datiert vorwärts /
-  // „Aktualisiert" als published fehlgelesen) → im Änderungsverlauf erschiene ein Edit VOR der
-  // „Veröffentlichung" (unmöglich). Obere Schranke = first_seen (bzw. jetzt beim Erstkontakt).
-  if (meta.published_at) {
-    const seenCap = (prev as any)?.first_seen ?? new Date().toISOString();
-    if (Date.parse(meta.published_at) > Date.parse(seenCap)) meta.published_at = seenCap;
-  }
+  const pubTrack = freezePubDate(meta, prev as any); // published_at einfrieren, Bump → modified_at + Verlauf
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   const tb = trackBody(html, url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null, meta.description ?? null);
-  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
+  if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, url, tb.isLive, (prev as any)?.published_at ?? null, pubTrack, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
   return id;
 }
 
@@ -1297,9 +1316,10 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   }
   // Präzise Veröffentlichungszeiten aus der Sitemap vorab in `articles` einpflegen
   // ({source_id,url,published_at} — Rest nullable). So hat z.B. Le Monde (Render → 402)
-  // die EXAKTE Zeit statt nur den URL-Mittags-Notnagel. publication_date ist autoritativ
-  // → überschreibt (auch den Notnagel); lastmod (= Änderungszeit) nur füllen, nie
-  // überschreiben. precise-sticky in saveArticleFull/enrich schützt den Wert beim Render.
+  // die EXAKTE Zeit statt nur den URL-Mittags-Notnagel. publication_date ist autoritativ,
+  // darf ein VORHANDENES Datum aber nur nach FRÜHER verfeinern (Freeze — Verlage bumpen
+  // Timelines/Podcasts/Deals täglich auf „heute"); lastmod (= Änderungszeit) nur füllen,
+  // nie überschreiben. freezePubDate in saveArticleFull/enrich schützt den Wert beim Render.
   const dated = list.filter((u) => pubDates.has(u));
   if (dated.length && !DRY_RUN) {
     // (1) NEUE Stubs anlegen — MIT provisorischem Ressort aus der URL. Sonst hätten
@@ -1314,18 +1334,21 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
         );
       }
     };
-    // (2) Präzises Datum NUR auf bestehende Zeilen überschreiben (kein topic → Render-Topic bleibt).
-    const overwriteDates = async (urls: string[]) => {
+    // (2) Präzises Datum auf bestehende Zeilen ANWENDEN — published_at ist eingefroren: die RPC
+    //     verfeinert nur nach FRÜHER (LEAST; präzisiert z.B. den Mittags-Notnagel). Ein NEUERES
+    //     Sitemap-Datum ist ein Verlags-Bump und landet in modified_at — vorher überschrieb dieser
+    //     Pfad das Original bei JEDEM Lauf (Haupt-Bumper: Artikel erschienen täglich als „neu").
+    const refineDates = async (urls: string[]) => {
       for (let i = 0; i < urls.length; i += 200) {
-        await sb.from("articles").upsert(
-          urls.slice(i, i + 200).map((url) => ({ source_id: src.id, url: canonUrl(url), published_at: pubDates.get(url)!.at })),
-          { onConflict: "url", ignoreDuplicates: false },
-        );
+        const { error } = await sb.rpc("apply_sitemap_dates", {
+          p: urls.slice(i, i + 200).map((url) => ({ url: canonUrl(url), at: pubDates.get(url)!.at })),
+        });
+        if (error) console.error("SITEMAP-DATUM-RPC-FEHLER:", src.base_url, error.message);
       }
     };
     try {
-      await insertStubs(dated);                                            // neue Stubs: URL-Topic + Datum
-      await overwriteDates(dated.filter((u) => pubDates.get(u)!.precise)); // publication_date → überschreibt (nur Datum)
+      await insertStubs(dated);                                          // neue Stubs: URL-Topic + Datum
+      await refineDates(dated.filter((u) => pubDates.get(u)!.precise));  // publication_date → LEAST bzw. modified_at
     } catch (e) { console.error("SITEMAP-DATUM-FEHLER:", src.base_url, (e as Error).message); }
   }
   console.log(`Sitemaps ${src.base_url}: ${files} Dateien gelesen, ${list.length} Artikel-URLs markiert (${dated.length} mit Datum)`);
@@ -2116,7 +2139,6 @@ async function enrichArticles(sources: Source[]) {
             .select(PREV_COLS)
             .eq("id", item.id).maybeSingle();
           meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
-          if (!meta.published_precise && (prev as any)?.published_at) meta.published_at = (prev as any).published_at;
           // Recency-Filter (wie saveArticleFull, frischestes Datum + kein Liveblog): noch nicht
           // verfolgte Alt-Artikel raus → Archiv parken.
           if (!(prev as any)?.content_hash && isStaleForArchive(meta, (prev as any)?.published_at, item.url)) {
@@ -2124,12 +2146,13 @@ async function enrichArticles(sources: Source[]) {
             await sb.from("articles").delete().eq("id", item.id);
             continue;
           }
+          const pubTrack = freezePubDate(meta, prev as any); // published_at einfrieren (wie saveArticleFull)
           const { authors, keywords, categories, published_precise, ...fields } = meta;
           void published_precise;
           await sb.from("articles").update({ ...fields, last_seen: new Date().toISOString(), scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) }).eq("id", item.id);
           await upsertDimensions(item.id, authors, keywords, categories);
           const tb = trackBody(html, item.url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null, meta.description ?? null);
-          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, item.url, tb.isLive, (prev as any)?.published_at ?? null, meta.published_at ?? null, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
+          if (tb) await trackChanges(item.id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, item.url, tb.isLive, (prev as any)?.published_at ?? null, pubTrack, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
           done++;
           if (done % 50 === 0) console.log(`  ${done}/${toEnrich.length} angereichert…`);
         } catch (e) { console.error("FEHLER:", item.url, (e as Error).message); }
