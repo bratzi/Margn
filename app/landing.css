@@ -692,6 +692,23 @@ html.lenis, html.lenis body { height: auto; }
 }
 
 /* ---------------------------------------------------------------- Abdeckung */
+.mg-next { margin-top: clamp(56px, 7vw, 104px); }
+.mg-next-badge {
+  display: inline-block; font-family: var(--mg-mono); font-size: 10px;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--mg-accent-2);
+  border: 1px solid rgba(110, 138, 255, 0.4); border-radius: 999px;
+  padding: 5px 12px; background: var(--mg-accent-sub); margin-bottom: 16px;
+}
+.mg-next-h {
+  font-family: var(--mg-display); font-weight: 400;
+  font-size: clamp(22px, 2.8vw, 36px); line-height: 1.25; margin: 0 0 14px;
+}
+.mg-srcs {
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  gap: clamp(12px, 1.6vw, 20px); margin-top: clamp(36px, 5vw, 64px);
+}
+@media (max-width: 1100px) { .mg-srcs { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 700px) { .mg-srcs { grid-template-columns: 1fr 1fr; } }
 .mg-pair {
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
   gap: clamp(18px, 3vw, 36px); margin-top: clamp(36px, 5vw, 64px);

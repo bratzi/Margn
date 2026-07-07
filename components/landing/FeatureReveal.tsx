@@ -71,12 +71,41 @@ function BenchPreview() {
 }
 
 function RadarPreview() {
-  const chips = ["Politik · Ausland", "Wirtschaft · Finanzen", "Sport · Fußball", "Kultur · Film", "Politique · International"];
+  const chips = ["Politik · Ausland", "Wirtschaft · Finanzen", "Sport · Fußball", "Kultur · Film", "Regional · Hessen"];
   return (
     <div className="pv pv-radar" aria-hidden>
       {chips.map((c, i) => (
         <span className="pv-chip" key={c} style={{ ["--d" as any]: `${i * 80}ms` }}>{c}</span>
       ))}
+    </div>
+  );
+}
+
+function TrendPreview() {
+  const rows: [string, number, string][] = [
+    ["Hitzewelle", 88, "+142%"], ["WM-Finale", 64, "+38%"], ["Koalition", 37, "−21%"],
+  ];
+  return (
+    <div className="pv pv-bench" aria-hidden>
+      {rows.map(([l, v, d], i) => (
+        <span className="pv-bench-row" key={l} style={{ ["--v" as any]: `${v}%`, ["--d" as any]: `${i * 90}ms` }}>
+          <b>{l}</b>
+          <i><u /></i>
+          <em className={d.startsWith("−") ? "dn" : "up"}>{d}</em>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RedatePreview() {
+  return (
+    <div className="pv pv-diff" aria-hidden>
+      <span className="pv-diff-meta">Verlag datiert um · Artikel wirkt „neu“</span>
+      <p className="pv-diff-line">
+        Veröffentlicht: <ins>31.10.2025</ins>, nicht <del>06.07.2026</del>
+      </p>
+      <span className="pv-diff-tag"><i /> Umdatierung als „Aktualisiert“ ausgewiesen</span>
     </div>
   );
 }
@@ -104,9 +133,13 @@ const FEATURES = [
   { n: "04", key: "bench", title: "Publizisten-Benchmark", tag: "Vergleich", preview: <BenchPreview />,
     text: "Volumen, Publikations-Tempo, Autoren-Transparenz: jede Quelle im direkten Vergleich — mit expliziter Vergleichsbasis statt schöner, leerer Zahlen." },
   { n: "05", key: "radar", title: "Unterthemen-Radar", tag: "Rubriken", preview: <RadarPreview />,
-    text: "Verlagseigene Rubriken wie Politik · Ausland oder Sport · Fußball, quellenübergreifend und mehrsprachig aus den URL-Strukturen abgeleitet." },
+    text: "Verlagseigene Rubriken wie Politik · Ausland oder Sport · Fußball, quellenübergreifend aus URL- und Seitenstruktur abgeleitet — bis hinunter auf Bundesland-Ebene." },
   { n: "06", key: "pulse", title: "Publikationsrhythmen", tag: "Zeitverlauf", preview: <PulsePreview />,
     text: "Publikationsrhythmen von Kalenderwochen bis auf Minuten zoombar. Ein Klick auf einen Datenpunkt filtert die Artikelliste exakt auf dieses Zeitfenster." },
+  { n: "07", key: "trends", title: "Keyword-Trends", tag: "Begriffskonjunktur", preview: <TrendPreview />,
+    text: "Welche Begriffe steigen im Nachrichtenstrom auf, welche verschwinden? Mehrere Suchbegriffe im Zeitverlauf — absolut oder als Anteil, Absteiger inklusive." },
+  { n: "08", key: "redate", title: "Datums-Forensik", tag: "Re-Dating", preview: <RedatePreview />,
+    text: "Verlage datieren Timelines, Podcast-Folgen und Ratgeber gern auf „heute“ um, damit sie neu wirken. margn bewahrt das originale Veröffentlichungsdatum und weist jede Verschiebung als Aktualisierung aus." },
 ];
 
 export default function FeatureReveal() {
@@ -117,7 +150,7 @@ export default function FeatureReveal() {
       <div className="mg-head">
         <p className="mg-overline">Funktionen</p>
         <h2 className="mg-h2" data-split>
-          Sechs Blicke <em>hinter</em> die Schlagzeile
+          Acht Blicke <em>hinter</em> die Schlagzeile
         </h2>
         <p className="mg-lede" data-reveal="0">
           Fahre über eine Funktion — rechts erscheint, was sie sichtbar macht.

@@ -27,12 +27,12 @@ const STEPS = [
   {
     n: "01",
     title: "Erfassen",
-    text: "Leitmedien aus mehreren Ländern werden stündlich erfasst — vollautomatisch und zurückhaltend. Weitere Märkte kommen laufend hinzu.",
+    text: "Fünf führende deutsche Leitmedien werden stündlich erfasst — vollautomatisch und zurückhaltend über Feeds, Sitemaps und behutsames Crawling.",
   },
   {
     n: "02",
     title: "Versionieren",
-    text: "Jeder Artikel wird bei jedem Scan verglichen. Änderungen an Titel und Text werden als Revision festgehalten — mit Zeitstempel.",
+    text: "Jeder Artikel wird bei jedem Scan verglichen. Änderungen an Titel, Text und Metadaten — bis zum still verschobenen Veröffentlichungsdatum — werden als Revision festgehalten, mit Zeitstempel.",
   },
   {
     n: "03",
@@ -327,7 +327,7 @@ export default function LandingPage() {
       {/* ---------------- Hero ---------------- */}
       <section className="mg-hero">
         <HeroCanvas />
-        <p className="mg-overline">Offenes Medienobservatorium · mehrsprachig</p>
+        <p className="mg-overline">Offenes Medienobservatorium · fünf deutsche Leitmedien</p>
         <h1 className="mg-h1">
           <W>Was</W> <W>Nachrichtenseiten</W>{" "}
           <W>
@@ -340,10 +340,10 @@ export default function LandingPage() {
           <W>sie</W> <W>publiziert</W> <W>haben.</W>
         </h1>
         <p className="mg-hero-sub">
-          margn beobachtet Leitmedien über Länder- und Sprachgrenzen hinweg,
-          versioniert jeden Artikel stündlich und macht sichtbar, was zwischen
-          den Zeilen passiert: <strong>stille Edits</strong>, Agenda-Profile,
-          Paywall-Strategien.
+          margn beobachtet fünf führende deutsche Leitmedien, versioniert
+          jeden Artikel stündlich und macht sichtbar, was zwischen den Zeilen
+          passiert: <strong>stille Edits</strong>, umdatierte Artikel,
+          Agenda-Profile, Paywall-Strategien.
         </p>
         <div className="mg-hero-cta">
           <Link href="/articles" className="mg-btn">
@@ -359,7 +359,7 @@ export default function LandingPage() {
           <span className="mg-scrollhint">
             Scrollen <i />
           </span>
-          <span className="mg-rev">rev 2026.06 · stündlich aktualisiert</span>
+          <span className="mg-rev">rev 2026.07 · stündlich aktualisiert</span>
         </div>
       </section>
 
@@ -382,17 +382,18 @@ export default function LandingPage() {
           </div>
           <div className="mg-stat" data-reveal="0.08">
             <span className="v">
-              <span data-count="2">0</span>
+              <span data-count="5">0</span>
             </span>
-            <span className="l">Medienmärkte</span>
-            <span className="s">Deutschland &amp; Frankreich</span>
+            <span className="l">Leitmedien</span>
+            <span className="s">Tagesschau · Spiegel · FAZ · Bild · n-tv</span>
           </div>
           <div className="mg-stat" data-reveal="0.16">
             <span className="v">
-              <span data-count="1024">0</span>
+              <span data-count="30">0</span>
+              <small>Tage</small>
             </span>
-            <span className="l">Dimensionen je Embedding</span>
-            <span className="s">sprachübergreifend vergleichbar</span>
+            <span className="l">Änderungshistorie</span>
+            <span className="s">jede Version, jeder Zeitstempel</span>
           </div>
           <div className="mg-stat" data-reveal="0.24">
             <span className="v">24/7</span>
@@ -433,40 +434,92 @@ export default function LandingPage() {
         <div className="mg-head">
           <p className="mg-overline">Abdeckung</p>
           <h2 className="mg-h2" data-split>
-            Viele Sprachen, <em>eine</em> Geschichte
+            Fünf Perspektiven, <em>ein</em> Nachrichtenmarkt
           </h2>
           <p className="mg-lede" data-reveal="0">
-            Mehrsprachige Embeddings legen dieselbe Story über Sprachgrenzen
-            zusammen: Berichterstattung aus verschiedenen Ländern landet im
-            selben Cluster — mit derselben Methodik vermessen. Weitere Märkte
-            kommen laufend hinzu.
+            Vom öffentlich-rechtlichen Angebot bis zum Boulevard: fünf
+            Leitmedien, die den deutschen Nachrichtenmarkt prägen — mit
+            derselben Methodik vermessen. Erfasst wird das komplette Spektrum:
+            alle Ressorts, Liveticker und Regionalberichterstattung aus allen
+            16 Bundesländern.
           </p>
         </div>
-        <div className="mg-pair">
+        <div className="mg-srcs">
           <div className="mg-pair-card" data-reveal="0">
             <span className="lang">
-              <b>DE</b>
-              <span>06:12</span>
+              <b>ÖRR</b>
             </span>
-            <h3>EU einigt sich auf strengere Regeln für Lieferketten</h3>
-            <span className="src">deutsche Tageszeitung · Wirtschaft</span>
+            <h3>Tagesschau</h3>
+            <span className="src">tagesschau.de</span>
           </div>
-          <div className="mg-pair-link" data-reveal="0.15" aria-hidden>
-            <span className="line" />
-            <span className="sim">Ähnlichkeit 0,91</span>
-            <span className="cl">ein Story-Cluster</span>
-            <span className="line" />
-          </div>
-          <div className="mg-pair-card" data-reveal="0.1">
+          <div className="mg-pair-card" data-reveal="0.06">
             <span className="lang">
-              <b>FR</b>
-              <span>08:47</span>
+              <b>Magazin</b>
             </span>
-            <h3>
-              L’UE s’accorde sur des règles plus strictes pour les chaînes
-              d’approvisionnement
-            </h3>
-            <span className="src">quotidien français · Économie</span>
+            <h3>Spiegel</h3>
+            <span className="src">spiegel.de</span>
+          </div>
+          <div className="mg-pair-card" data-reveal="0.12">
+            <span className="lang">
+              <b>Zeitung</b>
+            </span>
+            <h3>FAZ</h3>
+            <span className="src">faz.net</span>
+          </div>
+          <div className="mg-pair-card" data-reveal="0.18">
+            <span className="lang">
+              <b>Boulevard</b>
+            </span>
+            <h3>Bild</h3>
+            <span className="src">bild.de</span>
+          </div>
+          <div className="mg-pair-card" data-reveal="0.24">
+            <span className="lang">
+              <b>TV-Nachrichten</b>
+            </span>
+            <h3>n-tv</h3>
+            <span className="src">n-tv.de</span>
+          </div>
+        </div>
+
+        {/* Ausblick: sprachübergreifende Story-Findung — bewusst als KOMMENDES Feature
+            ausgewiesen, nicht als bestehendes (aktuell rein deutschsprachiger Korpus). */}
+        <div className="mg-next" data-reveal="0">
+          <span className="mg-next-badge">In Vorbereitung</span>
+          <h3 className="mg-next-h">Viele Sprachen, eine Geschichte</h3>
+          <p className="mg-lede">
+            Als Nächstes wächst margn über den deutschen Markt hinaus:
+            mehrsprachige Embeddings legen dieselbe Story über Sprachgrenzen
+            zusammen — Berichterstattung aus verschiedenen Ländern landet
+            automatisch im selben Cluster, übersetzt vergleichbar und mit
+            derselben Methodik vermessen.
+          </p>
+          <div className="mg-pair">
+            <div className="mg-pair-card">
+              <span className="lang">
+                <b>DE</b>
+                <span>06:12</span>
+              </span>
+              <h3>EU einigt sich auf strengere Regeln für Lieferketten</h3>
+              <span className="src">deutsche Tageszeitung · Wirtschaft</span>
+            </div>
+            <div className="mg-pair-link" aria-hidden>
+              <span className="line" />
+              <span className="sim">Ähnlichkeit 0,91</span>
+              <span className="cl">ein Story-Cluster</span>
+              <span className="line" />
+            </div>
+            <div className="mg-pair-card">
+              <span className="lang">
+                <b>FR</b>
+                <span>08:47</span>
+              </span>
+              <h3>
+                L’UE s’accorde sur des règles plus strictes pour les chaînes
+                d’approvisionnement
+              </h3>
+              <span className="src">quotidien français · Économie</span>
+            </div>
           </div>
         </div>
       </section>
@@ -506,7 +559,7 @@ export default function LandingPage() {
           </Link>
         </div>
         <p className="mg-final-rev" data-reveal="0.15">
-          margn · offenes Medienobservatorium · rev 2026.06
+          margn · offenes Medienobservatorium · rev 2026.07
         </p>
       </section>
 
@@ -520,8 +573,9 @@ export default function LandingPage() {
             </span>
             <p className="mg-foot-claim">
               Liest, was zwischen den Zeilen steht: stille Änderungen,
-              Agenda-Profile und Paywall-Strategien von Leitmedien über
-              Länder- und Sprachgrenzen hinweg.
+              umdatierte Artikel, Agenda-Profile und Paywall-Strategien
+              von fünf führenden deutschen Leitmedien — stündlich erfasst,
+              versioniert, nachvollziehbar.
             </p>
           </div>
           <div>
@@ -532,6 +586,9 @@ export default function LandingPage() {
               </li>
               <li>
                 <Link href="/articles/edits">Silent Edits</Link>
+              </li>
+              <li>
+                <Link href="/articles/keywords">Keyword-Trends</Link>
               </li>
             </ul>
           </div>

@@ -179,7 +179,9 @@ export default function FilterControls() {
         </div>
       </div>
 
-      <Group label="Sprache" value={f.lang} on={f.setLang} opts={[["all", "Alle"], ["de", "DE"], ["fr", "FR"]]} />
+      {/* Sprachfilter bewusst ausgebaut: der Korpus ist bisher rein deutschsprachig — eine
+          Alle/DE/FR-Auswahl wäre eine leere Option. Der lang-State im FilterProvider bleibt
+          (Default "all"), damit RPC-Signaturen stabil sind; UI kommt mit mehrsprachigen Quellen wieder. */}
       <p className="faint" style={{ fontSize: 10.5, lineHeight: 1.5, marginTop: 6 }}>Zeitraum wählst du unten am Zeitstrahl. Schlagwörter über der Tabelle.</p>
     </div>
   );

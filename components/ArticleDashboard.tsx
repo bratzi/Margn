@@ -43,7 +43,7 @@ const SERVER_SORT: Record<string, string> = {
   author_status: "author_status", scan: "scan_count",
   published_at: "published_at", discovered_at: "discovered_at", last_seen: "last_seen",
   word_count: "word_count", reading_min: "reading_min",
-  revision_count: "revision_count", lang: "lang_detected",
+  revision_count: "revision_count",
 };
 const shortUrl = (u: string) => { try { const x = new URL(u); return { host: x.host.replace(/^www\./, ""), path: x.pathname }; } catch { return { host: "", path: u }; } };
 const fmtDT = (iso: string | null) => iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -149,7 +149,8 @@ export default function ArticleDashboard() {
       agg: "avg", aggFormat: (n) => <span title="Ø Wörter">ø {n.toLocaleString("de-DE")}</span> },
     { key: "reading_min", label: "Lesezeit", width: 84, align: "right", value: (r) => r.reading_min ?? 0, render: (r) => <span className="faint">{r.reading_min ? `${r.reading_min} min` : "—"}</span>,
       agg: "avg", aggFormat: (n) => <span title="Ø Lesezeit">ø {n} min</span> },
-    { key: "lang", label: "Sprache", width: 74, value: (r) => r.lang_detected || r.country?.toLowerCase() || "—", render: (r) => <span className="faint" style={{ textTransform: "uppercase", fontSize: 11 }}>{r.lang_detected || r.country?.toLowerCase() || "—"}</span> },
+    // Sprach-Spalte bewusst ausgebaut: Korpus ist bisher rein deutschsprachig (nur "de"-Duplikate).
+    // lang_detected bleibt in Row/Query, damit sie mit mehrsprachigen Quellen 1:1 zurückkommen kann.
   ], [rowKw]);
 
   return (
