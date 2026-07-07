@@ -63,7 +63,9 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
   const [dragOver, setDragOver] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  // Layout (Reihenfolge/versteckt/gepinnt/Breiten) aus localStorage laden + speichern.
+  // Layout (Reihenfolge/versteckt/gepinnt/Breiten) UND Ansicht (Sortierung/Gruppierung/
+  // Spalten-Filter) aus localStorage laden + speichern — soll in der nächsten Session
+  // exakt wieder so aussehen wie verlassen.
   const lsKey = tableId ? `dt-layout-${tableId}` : null;
   useEffect(() => {
     if (!lsKey) return;
@@ -78,12 +80,22 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
       if (s.v === LAYOUT_VERSION && s.widths) setWidths(s.widths);
       if (Array.isArray(s.hidden)) setHidden(new Set(s.hidden));
       if (Array.isArray(s.pinned)) setPinned(new Set(s.pinned));
+      // Sort ggf. an den Server-Sort-Handler weiterreichen (sonst bliebe die erste
+      // Ladung beim Default stehen, bis der Nutzer erneut klickt).
+      if (s.sort && typeof s.sort.key === "string" && (s.sort.dir === "asc" || s.sort.dir === "desc")) {
+        setSort(s.sort);
+        onSortChange?.(s.sort);
+      }
+      if (typeof s.groupBy === "string") setGroupBy(s.groupBy);
+      if (s.filters && typeof s.filters === "object") setFilters(s.filters);
+      if (typeof s.showFilters === "boolean") setShowFilters(s.showFilters);
     } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lsKey]);
   useEffect(() => {
     if (!lsKey) return;
-    try { localStorage.setItem(lsKey, JSON.stringify({ v: LAYOUT_VERSION, order, hidden: [...hidden], pinned: [...pinned], widths })); } catch {}
-  }, [lsKey, order, hidden, pinned, widths]);
+    try { localStorage.setItem(lsKey, JSON.stringify({ v: LAYOUT_VERSION, order, hidden: [...hidden], pinned: [...pinned], widths, sort, groupBy, filters, showFilters })); } catch {}
+  }, [lsKey, order, hidden, pinned, widths, sort, groupBy, filters, showFilters]);
 
   // Sichtbare Spalten in aktueller Reihenfolge, gepinnte zuerst.
   const orderedCols = useMemo(() => {
