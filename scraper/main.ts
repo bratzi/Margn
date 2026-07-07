@@ -1047,6 +1047,18 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   url = canonicalArticleUrl(url, html); // Bild-Slug-Varianten → kanonische URL (Mehrfach-Erfassung verhindern)
   const meta = extractMeta(html, url);
   const art = asArticle(html, url);
+  // Werbe-/Commerce-Inhalte NICHT analysieren (User-Entscheid 07.07.). Prüft neben der
+  // gespeicherten URL auch meta.rubric (= sektionierte og:url/canonical), weil n-tv-URLs
+  // (idN.html) die Sektion verlieren — nur so ist shopping-und-service dort erkennbar.
+  // Seite als 'sponsored' parken (fällt aus dem Render-Pool), evtl. schon angelegte
+  // articles-Zeile mitsamt Anhang löschen (FK-CASCADE).
+  if ([url, meta.rubric].some((c) => c && classifyUrl(c) === "sponsored")) {
+    if (!DRY_RUN) {
+      await sb.from("pages").update({ kind: "sponsored" }).in("url", [...new Set([discoveredUrl, url])]);
+      await sb.from("articles").delete().eq("url", url);
+    }
+    return null;
+  }
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
     .select(PREV_COLS)
@@ -1262,7 +1274,9 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
     // URLs einsammeln (tolerant ggü. Sitemap-Struktur, wie bisher).
     for (const m of xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)) {
       const u = stripHash(m[1].trim());
-      if (u.startsWith(origin) && looksLikeArticle(u)) arts.add(u);
+      // classifyUrl statt nur looksLikeArticle: News-Sitemaps führen auch Advertorials/
+      // Shopping-Deals — die dürfen keine Stubs/Datumszeilen mehr erzeugen (kind-Gates).
+      if (u.startsWith(origin) && classifyUrl(u) === "article") arts.add(u);
     }
     // Pro <url>-Block die Veröffentlichungszeit ziehen (publication_date > lastmod).
     for (const block of xml.matchAll(/<url\b[^>]*>([\s\S]*?)<\/url>/gi)) {
@@ -1270,7 +1284,7 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
       const loc = /<loc>\s*([^<]+?)\s*<\/loc>/i.exec(inner)?.[1];
       if (!loc) continue;
       const u = stripHash(loc.trim());
-      if (!(u.startsWith(origin) && looksLikeArticle(u))) continue;
+      if (!(u.startsWith(origin) && classifyUrl(u) === "article")) continue; // Werbe-URLs: keine Datums-Stubs
       const pd = sitemapDate(/<(?:\w+:)?publication_date>\s*([^<]+?)\s*<\/(?:\w+:)?publication_date>/i.exec(inner)?.[1]);
       const lm = sitemapDate(/<lastmod>\s*([^<]+?)\s*<\/lastmod>/i.exec(inner)?.[1]);
       if (pd) pubDates.set(u, { at: pd, precise: true });
@@ -1475,9 +1489,18 @@ const SEC = (segs: string[], rx: RegExp) => segs.some((s) => rx.test(s));
 function classifyUrl(url: string): Kind {
   const { sections, slug } = urlSegments(url);
   const u = url.toLowerCase();
-  // Werbung: nur als eigenes Rubrik-Segment oder Query-Param (nicht "bewerbung"/"umwerbung")
-  if (SEC(sections, /^(anzeige[n]?|sponsored|advertorials?|werbe[a-z-]*|promotion|adv|partner-?content)$/) ||
+  // Werbung/Commerce: nur als eigenes Rubrik-Segment oder Query-Param (nicht "bewerbung"/
+  // "umwerbung", und NIE der Slug — "anzeige-gegen-politiker" ist echte News). User-Entscheid
+  // 07.07.: Werbe-/Deals-/Gewinnspiel-Inhalte gar nicht erst erfassen. Verlags-Vertikale:
+  // n-tv shopping-und-service, FAZ kaufkompass, Bild brandstory/productstory/kaufberater,
+  // Gewinnspiel-Aktionen (Segment-Substring fängt "bildplus-gewinnspiele-aktionen").
+  if (SEC(sections, /^(anzeige[n]?|sponsored|advertorials?|werbe[a-z-]*|promotion|adv|partner-?content|brandstory|productstory|shopping-und-service|kaufkompass|kaufberater[a-z-]*|[a-z-]*gewinnspiel[a-z-]*)$/) ||
       /[?&](sponsored|advertorial|anzeige)=/.test(u)) return "sponsored";
+  // Host-spezifisch: Bilds /service/ + /sonstiges/ sind durchgehend Affiliate/Eigenwerbung
+  // (Kaufberater-Deals, Brandstorys, Abo-/Gewinnspiel-Aktionen, Corporate); Spiegels /tests/
+  // ist das Affiliate-Produkttest-Vertical. NICHT global sperren: Bild /auto/tests/ und
+  // n-tv /ratgeber/tests/ sind redaktionelle Tests bzw. Hubs.
+  if (/bild\.de\/(service|sonstiges)\//.test(u) || /spiegel\.de\/tests\//.test(u)) return "sponsored";
   if (SEC(sections, /^(impressum|kontakt|datenschutz|newsletter|abo|login|konto|hilfe|agb|nutzungsbedingungen|privacy|mentions-legales|cgu)$/)) return "service";
   // Medien: Rubrik-Segment ODER Slug-Präfix (tagesschau /video-NNN.html, /audio-NNN)
   if (SEC(sections, /^(podcast|videos?|audio|mediathek|livestream|bilder|fotostrecke[n]?|galerie|multimedia|tv)$/) ||
@@ -2133,6 +2156,13 @@ async function enrichArticles(sources: Source[]) {
         }
         const meta = extractMeta(html, item.url);
         const art = asArticle(html, item.url);
+        // Werbe-/Commerce-Guard (wie saveArticleFull): auch og:url/canonical-Rubrik prüfen
+        // (n-tv idN.html trägt die Sektion nicht in der gespeicherten URL).
+        if ([item.url, meta.rubric].some((c) => c && classifyUrl(c) === "sponsored")) {
+          await sb.from("pages").update({ kind: "sponsored" }).eq("url", item.url);
+          await sb.from("articles").delete().eq("id", item.id);
+          continue;
+        }
         try {
           // Vorzustand für Tracking lesen, dann Metadaten aktualisieren.
           const { data: prev } = await sb.from("articles")
