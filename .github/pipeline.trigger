@@ -24,3 +24,4 @@
 # 2026-06-26 — Frischer Lauf zum Beobachten: 90-Tage-Recency-Filter + uniforme Feed-Discovery
 #              + n-tv-Teaser/Dedup + recentFirst-Fix (00a86a4). Prüfen: alte Artikel→archive,
 #              breitere Feed-Abdeckung, keine fälschlich archivierten aktuellen Artikel.
+# 2026-07-08 - Sichtungs-Protokoll live (sightings-Tabelle): recordSightings an allen Link-Bump-Stellen + flushSightings am Lauf-Ende; Dashboard-Achse Zuletzt-gesehen zeigt echte Crawl-Events.

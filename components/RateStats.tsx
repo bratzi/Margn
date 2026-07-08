@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS, TOPIC_COLORS } from "@/components/TimeRangeFilter";
 import { axisTime, berlinDayBoundsUTC, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
@@ -139,77 +140,57 @@ export default function RateStats() {
   // Zählung direkt aus dem gemeinsamen Corpus — gleiches Prädikat wie die Tabelle,
   // Zeitfenster ist der gewählte Zeitstrahl-Bereich, Bucketing über die EFFEKTIVE Zeit
   // (published_at, sonst discovered_at — vorher fielen undatierte Artikel ganz raus).
-  // „Zuletzt gesehen"-Achse = SICHTUNGEN: jede Stunde zählt, welche Seiten der Crawl
-  // verlinkt gesehen hat (Rel. = pro Zeiteinheit; Abs. = Tageszähler, Reset um 00:00).
-  // Die „Veröffentlicht"-Achse bleibt eine Ereignis-Verteilung (1 Artikel = 1 Bucket).
+  // „Zuletzt gesehen"-Achse = SICHTUNGEN: der Scraper protokolliert minutengenau, wie
+  // viele Artikel-Links jeder Lauf sieht (Rel. = pro Zeiteinheit; Abs. = Tageszähler,
+  // Reset um 00:00). Die „Veröffentlicht"-Achse bleibt unverändert (1 Artikel = 1 Bucket).
   const presence = f.timeAxis === "seen";
 
-  const { series, total } = useMemo(() => {
-    // Sichtungen: Ein Artikel zählt in JEDEM Bucket zwischen erster (discovered_at) und
-    // letzter Sichtung (last_seen) — Annahme: dazwischen durchgehend verlinkt (Sichtungs-
-    // EVENTS speichern wir bewusst nicht; das Intervall ist die Rekonstruktion).
-    // Buckets nach „jetzt" bleiben 0 — dort war noch kein Crawl.
-    if (presence) {
-      const match = makeMatcher(snapshotOf(f as any), f.subPats, f.kwIdSet, { time: true });
+  // Sichtungs-Events laden (RPC aggregiert serverseitig auf Minuten- bzw. Stunden-Körnung,
+  // hält den Egress klein). null = noch nicht geladen, [] = keine Events im Fenster.
+  const [sightRows, setSightRows] = useState<{ source_id: number; bucket: string; n: number }[] | null>(null);
+  const sightGran = unit === "minute" ? "minute" : "hour";
+  useEffect(() => {
+    if (!presence) { setSightRows(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("sighting_buckets", { p_from: fromIso, p_to: toIso, p_gran: sightGran });
+      if (!cancelled) setSightRows(error ? [] : ((data ?? []) as { source_id: number; bucket: string; n: number }[]));
+    })();
+    return () => { cancelled = true; };
+  }, [presence, fromIso, toIso, sightGran, f.corpusLoadedAt]);
+
+  const { series, total, isSightings } = useMemo(() => {
+    // „Zuletzt gesehen" + Verleger: ECHTE Crawl-Sichtungen aus der sightings-Tabelle —
+    // der Scraper protokolliert minutengenau, wie viele Artikel-Links er sieht. Ergebnis:
+    // Rampe während des ~30-min-Laufs, Plateau bis zum nächsten Lauf. Fällt auf die
+    // last_seen-Verteilung zurück, solange noch keine Events gesammelt sind (Tabelle neu)
+    // oder im Themen-Modus (Sichtungen sind nur je Quelle erfasst, nicht je Thema).
+    if (presence && chartMode === "publishers" && sightRows && sightRows.length) {
       const starts = buckets.map((b) => Date.parse(b));
       const stepMs = unit === "minute" ? 60000 : unit === "hour" ? 3600000 : unit === "day" ? 86400000 : 604800000;
-      const windowFrom = starts[0] ?? 0;
       const windowTo = (starts[starts.length - 1] ?? 0) + stepMs;
-      // „Noch online"-Kante: last_seen noch-verlinkter Seiten ist der LETZTE Scan (bis zu
-      // ~1 h alt) — ohne Ausgleich stürzt der jüngste Bucket fälschlich auf ~0 (Klippe).
-      // Alles, was seit dem jüngsten Scan-Stand (± 90 min) gesehen wurde, gilt als aktuell
-      // online und zählt bis zum „Jetzt"-Bucket durch — NICHT weiter (Zukunft bleibt 0).
-      let newestSeen = 0;
-      for (const r of f.corpus) { if (r.last_seen) { const t = Date.parse(r.last_seen); if (t > newestSeen) newestSeen = t; } }
-      const onlineCut = newestSeen - 90 * 60000;
       // letzter Bucket-Index mit start <= ms (binäre Suche)
       const idxOf = (ms: number) => {
         let lo = 0, hi = starts.length - 1, res = 0;
         while (lo <= hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= ms) { res = mid; lo = mid + 1; } else hi = mid - 1; }
         return res;
       };
-      // Diff-Array je Gruppe (+1 bei Eintritt, -1 nach Austritt), Präfixsumme = Sichtungen.
-      const NBp = buckets.length;
-      // Buckets nach „jetzt" haben noch keinen Crawl gesehen → Obergrenze ist der
-      // Jetzt-Bucket. Liegt das ganze Fenster in der Vergangenheit, zählt bis zum Ende.
-      const capIdx = nowMs >= windowTo ? NBp - 1 : idxOf(Math.max(nowMs, windowFrom));
-      const diffs = new Map<string, number[]>();
+      const bySid = new Map<number, number[]>();
       let tot = 0;
-      for (const r of f.corpus) {
+      for (const r of sightRows) {
         if (!act.has(r.source_id)) continue;
-        if (!match(r)) continue;
-        if (!r.last_seen) continue;
-        const seen = Date.parse(r.last_seen);
-        const born = r.discovered_at ? Date.parse(r.discovered_at) : seen;
-        if (seen < windowFrom || born >= windowTo) continue;
-        const i0 = idxOf(Math.max(born, windowFrom));
-        if (i0 > capIdx) continue;
-        const i1 = seen >= onlineCut ? capIdx : Math.min(capIdx, Math.max(i0, idxOf(Math.min(seen, windowTo - 1))));
-        const g = chartMode === "topics" ? (r.topic ?? "sonstiges") : String(r.source_id);
-        let d = diffs.get(g);
-        if (!d) { d = new Array(NBp + 1).fill(0); diffs.set(g, d); }
-        d[i0]++; d[i1 + 1]--;
-        tot++;
-      }
-      const valsOf = (g: string) => {
-        const d = diffs.get(g);
-        if (!d) return buckets.map(() => 0);
-        const out = new Array<number>(NBp); let run = 0;
-        for (let i = 0; i < NBp; i++) { run += d[i]; out[i] = run; }
-        return out;
-      };
-      if (chartMode === "topics") {
-        const ser: Series[] = [...diffs.keys()]
-          .map((topic) => ({ key: topic, topic, color: TOPIC_COLORS[topic] ?? "var(--faint)", label: topicLabel(topic), vals: valsOf(topic) }))
-          .sort((a, b) => b.vals.reduce((s, v) => s + v, 0) - a.vals.reduce((s, v) => s + v, 0))
-          .slice(0, 10);
-        return { series: ser, total: tot };
+        const ms = Date.parse(r.bucket);
+        if (ms < (starts[0] ?? 0) || ms >= windowTo) continue;
+        let vals = bySid.get(r.source_id);
+        if (!vals) { vals = new Array(buckets.length).fill(0); bySid.set(r.source_id, vals); }
+        vals[idxOf(ms)] += r.n;
+        tot += r.n;
       }
       const ser: Series[] = sources.filter((s) => act.has(s.id)).map((s) => ({
         key: String(s.id), sid: s.id, color: colorById.get(s.id)!, label: short(s.name),
-        vals: valsOf(String(s.id)),
+        vals: bySid.get(s.id) ?? buckets.map(() => 0),
       }));
-      return { series: ser, total: tot };
+      return { series: ser, total: tot, isSightings: true };
     }
 
     const snap = { ...snapshotOf(f as any), rangeFrom: fromIso, rangeTo: toIso };
@@ -238,7 +219,7 @@ export default function RateStats() {
         }))
         .sort((a, b) => b.vals.reduce((s, v) => s + v, 0) - a.vals.reduce((s, v) => s + v, 0))
         .slice(0, 10);
-      return { series: ser, total: tot };
+      return { series: ser, total: tot, isSightings: false };
     }
 
     const map = new Map<number, Map<string, number>>();
@@ -257,8 +238,8 @@ export default function RateStats() {
       key: String(s.id), sid: s.id, color: colorById.get(s.id)!, label: short(s.name),
       vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0),
     }));
-    return { series: ser, total: tot };
-  }, [chartMode, presence, nowMs, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
+    return { series: ser, total: tot, isSightings: false };
+  }, [chartMode, presence, sightRows, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
       f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
       f.hideRegional, f.subPats.join("|"), f.kwIdSet]);
 
@@ -558,7 +539,7 @@ export default function RateStats() {
     <>
       <h2 className="section-h" style={{ alignItems: "center", flexWrap: "wrap" }}>
         {f.timeAxis === "seen" ? "Gesehen über Zeit" : "Publikationen über Zeit"}
-        <span className="count"><span className="fx-text" key={`${total}-${fromD}-${toD}`}>{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span></span>
+        <span className="count"><span className="fx-text" key={`${total}-${fromD}-${toD}-${isSightings}`}>{total.toLocaleString("de-DE")} {isSightings ? "Sichtungen" : "Artikel"} · {fromD}–{toD}</span></span>
         <div className="seg seg-xs" style={{ marginLeft: "auto" }}>
           <button className={chartMode === "publishers" ? "on" : ""} onClick={() => setChartMode("publishers")} title="Linien je Verleger">Verleger</button>
           <button className={chartMode === "topics" ? "on" : ""} onClick={() => setChartMode("topics")} title="Linien je Thema (Top 10)">Themen</button>

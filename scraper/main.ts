@@ -1325,6 +1325,7 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
         // ignoreDuplicates überspringt Bekanntes komplett — ohne diesen Bump wüsste niemand,
         // dass ein alter Artikel noch geführt wird (Basis der Re-Scan-Stufe „noch verlinkt").
         await sb.from("pages").update({ last_seen: new Date().toISOString() }).in("url", batch);
+        recordSightings(src.id, batch);
       }
     } catch (e) { console.error("SITEMAP-FEHLER:", src.base_url, (e as Error).message); }
   }
@@ -1599,6 +1600,37 @@ const pageId = new Map<string, number>(); // url -> pages.id (laufzeitweiter Cac
 // fiel er FÜR IMMER aus der Beobachtung (Art. 207366: 12 Tage ungescannt trotz
 // Startseiten-Platzierung). Der Bump ist die Basis der Re-Scan-Stufe „noch verlinkt".
 const bumpedThisRun = new Set<string>();
+
+// === Sichtungs-Protokoll (Minuten-Aggregat) ===
+// Jede Artikel-Link-/Listungs-Sichtung zählt EINMAL pro Lauf, minutengenau — Grundlage
+// der „Zuletzt gesehen"-Achse im Dashboard: echte Crawl-Ereignisse (Rampe während des
+// Laufs, Plateau dazwischen). pages.last_seen allein reicht nicht — jeder neue Lauf
+// überschreibt es und frühere Sichtungen des Tages gehen verloren.
+const sightingSeen = new Set<string>();
+const sightingAgg = new Map<number, Map<string, number>>();
+function recordSightings(sourceId: number, urls: string[]) {
+  const minute = new Date(); minute.setSeconds(0, 0);
+  const k = minute.toISOString();
+  let m = sightingAgg.get(sourceId);
+  if (!m) { m = new Map(); sightingAgg.set(sourceId, m); }
+  let n = 0;
+  for (const u of urls) { if (!sightingSeen.has(u)) { sightingSeen.add(u); n++; } }
+  if (n) m.set(k, (m.get(k) ?? 0) + n);
+}
+async function flushSightings() {
+  const rows: { source_id: number; minute: string; n: number }[] = [];
+  for (const [sid, m] of sightingAgg) for (const [minute, n] of m) rows.push({ source_id: sid, minute, n });
+  sightingAgg.clear();
+  if (!rows.length || DRY_RUN) return;
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb.from("sightings").insert(rows.slice(i, i + 200));
+    if (error) { console.error("SIGHTINGS-FEHLER:", error.message); return; }
+  }
+  // Retention im selben Zug: älter als 35 Tage raus (Korpus-Horizont).
+  await sb.from("sightings").delete().lt("minute", new Date(Date.now() - 35 * 864e5).toISOString());
+  console.log(`Sichtungen protokolliert: ${rows.length} Minuten-Zeilen.`);
+}
+
 async function ensureNodes(sourceId: number, urls: string[], depth: number) {
   const all = [...new Set(urls.map(canonUrl))];
   const fresh = all.filter((u) => !pageId.has(u));
@@ -1611,7 +1643,9 @@ async function ensureNodes(sourceId: number, urls: string[], depth: number) {
     }
   }
   // Nur Artikel-Links, je Lauf einmal (Navigation/Hubs stehen auf jeder Seite → sparen).
-  const toBump = all.filter((u) => classifyUrl(u) === "article" && !bumpedThisRun.has(u));
+  const artLinks = all.filter((u) => classifyUrl(u) === "article");
+  recordSightings(sourceId, artLinks);
+  const toBump = artLinks.filter((u) => !bumpedThisRun.has(u));
   for (const u of toBump) bumpedThisRun.add(u);
   for (let i = 0; i < toBump.length; i += 200) {
     await sb.from("pages").update({ last_seen: new Date().toISOString() }).in("url", toBump.slice(i, i + 200));
@@ -1778,6 +1812,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
             );
             // Link-Sichtung protokollieren (s. ensureNodes): Feed führt den Artikel noch.
             await sb.from("pages").update({ last_seen: new Date().toISOString() }).in("url", batch);
+            recordSightings(src.id, batch);
           }
         } catch (e) { console.error("FEED-FEHLER:", s.url, (e as Error).message); }
       }
@@ -2418,6 +2453,9 @@ async function run() {
     }
   } finally {
     if (browser) await browser.close();
+    // Sichtungs-Aggregate IMMER schreiben — auch bei Teilabbruch (Zeitbudget) sind die
+    // bereits gezählten Minuten korrekt.
+    await flushSightings();
   }
 }
 
