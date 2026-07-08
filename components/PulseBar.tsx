@@ -63,12 +63,51 @@ export default function PulseBar() {
     const topSource = [...bySource.entries()].sort((a, b) => b[1] - a[1])[0];
     const topTopic = [...byTopic.entries()].sort((a, b) => b[1] - a[1])[0];
     const perDay = daysSorted.length ? n / daysSorted.length : 0;
+
+    // Zu-/Abgänge im gewählten Zeitraum: Zugang = erste Sichtung (discovered_at) im
+    // Fenster; Abgang = letzte Sichtung im Fenster UND seit dem jüngsten Scan-Stand
+    // (± 90 min) nicht mehr gesehen — noch verlinkte Seiten sind KEINE Abgänge.
+    // Zeit-agnostischer Matcher: die beiden Ereignisse haben ihre eigene Zeitachse.
+    const matchNT = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
+    const fromMs = f.rangeFrom ? Date.parse(f.rangeFrom) : -Infinity;
+    const toMs = f.rangeTo ? Date.parse(f.rangeTo) : Infinity;
+    let newestSeen = 0;
+    for (const r of f.corpus) { if (r.last_seen) { const t = Date.parse(r.last_seen); if (t > newestSeen) newestSeen = t; } }
+    const onlineCut = newestSeen - 90 * 60000;
+    let gainsN = 0, lossesN = 0;
+    const gainsByDay = new Map<string, number>(), lossesByDay = new Map<string, number>();
+    for (const r of f.corpus) {
+      if (!act.has(r.source_id)) continue;
+      if (!matchNT(r)) continue;
+      if (r.discovered_at) {
+        const t = Date.parse(r.discovered_at);
+        if (t >= fromMs && t <= toMs) { gainsN++; const d = berlinDate(r.discovered_at); gainsByDay.set(d, (gainsByDay.get(d) ?? 0) + 1); }
+      }
+      if (r.last_seen) {
+        const t = Date.parse(r.last_seen);
+        if (t < onlineCut && t >= fromMs && t <= toMs) { lossesN++; const d = berlinDate(r.last_seen); lossesByDay.set(d, (lossesByDay.get(d) ?? 0) + 1); }
+      }
+    }
+    // Kontinuierliche Tagesliste (Lücken = 0), damit die Sparklines zeitlich stimmen.
+    const fluxDays = [...new Set([...gainsByDay.keys(), ...lossesByDay.keys()])].sort();
+    let gainSpark: number[] = [], lossSpark: number[] = [];
+    if (fluxDays.length) {
+      const list: string[] = [];
+      const cur = new Date(fluxDays[0] + "T12:00:00Z");
+      const end = fluxDays[fluxDays.length - 1];
+      while (list.length < 400) { const d = berlinDate(cur); list.push(d); if (d >= end) break; cur.setUTCDate(cur.getUTCDate() + 1); }
+      gainSpark = list.map((d) => gainsByDay.get(d) ?? 0);
+      lossSpark = list.map((d) => lossesByDay.get(d) ?? 0);
+    }
+
     return {
       n, pwPct: pct(pw, n), namedPct: pct(named, au),
       revPct: pct(revAny, n), edits,
       avgWords: wordsN ? Math.round(words / wordsN) : 0,
       avgRead: wordsN ? Math.round(words / wordsN / 200) : 0, // ~200 WPM
       spark, paceDelta, perDay,
+      gains: { n: gainsN, spark: gainSpark },
+      losses: { n: lossesN, spark: lossSpark },
       topOutlet: topSource ? { name: nameById.get(topSource[0]) ?? "?", n: topSource[1], sh: pct(topSource[1], n) } : null,
       topTopic: topTopic ? { key: topTopic[0], n: topTopic[1], sh: pct(topTopic[1], n) } : null,
     };
@@ -83,6 +122,8 @@ export default function PulseBar() {
   const animNamed = useTweenedNumber(m.namedPct);
   const animRev = useTweenedNumber(m.revPct);
   const animWords = useTweenedNumber(m.avgWords);
+  const animGains = useTweenedNumber(m.gains.n);
+  const animLosses = useTweenedNumber(m.losses.n);
 
   if (!f.corpusReady) {
     return (
@@ -144,6 +185,20 @@ export default function PulseBar() {
           <div className="pulse-k">Ø Artikel-Tiefe</div>
           <div className="pulse-v">{Math.round(animWords).toLocaleString("de-DE")}<span className="pulse-unit"> Wörter</span></div>
           <div className="pulse-sub">≈ {m.avgRead} min Lesezeit</div>
+        </div>
+
+        {/* Fluktuation: neu reingekommen vs. offline gegangen (Sparkline = wann) */}
+        <div className="pulse-card panel pulse-wide" title="Erste Sichtung liegt im gewählten Zeitraum">
+          <div className="pulse-k">Neu reingekommen</div>
+          <div className="pulse-v" style={{ color: "var(--green)" }}>{Math.round(animGains).toLocaleString("de-DE")}</div>
+          <div className="pulse-sub">erste Sichtung im Zeitraum</div>
+          <Spark vals={m.gains.spark} color="var(--green)" />
+        </div>
+        <div className="pulse-card panel pulse-wide" title="Letzte Sichtung liegt im Zeitraum — seither nicht mehr verlinkt angetroffen">
+          <div className="pulse-k">Rausgeflogen</div>
+          <div className="pulse-v" style={{ color: "var(--red)" }}>{Math.round(animLosses).toLocaleString("de-DE")}</div>
+          <div className="pulse-sub">seither nicht mehr gesehen</div>
+          <Spark vals={m.losses.spark} color="var(--red)" />
         </div>
 
         {/* Aktivster Publizist */}
