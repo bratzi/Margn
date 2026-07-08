@@ -29,9 +29,6 @@ export default function RateStats() {
   const [manual, setManual] = useState<"auto" | Unit>("auto");
   const [chartMode, setChartMode] = useState<ChartMode>("publishers");
   const [timeFormat, setTimeFormat] = useState<"abs" | "rel">("rel");
-  // Nur auf der „Zuletzt gesehen"-Achse: Abgänge (wann zuletzt gesehen, jede Seite zählt
-  // genau 1×) vs. Sichtungen/Bestand (wie viele Seiten zum Zeitpunkt online/verlinkt waren).
-  const [seenMode, setSeenMode] = useState<"lastseen" | "presence">("lastseen");
   const [chartH, setChartH] = useState(220);
   const [resizing, setResizing] = useState(false);
   const VH = chartH;
@@ -142,13 +139,16 @@ export default function RateStats() {
   // Zählung direkt aus dem gemeinsamen Corpus — gleiches Prädikat wie die Tabelle,
   // Zeitfenster ist der gewählte Zeitstrahl-Bereich, Bucketing über die EFFEKTIVE Zeit
   // (published_at, sonst discovered_at — vorher fielen undatierte Artikel ganz raus).
-  const presence = f.timeAxis === "seen" && seenMode === "presence";
+  // „Zuletzt gesehen"-Achse = SICHTUNGEN: jede Stunde zählt, welche Seiten der Crawl
+  // verlinkt gesehen hat (Rel. = pro Zeiteinheit; Abs. = Tageszähler, Reset um 00:00).
+  // Die „Veröffentlicht"-Achse bleibt eine Ereignis-Verteilung (1 Artikel = 1 Bucket).
+  const presence = f.timeAxis === "seen";
 
   const { series, total } = useMemo(() => {
-    // Bestand („Sichtungen"): Ein Artikel zählt in JEDEM Bucket zwischen erster
-    // (discovered_at) und letzter Sichtung (last_seen) — Annahme: dazwischen durchgehend
-    // verlinkt. Sichtungs-EVENTS speichern wir bewusst nicht (DB-Platz); das Intervall
-    // ist die bestmögliche Rekonstruktion von „wie viele Seiten waren um 02:00 online?".
+    // Sichtungen: Ein Artikel zählt in JEDEM Bucket zwischen erster (discovered_at) und
+    // letzter Sichtung (last_seen) — Annahme: dazwischen durchgehend verlinkt (Sichtungs-
+    // EVENTS speichern wir bewusst nicht; das Intervall ist die Rekonstruktion).
+    // Buckets nach „jetzt" bleiben 0 — dort war noch kein Crawl.
     if (presence) {
       const match = makeMatcher(snapshotOf(f as any), f.subPats, f.kwIdSet, { time: true });
       const starts = buckets.map((b) => Date.parse(b));
@@ -157,8 +157,8 @@ export default function RateStats() {
       const windowTo = (starts[starts.length - 1] ?? 0) + stepMs;
       // „Noch online"-Kante: last_seen noch-verlinkter Seiten ist der LETZTE Scan (bis zu
       // ~1 h alt) — ohne Ausgleich stürzt der jüngste Bucket fälschlich auf ~0 (Klippe).
-      // Alles, was seit dem jüngsten Scan-Stand (± 90 min) gesehen wurde, gilt als
-      // aktuell online und zählt bis zum rechten Rand durch.
+      // Alles, was seit dem jüngsten Scan-Stand (± 90 min) gesehen wurde, gilt als aktuell
+      // online und zählt bis zum „Jetzt"-Bucket durch — NICHT weiter (Zukunft bleibt 0).
       let newestSeen = 0;
       for (const r of f.corpus) { if (r.last_seen) { const t = Date.parse(r.last_seen); if (t > newestSeen) newestSeen = t; } }
       const onlineCut = newestSeen - 90 * 60000;
@@ -168,8 +168,11 @@ export default function RateStats() {
         while (lo <= hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= ms) { res = mid; lo = mid + 1; } else hi = mid - 1; }
         return res;
       };
-      // Diff-Array je Gruppe (+1 bei Eintritt, -1 nach Austritt), Präfixsumme = Bestand.
+      // Diff-Array je Gruppe (+1 bei Eintritt, -1 nach Austritt), Präfixsumme = Sichtungen.
       const NBp = buckets.length;
+      // Buckets nach „jetzt" haben noch keinen Crawl gesehen → Obergrenze ist der
+      // Jetzt-Bucket. Liegt das ganze Fenster in der Vergangenheit, zählt bis zum Ende.
+      const capIdx = nowMs >= windowTo ? NBp - 1 : idxOf(Math.max(nowMs, windowFrom));
       const diffs = new Map<string, number[]>();
       let tot = 0;
       for (const r of f.corpus) {
@@ -180,7 +183,8 @@ export default function RateStats() {
         const born = r.discovered_at ? Date.parse(r.discovered_at) : seen;
         if (seen < windowFrom || born >= windowTo) continue;
         const i0 = idxOf(Math.max(born, windowFrom));
-        const i1 = seen >= onlineCut ? NBp - 1 : Math.max(i0, idxOf(Math.min(seen, windowTo - 1)));
+        if (i0 > capIdx) continue;
+        const i1 = seen >= onlineCut ? capIdx : Math.min(capIdx, Math.max(i0, idxOf(Math.min(seen, windowTo - 1))));
         const g = chartMode === "topics" ? (r.topic ?? "sonstiges") : String(r.source_id);
         let d = diffs.get(g);
         if (!d) { d = new Array(NBp + 1).fill(0); diffs.set(g, d); }
@@ -254,7 +258,7 @@ export default function RateStats() {
       vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0),
     }));
     return { series: ser, total: tot };
-  }, [chartMode, presence, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
+  }, [chartMode, presence, nowMs, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
       f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
       f.hideRegional, f.subPats.join("|"), f.kwIdSet]);
 
@@ -401,9 +405,10 @@ export default function RateStats() {
   const axisStep = Math.max(1, Math.ceil((NB - 1) / maxLabels));
 
   // Im "abs"-Modus: Tageskumulierung — Reset auf 0 bei Tageswechsel (Lokalzeit).
-  // Im Bestand-Modus ist der Wert bereits ein Pegel (keine Rate) → nie kumulieren.
+  // Auf der Sichtungs-Achse ergibt das den erwarteten Tageszähler: jeder Crawl addiert
+  // seine Sichtungen obendrauf, um 00:00 beginnt der Zähler bei null.
   const displayTarget = useMemo(() => {
-    if (timeFormat !== "abs" || presence) return series;
+    if (timeFormat !== "abs") return series;
     const dayKey = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
     return series.map((s) => {
       let running = 0, curDay = "";
@@ -552,26 +557,18 @@ export default function RateStats() {
   return (
     <>
       <h2 className="section-h" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        {f.timeAxis === "seen" ? (presence ? "Online-Bestand über Zeit" : "Gesehen über Zeit") : "Publikationen über Zeit"}
-        <span className="count"><span className="fx-text" key={`${total}-${fromD}-${toD}-${presence}`}>{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span></span>
+        {f.timeAxis === "seen" ? "Gesehen über Zeit" : "Publikationen über Zeit"}
+        <span className="count"><span className="fx-text" key={`${total}-${fromD}-${toD}`}>{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span></span>
         <div className="seg seg-xs" style={{ marginLeft: "auto" }}>
           <button className={chartMode === "publishers" ? "on" : ""} onClick={() => setChartMode("publishers")} title="Linien je Verleger">Verleger</button>
           <button className={chartMode === "topics" ? "on" : ""} onClick={() => setChartMode("topics")} title="Linien je Thema (Top 10)">Themen</button>
         </div>
-        {f.timeAxis === "seen" && (
-          <div className="seg seg-xs" style={{ marginLeft: 6 }}>
-            <button className={seenMode === "lastseen" ? "on" : ""} onClick={() => setSeenMode("lastseen")}
-              title="Abgangs-Verteilung: wann eine Seite ZULETZT gesehen wurde — jede Seite zählt genau einmal, im Bucket ihrer letzten Sichtung">Abgänge</button>
-            <button className={seenMode === "presence" ? "on" : ""} onClick={() => setSeenMode("presence")}
-              title="Bestand: wie viele Seiten zu diesem Zeitpunkt online/verlinkt waren — rekonstruiert aus erster und letzter Sichtung (Obergrenze: zwischenzeitliches Offline-Sein ist nicht erkennbar)">Sichtungen</button>
-          </div>
-        )}
         <div className="seg" style={{ marginLeft: 6 }}>
-          {!presence && <>
-            <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")} title="Pro Zeiteinheit (relative Häufigkeit)">Rel.</button>
-            <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")} title="Kumuliert (absolut aufsteigend)">Abs.</button>
-            <div style={{ width: 1, background: "var(--line)", margin: "0 4px" }} />
-          </>}
+          <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")}
+            title={presence ? "Sichtungen pro Zeiteinheit — wie viele Seiten der Crawl in diesem Zeitfenster verlinkt gesehen hat" : "Pro Zeiteinheit (relative Häufigkeit)"}>Rel.</button>
+          <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")}
+            title={presence ? "Tageszähler: jeder Crawl addiert seine Sichtungen — Reset um 00:00" : "Kumuliert je Tag (Reset um 00:00)"}>Abs.</button>
+          <div style={{ width: 1, background: "var(--line)", margin: "0 4px" }} />
           <button className={manual === "auto" ? "on" : ""} onClick={() => setManual("auto")} title="Dynamisch">⟳ Dynamisch</button>
           {/* Minuten nur bei kurzem Zeitraum (sonst zu viele Buckets für die RPC) */}
           {spanDays <= 3 && <button className={manual === "minute" ? "on" : ""} onClick={() => setManual("minute")} title="Minutengenau">Minute</button>}
