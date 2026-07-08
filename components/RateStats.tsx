@@ -5,6 +5,7 @@ import { useFilters } from "@/components/FilterProvider";
 import { PUB_COLORS, TOPIC_COLORS } from "@/components/TimeRangeFilter";
 import { axisTime, berlinDayBoundsUTC, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 import { topicLabel } from "@/lib/topics";
+import { useTweenedSeries } from "@/lib/chartTween";
 
 type Unit = "minute" | "hour" | "day" | "week";
 type ChartMode = "publishers" | "topics";
@@ -160,7 +161,7 @@ export default function RateStats() {
       }
       const ser: Series[] = [...map.entries()]
         .map(([topic, m]) => ({
-          key: topic, topic, color: TOPIC_COLORS[topic] ?? "#AAAAAA", label: topicLabel(topic),
+          key: topic, topic, color: TOPIC_COLORS[topic] ?? "var(--faint)", label: topicLabel(topic),
           vals: buckets.map((b) => m.get(b) ?? 0),
         }))
         .sort((a, b) => b.vals.reduce((s, v) => s + v, 0) - a.vals.reduce((s, v) => s + v, 0))
@@ -332,7 +333,7 @@ export default function RateStats() {
   const axisStep = Math.max(1, Math.ceil((NB - 1) / maxLabels));
 
   // Im "abs"-Modus: Tageskumulierung — Reset auf 0 bei Tageswechsel (Lokalzeit).
-  const displaySeries = useMemo(() => {
+  const displayTarget = useMemo(() => {
     if (timeFormat !== "abs") return series;
     const dayKey = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
     return series.map((s) => {
@@ -348,6 +349,9 @@ export default function RateStats() {
       };
     });
   }, [series, timeFormat, buckets]);
+  // Wertwechsel (Rel↔Abs, Filter, Corpus-Reload) morphen weich zur neuen Sicht;
+  // Y-Skala/Ticks hängen an den getweenten Werten und gleiten mit.
+  const displaySeries = useTweenedSeries(displayTarget);
 
   const displayMaxVal = useMemo(
     () => Math.max(1, ...displaySeries.flatMap((s) => s.vals)),
@@ -368,10 +372,11 @@ export default function RateStats() {
 
   const hoverInfo = useMemo(() => {
     if (!hoverDot) return null;
-    const s = displaySeries.find((x) => x.key === hoverDot.key);
+    // Ziel-Werte (nicht die getweenten) — im Tooltip sollen ganze Zahlen stehen.
+    const s = displayTarget.find((x) => x.key === hoverDot.key);
     if (!s) return null;
     return { name: s.label, color: s.color, val: s.vals[hoverDot.idx], when: fmtFull(buckets[hoverDot.idx]) };
-  }, [hoverDot, displaySeries, buckets, timeFormat]);
+  }, [hoverDot, displayTarget, buckets, timeFormat]);
 
   // Mausrad: kontrolliert in beide Richtungen stauchen/strecken.
   // Dynamisch-Modus: an den Dichte-Enden springt die EINHEIT (grob ↔ fein).
@@ -467,9 +472,11 @@ export default function RateStats() {
   // Datenpunkte zeigen, wenn sie nicht zu dicht stehen — ODER wenn die Daten dünn sind
   // (z.B. Minuten-Modus: viele leere Buckets, aber nur wenige echte Punkte → diese exakt
   // minutengenau als Dots zeigen, statt sie wegen niedriger Dichte auszublenden).
+  // Auf den ZIEL-Werten rechnen — die getweenten Zwischenwerte würden die
+  // Dot-Sichtbarkeit während der Animation hin- und herkippen.
   const nonZeroPts = useMemo(
-    () => displaySeries.reduce((s, ser) => s + ser.vals.reduce((a, v) => a + (v > 0 ? 1 : 0), 0), 0),
-    [displaySeries],
+    () => displayTarget.reduce((s, ser) => s + ser.vals.reduce((a, v) => a + (v > 0 ? 1 : 0), 0), 0),
+    [displayTarget],
   );
   const showDots = effDens >= 7 || nonZeroPts <= 280;
 
@@ -477,7 +484,7 @@ export default function RateStats() {
     <>
       <h2 className="section-h" style={{ alignItems: "center", flexWrap: "wrap" }}>
         {f.timeAxis === "seen" ? "Gesehen über Zeit" : "Publikationen über Zeit"}
-        <span className="count">{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span>
+        <span className="count"><span className="fx-text" key={`${total}-${fromD}-${toD}`}>{total.toLocaleString("de-DE")} Artikel · {fromD}–{toD}</span></span>
         <div className="seg seg-xs" style={{ marginLeft: "auto" }}>
           <button className={chartMode === "publishers" ? "on" : ""} onClick={() => setChartMode("publishers")} title="Linien je Verleger">Verleger</button>
           <button className={chartMode === "topics" ? "on" : ""} onClick={() => setChartMode("topics")} title="Linien je Thema (Top 10)">Themen</button>
@@ -505,7 +512,7 @@ export default function RateStats() {
               <span className="rate-hint">Mausrad: stauchen / strecken{stretched ? " · ziehen verschiebt" : ""}</span>
               {zoomMod && <button className="rate-zoomreset" onClick={resetZoom} title="Ansicht zurücksetzen">⤢ zurücksetzen</button>}
               <span style={{ marginLeft: zoomMod ? 0 : "auto", color: "var(--faint)" }}>
-                Einheit: <b style={{ color: "var(--accent)" }}>{unitLabel}</b>{manual === "auto" ? " (dynamisch)" : ""}
+                Einheit: <b className="fx-text" key={unitLabel} style={{ color: "var(--accent)" }}>{unitLabel}</b>{manual === "auto" ? " (dynamisch)" : ""}
               </span>
             </div>
 
@@ -542,11 +549,11 @@ export default function RateStats() {
                 }}
               >
               <svg
-                key={`${unit}-${NB}`}
+                key={`${unit}-${NB}-${displayTarget.map((s) => s.key).join(",")}`}
                 viewBox={`0 0 ${totalSvgW} ${VH}`}
                 width={totalSvgW}
                 height={VH}
-                className="rate-svg-inner data-fade-in"
+                className="rate-svg-inner chart-swap"
                 style={{ display: "block", touchAction: "pan-x" }}
                 onMouseDown={handleDown}
                 onMouseMove={handleMove}
@@ -571,8 +578,22 @@ export default function RateStats() {
                 <line x1={PAD_L} y1={PAD_T + CH} x2={totalSvgW - PAD_R} y2={PAD_T + CH}
                   stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
 
+                {/* Vertikal auslaufende Gradient-Flächen unter den Kurven (statt flacher
+                    Deckkraft) — stopColor nimmt die var(--cN)-Serienfarben direkt an. */}
+                <defs>
+                  {displaySeries.map((s) => {
+                    const gid = `rs-grad-${String(s.key).replace(/[^a-zA-Z0-9_-]/g, "")}`;
+                    return (
+                      <linearGradient key={gid} id={gid} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={s.color} stopOpacity="0.32" />
+                        <stop offset="100%" stopColor={s.color} stopOpacity="0" />
+                      </linearGradient>
+                    );
+                  })}
+                </defs>
                 {displaySeries.map((s) => (
-                  <path key={`a${s.key}`} d={areaPath(s.vals)} fill={s.color} opacity={0.12} />
+                  <path key={`a${s.key}`} d={areaPath(s.vals)}
+                    fill={`url(#rs-grad-${String(s.key).replace(/[^a-zA-Z0-9_-]/g, "")})`} />
                 ))}
                 {displaySeries.map((s) => (
                   <path key={`l${s.key}`} d={smoothPath(s.vals)} fill="none"

@@ -4,13 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFilters, WINDOW_OPTS } from "@/components/FilterProvider";
 import { axisTime, berlinDate, berlinDayBoundsUTC, makeMatcher, snapshotOf, TIME_AXIS_LABEL } from "@/lib/filterCorpus";
 import { topicLabel } from "@/lib/topics";
+import { useTweenedNumber, useTweenedSeries } from "@/lib/chartTween";
 
-export const PUB_COLORS = ["#3D63DD", "#1A7F55", "#CF4035", "#B0790C", "#0C8F86", "#8B5CF6", "#D6457A", "#0E7490"];
+// Serien-Slots aus globals.css (--c1..--c8): je Theme eigene, validierte Stufen.
+// Feste Slot-Reihenfolge = CVD-Sicherheit — nicht umsortieren, nur dort ändern.
+export const PUB_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)", "var(--c8)"];
 export const TOPIC_COLORS: Record<string, string> = {
-  politik: "#CF4035", wirtschaft: "#B0790C", sport: "#3D63DD",
-  kultur: "#8B5CF6", wissen: "#0C8F86", digital: "#0E7490",
-  panorama: "#1A7F55", regional: "#6B8E23", gesundheit: "#D6457A", reise: "#E07020",
-  auto: "#666666", meinung: "#999999", sonstiges: "#CCCCCC",
+  politik: "var(--c4)", wirtschaft: "var(--c7)", sport: "var(--c1)",
+  kultur: "var(--c6)", wissen: "var(--c3)", digital: "var(--petrol)",
+  panorama: "var(--c5)", regional: "var(--olive)", gesundheit: "var(--c8)", reise: "var(--c2)",
+  auto: "var(--muted)", meinung: "var(--faint)", sonstiges: "var(--line-2)",
 };
 type ChartMode = "publishers" | "topics";
 const short = (n: string) => n.replace(" Online", "");
@@ -88,16 +91,20 @@ export default function TimeRangeFilter() {
       .sort((a, b) => b[1].reduce((s, v) => s + v, 0) - a[1].reduce((s, v) => s + v, 0))
       .slice(0, 10)
       .map(([topic, vals]) => ({
-        id: topic, color: TOPIC_COLORS[topic] ?? "#AAAAAA", label: topicLabel(topic), vals,
+        id: topic, color: TOPIC_COLORS[topic] ?? "var(--faint)", label: topicLabel(topic), vals,
       }));
   }, [act, ...corpusDeps]);
 
   const activeSeries = chartMode === "topics" ? topicSeries : series;
+  // Getweente Kopie NUR für die Balken-Geometrie (weiches Morphen bei Filter-/Achsen-
+  // Wechseln); Tooltip + Legende lesen weiter die ganzzahligen Ziel-Werte.
+  const animSeries = useTweenedSeries(activeSeries);
 
   const maxTotal = useMemo(() => {
     const tot = days.map((_, i) => series.reduce((sum, s) => sum + s.vals[i], 0));
     return Math.max(1, ...tot);
   }, [series, days]);
+  const animMaxTotal = Math.max(1, useTweenedNumber(maxTotal));
 
   const X = (i: number) => (i / (N - 1)) * VW;
   const colW = (VW / N) * 0.72;
@@ -191,10 +198,10 @@ export default function TimeRangeFilter() {
         onMouseLeave={() => setHoverDay(null)}
         title="Doppelklick: nur diesen Tag · Klick auf Balken: alle Artikel dieses Tages"
       >
-        <svg className="trf-svg" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
+        <svg key={`${chartMode}-${N}`} className="trf-svg chart-swap" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
           {days.map((_, i) => {
             let yb = VH;
-            return <g key={i}>{activeSeries.map((s) => { const ht = (s.vals[i] / maxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
+            return <g key={i}>{animSeries.map((s) => { const ht = (s.vals[i] / animMaxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
           })}
         </svg>
 

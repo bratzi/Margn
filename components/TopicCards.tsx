@@ -100,7 +100,7 @@ export default function TopicCards() {
                 <Metric l="Neu 24h" v={String(r.new_24h)} bar={{ p: pct(r.new_24h, Math.max(1, r.new_7d)), c: "var(--accent)" }} />
                 {exp && (
                   <>
-                    <Metric l="Timelines" v={String(r.timelines)} bar={{ p: pct(r.timelines, r.articles), c: "#8B5CF6" }} />
+                    <Metric l="Timelines" v={String(r.timelines)} bar={{ p: pct(r.timelines, r.articles), c: "var(--c6)" }} />
                     <Metric l="Edits" v={String(r.edits)} color={r.edits > 0 ? "var(--amber)" : undefined} bar={{ p: Math.min(100, r.edits * 10), c: "var(--amber)" }} />
                     <Metric l="Ø Wörter" v={r.avg_words ? r.avg_words.toLocaleString("de-DE") : "—"} bar={{ p: Math.min(100, r.avg_words / 12), c: "var(--teal)" }} />
                     <Metric l="Anteil" v={`${pct(r.articles, rows.reduce((s, x) => s + x.articles, 0))}%`} bar={{ p: pct(r.articles, rows.reduce((s, x) => s + x.articles, 0)), c: "var(--line-2)" }} />

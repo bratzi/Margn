@@ -7,6 +7,7 @@ import { useFilters } from "@/components/FilterProvider";
 import { berlinDate } from "@/lib/filterCorpus";
 import { TOPICS_SANS_REGIONAL } from "@/lib/topics";
 import { PUB_COLORS } from "@/components/TimeRangeFilter";
+import { useTweenedSeries } from "@/lib/chartTween";
 import FilterPills from "@/components/FilterPills";
 import TimeRangeFilter from "@/components/TimeRangeFilter";
 import DataTable, { type Col } from "@/components/DataTable";
@@ -310,7 +311,9 @@ function TrendChart({ terms, days }: { terms: Metric[]; days: string[] }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const VW = 1000, VH = 240, PAD_L = 0, PAD_B = 0;
   const N = days.length;
-  const max = useMemo(() => Math.max(1, ...terms.flatMap((t) => t.vals)), [terms]);
+  // Linien-Geometrie weich morphen (Tooltip/Legende lesen weiter die Roh-Werte).
+  const animTerms = useTweenedSeries(useMemo(() => terms.map((t) => ({ ...t, key: t.term })), [terms]));
+  const max = useMemo(() => Math.max(1, ...animTerms.flatMap((t) => t.vals)), [animTerms]);
   const X = (i: number) => (N <= 1 ? VW / 2 : (i / (N - 1)) * VW);
   const Y = (v: number) => VH - (v / max) * (VH - 8) - 4;
   const colorOf = (i: number) => PUB_COLORS[i % PUB_COLORS.length];
@@ -333,15 +336,15 @@ function TrendChart({ terms, days }: { terms: Metric[]; days: string[] }) {
         ))}
       </div>
       <div className="kt-chart-plot" ref={wrapRef} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-        <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="kt-chart-svg">
+        <svg key={terms.map((t) => t.term).join(",")} viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" className="kt-chart-svg chart-swap">
           {/* Horizontale Hilfslinien */}
           {[0.25, 0.5, 0.75].map((p) => <line key={p} x1={0} x2={VW} y1={VH - p * (VH - 8) - 4} y2={VH - p * (VH - 8) - 4} className="kt-grid" />)}
-          {terms.map((t, i) => {
+          {animTerms.map((t, i) => {
             const d = t.vals.map((v, j) => `${j === 0 ? "M" : "L"}${X(j).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ");
             return <path key={t.term} d={d} fill="none" stroke={colorOf(i)} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" opacity={0.92} />;
           })}
           {hover !== null && <line x1={X(hover)} x2={X(hover)} y1={0} y2={VH} className="kt-cursor" />}
-          {hover !== null && terms.map((t, i) => <circle key={t.term} cx={X(hover)} cy={Y(t.vals[hover])} r={2.6} fill={colorOf(i)} />)}
+          {hover !== null && animTerms.map((t, i) => <circle key={t.term} cx={X(hover)} cy={Y(t.vals[hover])} r={2.6} fill={colorOf(i)} />)}
         </svg>
         {hover !== null && (() => {
           const rows = terms.map((t, i) => ({ term: t.term, v: t.vals[hover], c: colorOf(i) })).filter((r) => r.v > 0).sort((a, b) => b.v - a.v);

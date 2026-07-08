@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
 import { axisTime, berlinDate, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
+import { useTweenedNumber } from "@/lib/chartTween";
 
 // „Auf einen Blick" — verdichtete Headline-Metriken mit Kontext.
 // Zählt über den gemeinsamen Corpus mit dem GLEICHEN Prädikat wie die Artikel-Tabelle
@@ -75,6 +76,14 @@ export default function PulseBar() {
       f.topics.join(","), f.lang, f.changed, f.depth, f.hideRegional, f.rangeFrom, f.rangeTo, f.timeAxis,
       f.subPats.join("|"), f.kwIdSet, nameById]);
 
+  // Count-up: Kennzahlen zählen weich zum neuen Wert statt hart umzuspringen.
+  // (Hooks VOR den early returns — React-Regel.)
+  const animN = useTweenedNumber(m.n);
+  const animPw = useTweenedNumber(m.pwPct);
+  const animNamed = useTweenedNumber(m.namedPct);
+  const animRev = useTweenedNumber(m.revPct);
+  const animWords = useTweenedNumber(m.avgWords);
+
   if (!f.corpusReady) {
     return (
       <>
@@ -94,7 +103,7 @@ export default function PulseBar() {
         {/* Volumen + Tempo mit Sparkline */}
         <div className="pulse-card panel pulse-wide">
           <div className="pulse-k">Artikel im Filter</div>
-          <div className="pulse-v">{m.n.toLocaleString("de-DE")}</div>
+          <div className="pulse-v">{Math.round(animN).toLocaleString("de-DE")}</div>
           <div className="pulse-sub">
             ø {m.perDay.toLocaleString("de-DE", { maximumFractionDigits: 1 })}/Tag
             {m.paceDelta !== null && (
@@ -109,7 +118,7 @@ export default function PulseBar() {
         {/* Paywall */}
         <div className="pulse-card panel">
           <div className="pulse-k">Hinter Paywall</div>
-          <div className="pulse-v" style={{ color: m.pwPct > 40 ? "var(--red)" : undefined }}>{m.pwPct}%</div>
+          <div className="pulse-v" style={{ color: m.pwPct > 40 ? "var(--red)" : undefined }}>{Math.round(animPw)}%</div>
           <div className="pulse-meter"><i style={{ width: `${m.pwPct}%`, background: "var(--red)" }} /></div>
           <div className="pulse-sub">{m.pwPct === 0 ? "frei zugänglich" : `${(100 - m.pwPct)}% frei lesbar`}</div>
         </div>
@@ -117,7 +126,7 @@ export default function PulseBar() {
         {/* Autoren-Transparenz */}
         <div className="pulse-card panel">
           <div className="pulse-k">Namentliche Autoren</div>
-          <div className="pulse-v" style={{ color: "var(--green)" }}>{m.namedPct}%</div>
+          <div className="pulse-v" style={{ color: "var(--green)" }}>{Math.round(animNamed)}%</div>
           <div className="pulse-meter"><i style={{ width: `${m.namedPct}%`, background: "var(--green)" }} /></div>
           <div className="pulse-sub">Rest: Redaktion / Agentur</div>
         </div>
@@ -125,7 +134,7 @@ export default function PulseBar() {
         {/* Stille Änderungen — das Alleinstellungsmerkmal */}
         <div className="pulse-card panel">
           <div className="pulse-k">Nachträglich geändert</div>
-          <div className="pulse-v" style={{ color: m.revPct > 0 ? "var(--amber)" : undefined }}>{m.revPct}%</div>
+          <div className="pulse-v" style={{ color: m.revPct > 0 ? "var(--amber)" : undefined }}>{Math.round(animRev)}%</div>
           <div className="pulse-meter"><i style={{ width: `${Math.min(100, m.revPct)}%`, background: "var(--amber)" }} /></div>
           <div className="pulse-sub">{m.edits.toLocaleString("de-DE")} Überschriften-Edits erfasst</div>
         </div>
@@ -133,7 +142,7 @@ export default function PulseBar() {
         {/* Artikel-Tiefe */}
         <div className="pulse-card panel">
           <div className="pulse-k">Ø Artikel-Tiefe</div>
-          <div className="pulse-v">{m.avgWords.toLocaleString("de-DE")}<span className="pulse-unit"> Wörter</span></div>
+          <div className="pulse-v">{Math.round(animWords).toLocaleString("de-DE")}<span className="pulse-unit"> Wörter</span></div>
           <div className="pulse-sub">≈ {m.avgRead} min Lesezeit</div>
         </div>
 
