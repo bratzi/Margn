@@ -1184,9 +1184,10 @@ table.dt.dt-fit { width: max-content; }
 .pc-footnote { font-size: 10.5px; color: var(--faint); line-height: 1.5; padding: 10px 14px 12px; border-top: 1px solid var(--line); }
 
 /* ---------- Auf einen Blick (PulseBar) ---------- */
-.pulse-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; margin-bottom: 8px; }
-.pulse-card { padding: 13px 15px; display: flex; flex-direction: column; gap: 2px; position: relative; overflow: hidden; text-align: left; }
-.pulse-card.pulse-wide { grid-column: span 2; }
+/* Horizontal scrollbar statt Umbruch — gleiches Muster wie .topic-cards drüber. */
+.pulse-grid { display: flex; align-items: stretch; gap: 12px; overflow-x: auto; padding: 2px 2px 10px; margin-bottom: 0; scroll-snap-type: x proximity; }
+.pulse-card { flex: 0 0 175px; scroll-snap-align: start; padding: 13px 15px; display: flex; flex-direction: column; gap: 2px; position: relative; overflow: hidden; text-align: left; }
+.pulse-card.pulse-wide { flex-basis: 320px; }
 .pulse-click { border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; transition: border-color .14s, transform .14s; box-shadow: var(--shadow); }
 .pulse-click:hover { border-color: var(--accent); transform: translateY(-2px); }
 .pulse-k { font-size: 11px; color: var(--muted); font-weight: 550; letter-spacing: .01em; }
@@ -1201,10 +1202,6 @@ table.dt.dt-fit { width: max-content; }
 .pulse-meter i { display: block; height: 100%; border-radius: 3px; transition: width .5s cubic-bezier(.4,0,.2,1); }
 .pulse-spark { position: absolute; right: 12px; bottom: 11px; width: 96px; height: 26px; opacity: .9; }
 .pulse-wide .pulse-sub { max-width: calc(100% - 104px); }
-@media (max-width: 600px) {
-  .pulse-card.pulse-wide { grid-column: span 1; }
-  .pulse-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-}
 
 /* ---------- TopicCards: Benchmark-Chips ---------- */
 .tc-m { position: relative; }
