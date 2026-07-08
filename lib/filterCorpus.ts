@@ -64,16 +64,32 @@ export const axisTime = (r: TimedRow, axis: TimeAxis) =>
 // Vorher liefen alle Tagesgrenzen über UTC-Mitternacht → „heute" begann für DE-Nutzer erst um
 // 02:00 nachts. Jetzt: Tage und Range-Grenzen in Berlin-Zeit, DST-sicher via Intl.
 const BERLIN_TZ = "Europe/Berlin";
+// ⚠ PERF: toLocaleDateString(…, { timeZone }) baut bei JEDEM Aufruf ein neues
+// Intl.DateTimeFormat (~0,5 ms). berlinDate läuft über jede Korpus-Zeile in mehreren
+// Komponenten (41k Zeilen × ~10 Aufrufe) — das fror den Main-Thread ~20 s ein.
+// Daher: EIN gecachter Formatter + Memo je Eingabe-String (Zeilen werden von mehreren
+// Komponenten mit identischen Timestamps angefragt).
+const BERLIN_DAY_FMT = new Intl.DateTimeFormat("en-CA", { timeZone: BERLIN_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+const berlinDateMemo = new Map<string, string>();
 // "YYYY-MM-DD" des Zeitpunkts in Berlin.
 export function berlinDate(d: Date | string): string {
-  return (typeof d === "string" ? new Date(d) : d).toLocaleDateString("en-CA", { timeZone: BERLIN_TZ });
+  if (typeof d === "string") {
+    let v = berlinDateMemo.get(d);
+    if (v === undefined) {
+      v = BERLIN_DAY_FMT.format(new Date(d));
+      if (berlinDateMemo.size > 300000) berlinDateMemo.clear(); // Wachstum deckeln
+      berlinDateMemo.set(d, v);
+    }
+    return v;
+  }
+  return BERLIN_DAY_FMT.format(d);
 }
-// Offset (ms) Berlin gegenüber UTC zum Zeitpunkt `date`.
+// Offset (ms) Berlin gegenüber UTC zum Zeitpunkt `date`. Formatter ebenfalls gecacht.
+const BERLIN_PARTS_FMT = new Intl.DateTimeFormat("en-US", { timeZone: BERLIN_TZ, hour12: false,
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 function berlinOffsetMs(date: Date): number {
-  const dtf = new Intl.DateTimeFormat("en-US", { timeZone: BERLIN_TZ, hour12: false,
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const m: Record<string, string> = {};
-  for (const p of dtf.formatToParts(date)) m[p.type] = p.value;
+  for (const p of BERLIN_PARTS_FMT.formatToParts(date)) m[p.type] = p.value;
   const hour = m.hour === "24" ? 0 : +m.hour;
   return Date.UTC(+m.year, +m.month - 1, +m.day, hour, +m.minute, +m.second) - date.getTime();
 }
