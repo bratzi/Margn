@@ -343,7 +343,8 @@ export default function ArticleDetail({ id }: { id: number }) {
 
           <DL h="Scan-Verlauf">
             <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
-              changeTimes={snaps.map((s) => s.captured_at)} />
+              changeTimes={snaps.map((s) => s.captured_at)}
+              goneAt={link?.gone ? link.since : null} />
           </DL>
 
           <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>

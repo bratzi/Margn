@@ -773,6 +773,12 @@ table.dt.dt-fit { width: max-content; }
 .scant-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .scant-dot-leg { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); border: 2px solid var(--surface); box-shadow: 0 0 0 1.5px var(--line-2); }
 .scant-dot-leg.change { background: var(--amber); box-shadow: 0 0 0 2px var(--marker-sub); }
+.scant-dot-leg.gone { background: var(--red); box-shadow: 0 0 0 2px var(--red-sub); }
+/* Rausgeflogen-Marker auf der Zeitlinie: roter Punkt am Ort der letzten Link-Sichtung.
+   z-index über den Scan-Punkten — der Moment des Verschwindens ist die wichtigere Information. */
+.scant-gone { position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 5; pointer-events: auto; }
+.scant-gone-dot { display: block; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--red); border: 2px solid var(--surface); box-shadow: 0 0 0 3px var(--red-sub); }
 
 /* ---------- Timeline ---------- */
 .tl { position: relative; padding-left: 24px; }

@@ -8,23 +8,28 @@ type DotInfo = {
   change: boolean;
 };
 
-export default function ScanTimeline({ firstSeen, lastSeen, scanTimes, changeTimes, scanCount }: {
+export default function ScanTimeline({ firstSeen, lastSeen, scanTimes, changeTimes, scanCount, goneAt }: {
   firstSeen: string | null;
   lastSeen: string | null;
   scanTimes: string[] | null;
   changeTimes: string[];
   scanCount: number | null;
+  // Zeitpunkt der LETZTEN Link-Sichtung, wenn der Artikel rausgeflogen ist (sonst null):
+  // ab hier fand der Crawl den Link auf keiner Übersichtsseite/Feed/Sitemap mehr.
+  goneAt?: string | null;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ dot: DotInfo; clientX: number; clientY: number } | null>(null);
 
-  const { dots, t0, t1 } = useMemo(() => {
+  const { dots, t0, t1, goneX, goneT } = useMemo(() => {
     const all = (scanTimes && scanTimes.length ? scanTimes : [firstSeen, lastSeen]).filter(Boolean) as string[];
     const ms = all.map((d) => new Date(d).getTime()).sort((a, b) => a - b);
     const first = firstSeen ? new Date(firstSeen).getTime() : ms[0];
     const last  = lastSeen  ? new Date(lastSeen).getTime()  : ms[ms.length - 1];
+    const gone = goneAt ? new Date(goneAt).getTime() : null;
     const t0 = Math.min(first, ms[0] ?? first);
-    const t1 = Math.max(last,  ms[ms.length - 1] ?? last);
+    // Rausflug-Zeitpunkt kann NACH dem letzten Scan liegen → Achse bis dorthin dehnen.
+    const t1 = Math.max(last, ms[ms.length - 1] ?? last, gone ?? -Infinity);
     const span = Math.max(1, t1 - t0);
     const changeSet = new Set(changeTimes.map((c) => Math.round(new Date(c).getTime() / 60000)));
     const dotArr: DotInfo[] = ms.map((m) => ({
@@ -32,8 +37,9 @@ export default function ScanTimeline({ firstSeen, lastSeen, scanTimes, changeTim
       t: m,
       change: changeSet.has(Math.round(m / 60000)),
     }));
-    return { dots: dotArr, t0, t1 };
-  }, [firstSeen, lastSeen, scanTimes, changeTimes]);
+    const goneX = gone != null ? ((gone - t0) / span) * 100 : null;
+    return { dots: dotArr, t0, t1, goneX, goneT: gone };
+  }, [firstSeen, lastSeen, scanTimes, changeTimes, goneAt]);
 
   const fmtFull = (ms: number) =>
     new Date(ms).toLocaleString("de-DE", {
@@ -120,6 +126,15 @@ export default function ScanTimeline({ firstSeen, lastSeen, scanTimes, changeTim
           </div>
         ))}
 
+        {/* Rausgeflogen-Marker: letzter Ort, an dem der Crawl den Link noch verlinkt fand.
+            Danach tauchte er auf keiner Startseite, keinem Ressort, Feed oder Sitemap mehr auf. */}
+        {goneX != null && goneT != null && (
+          <div className="scant-gone" style={{ left: `${goneX}%` }}
+            title={`Link nicht mehr gefunden — zuletzt verlinkt gesehen ${fmtFull(goneT)}`}>
+            <span className="scant-gone-dot" />
+          </div>
+        )}
+
         {/* Scan-Punkte */}
         {dots.map((d, i) => (
           <button
@@ -150,6 +165,7 @@ export default function ScanTimeline({ firstSeen, lastSeen, scanTimes, changeTim
       <div className="scant-legend">
         <span><i className="scant-dot-leg" /> Scan</span>
         <span><i className="scant-dot-leg change" /> Scan mit Änderung</span>
+        {goneX != null && <span><i className="scant-dot-leg gone" /> Link nicht mehr gefunden</span>}
         {baseline && <span className="faint">· Einzel-Scans werden ab jetzt erfasst</span>}
       </div>
     </div>
