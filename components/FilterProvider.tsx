@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel, TOPICS_SANS_REGIONAL } from "@/lib/topics";
 import { fetchAllRows } from "@/lib/pgFetch";
-import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, makeBerlinDays, berlinDayBoundsUTC, type CorpusRow, type TimeAxis } from "@/lib/filterCorpus";
+import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, makeBerlinDays, berlinDayBoundsUTC, onlineCutFrom, type CorpusRow, type TimeAxis } from "@/lib/filterCorpus";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
@@ -376,15 +376,13 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [needsCorpus]);
 
-  // Grenze „noch verlinkt" ↔ „rausgeflogen": jüngster Scan-Stand über den GESAMTEN Corpus
-  // minus 90 min Crawl-Toleranz (ein Lauf dauert ~30 min; Seiten, die der laufende Scan noch
-  // nicht erreicht hat, sind keine Abgänge). EINE Wahrheit für den Bestand-Filter
-  // (makeMatcher + applyServerFilters) UND die Fluktuations-KPIs in PulseBar.
-  const onlineCut = useMemo(() => {
-    let newest = 0;
-    for (const r of corpus) if (r.last_seen) { const t = Date.parse(r.last_seen); if (t > newest) newest = t; }
-    return newest ? new Date(newest - 90 * 60000).toISOString() : null;
-  }, [corpus]);
+  // Grenze „noch verlinkt" ↔ „rausgeflogen": jüngste LINK-SICHTUNG über den GESAMTEN Corpus
+  // minus ONLINE_TOLERANCE_MS. Vorher stand hier der jüngste SCAN-Stand − 90 min — das war die
+  // falsche Größe: Re-Scans sind budgetiert/altersgestaffelt (Median-Scanalter ~225 h), also
+  // wirkten 41 % der noch verlinkten Artikel wie Abgänge (alle Verlage, alle Typen).
+  // EINE Wahrheit für den Bestand-Filter (makeMatcher + applyServerFilters) UND die
+  // Fluktuations-KPIs in PulseBar.
+  const onlineCut = useMemo(() => onlineCutFrom(corpus), [corpus]);
 
   // Keyword → Artikel-IDs (zentral, damit Tabelle UND Analytics dieselbe Menge nutzen)
   const [kwIds, setKwIds] = useState<number[] | null>(null);

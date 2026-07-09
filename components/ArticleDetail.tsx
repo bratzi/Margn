@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder } from "@/components/icons";
+import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder, Link2, Link2Off } from "@/components/icons";
 import { topicLabel } from "@/lib/topics";
-import { ALLOWED_PTYPES } from "@/lib/filterCorpus";
+import { ALLOWED_PTYPES, ONLINE_TOLERANCE_MS } from "@/lib/filterCorpus";
 import ScanTimeline from "@/components/ScanTimeline";
 import ExtLink from "@/components/ExtLink";
 
@@ -14,6 +14,8 @@ type Detail = {
   published_at: string | null; modified_at: string | null; paywalled: boolean | null;
   word_count: number | null; reading_min: number | null; article_type: string | null;
   lang_detected: string | null; first_seen: string | null; last_seen: string | null; author_status: string | null; topic: string | null;
+  // link_seen = pages.last_seen = zuletzt VERLINKT gesehen (nicht: zuletzt gescannt).
+  link_seen: string | null;
   outlet: string; country: string; base_url: string; depth: number | null;
   revision_count: number | null; extension_count: number | null; edit_count: number | null;
   scan_count: number | null; scan_times: string[] | null;
@@ -72,6 +74,7 @@ export default function ArticleDetail({ id }: { id: number }) {
   const [pctls, setPctls] = useState<Pctl[] | null>(null);
   const [editedShare, setEditedShare] = useState<number | null>(null); // Anteil bearbeiteter Artikel der Quelle
   const [neighbors, setNeighbors] = useState<Neighbor[] | null>(null);
+  const [onlineCut, setOnlineCut] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -79,12 +82,17 @@ export default function ArticleDetail({ id }: { id: number }) {
       const { data } = await supabase.from("article_detail").select("*").eq("id", id).single();
       if (!data) { setLoading(false); return; }
       setA(data as Detail);
-      const [au, kw, cat, sn] = await Promise.all([
+      const [au, kw, cat, sn, cut] = await Promise.all([
         supabase.from("article_authors").select("authors(name)").eq("article_id", id),
         supabase.from("article_keywords").select("keywords(term)").eq("article_id", id),
         supabase.from("article_categories").select("categories(name)").eq("article_id", id),
         supabase.from("article_snapshots").select("*").eq("article_id", id).order("captured_at", { ascending: true }),
+        // Jüngste Link-Sichtung des GESAMTEN Bestands = Bezugspunkt für „noch verlinkt".
+        // Gegen „jetzt" zu messen wäre falsch, sobald der Crawler pausiert (dann wäre alles „raus").
+        supabase.from("page_overview").select("link_seen").order("link_seen", { ascending: false, nullsFirst: false }).limit(1),
       ]);
+      const newestLink = ((cut.data ?? []) as any[])[0]?.link_seen as string | undefined;
+      setOnlineCut(newestLink ? new Date(Date.parse(newestLink) - ONLINE_TOLERANCE_MS).toISOString() : null);
       setAuthors(((au.data ?? []) as any[]).map((r) => r.authors?.name).filter(Boolean));
       setKeywords(((kw.data ?? []) as any[]).map((r) => r.keywords?.term).filter(Boolean));
       setCategories(((cat.data ?? []) as any[]).map((r) => r.categories?.name).filter(Boolean));
@@ -252,6 +260,12 @@ export default function ArticleDetail({ id }: { id: number }) {
 
   const segs = (() => { try { return new URL(a.url).pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean); } catch { return []; } })();
   const type = a.article_type ?? "news";
+  // Online-Bestand: „noch verlinkt" = letzte LINK-Sichtung innerhalb der Toleranz. Ist der Artikel
+  // rausgeflogen, ist genau diese Sichtung der Zeitpunkt, ab dem er nirgends mehr auftauchte.
+  // Bezugsgröße ist NICHT der letzte Scan (der ist budgetiert und sagt nichts über Verlinkung).
+  const link = a.link_seen && onlineCut
+    ? { gone: Date.parse(a.link_seen) < Date.parse(onlineCut), since: a.link_seen }
+    : null;
 
   return (
     <div className="page detail">
@@ -265,6 +279,9 @@ export default function ArticleDetail({ id }: { id: number }) {
         <TypeBadge type={type} />
         {a.paywalled === true && <span className="badge lock"><Lock /> Paywall</span>}
         {a.paywalled === false && <span className="badge free"><LockOpen /> Frei zugänglich</span>}
+        {link && (link.gone
+          ? <span className="badge gone"><Link2Off /> Rausgeflogen</span>
+          : <span className="badge online"><Link2 /> Noch verlinkt</span>)}
       </div>
       <h1 className="d-title">{a.title ?? a.url.replace(/^https?:\/\/(www\.)?/, "")}</h1>
       {a.description && <p className="d-dek">{a.description}</p>}
@@ -299,6 +316,29 @@ export default function ArticleDetail({ id }: { id: number }) {
               {a.reading_min ? <Stat k="Lesezeit" v={`${a.reading_min} Min`} /> : null}
               <Stat k="Sprache" v={LANG[a.lang_detected ?? ""] ?? a.lang_detected ?? "—"} />
             </div>
+          </DL>
+
+          <DL h="Online-Bestand">
+            {!link ? (
+              <span className="faint" style={{ fontSize: 13 }}>Verlinkung unbekannt — für diese Seite liegt keine Link-Sichtung vor.</span>
+            ) : link.gone ? (
+              <>
+                <span className="badge gone"><Link2Off /> Rausgeflogen</span>
+                <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>
+                  Zuletzt verlinkt gesehen am <b>{fmtDate(link.since)}</b> — seither taucht der Artikel
+                  auf keiner Startseite, keinem Ressort, in keinem Feed und keiner Sitemap mehr auf
+                  (seit {timeDelta(link.since, new Date().toISOString())}).
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="badge online"><Link2 /> Noch verlinkt</span>
+                <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>
+                  Zuletzt verlinkt gesehen am <b>{fmtDate(link.since)}</b> — der Verlag führt den Artikel
+                  weiterhin auf mindestens einer Übersichtsseite, im Feed oder in der Sitemap.
+                </p>
+              </>
+            )}
           </DL>
 
           <DL h="Scan-Verlauf">
@@ -520,8 +560,41 @@ function inlineOps(oldS: string, newS: string): Op[] {
   for (let x = 1; x < raw.length - 1; x++) if (/^\s+$/.test(raw[x].t) && raw[x].op === "eq" && raw[x - 1].op === raw[x + 1].op && raw[x - 1].op !== "eq") raw[x].op = raw[x - 1].op;
   const segs: Op[] = [];
   for (const r of raw) { const l = segs[segs.length - 1]; if (l && l.op === r.op) l.t += r.t; else segs.push({ ...r }); }
-  for (let x = 1; x < segs.length; x++) if (segs[x].op === "ins" && segs[x - 1].op === "del") segs[x].op = "repl";
-  return segs;
+  // Unterscheidet sich ein del/ins-Paar NUR in Satzzeichen/Whitespace/Groß-Klein (typisch: ein
+  // nachträglich gesetztes Komma, „plant" → „plant,", Art. 1531034), dann NICHT das ganze Wort
+  // durchstreichen + neu einfügen, sondern ZEICHENGENAU diffen — sichtbar bleibt nur das Komma.
+  // Der Buchstaben/Ziffern-Vergleich garantiert, dass hier kein echter Wortwechsel char-weise
+  // zerhackt wird (das bliebe ein sauberer del/ins-Block).
+  const refined: Op[] = [];
+  for (let x = 0; x < segs.length; x++) {
+    const a = segs[x], b = segs[x + 1];
+    if (a.op === "del" && b && b.op === "ins" && a.t.length <= 400 && b.t.length <= 400 &&
+        alnumOnly(a.t) !== "" && alnumOnly(a.t) === alnumOnly(b.t)) {
+      refined.push(...charOps(a.t, b.t)); x++; continue;
+    }
+    refined.push(a);
+  }
+  const segs2 = mergeOps(refined);
+  for (let x = 1; x < segs2.length; x++) if (segs2[x].op === "ins" && segs2[x - 1].op === "del") segs2[x].op = "repl";
+  return segs2;
+}
+// Buchstaben+Ziffern eines Segments (klein, ohne Satzzeichen/Whitespace) — Gleichheit heißt:
+// es änderte sich NUR Interpunktion/Schreibweise.
+function alnumOnly(s: string): string { return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
+// Zeichen-genauer LCS-Diff. Nur für kurze, nachweislich fast identische Segmente (s. inlineOps),
+// sonst entstünde unlesbares Zeichen-Konfetti.
+function charOps(a: string, b: string): Op[] {
+  const m = a.length, k = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(k + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) for (let j = k - 1; j >= 0; j--)
+    dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out: Op[] = []; let i = 0, j = 0;
+  while (i < m || j < k) {
+    if (i < m && j < k && a[i] === b[j]) { out.push({ t: a[i], op: "eq" }); i++; j++; }
+    else if (i < m && (j >= k || dp[i + 1][j] >= dp[i][j + 1])) { out.push({ t: a[i], op: "del" }); i++; }
+    else { out.push({ t: b[j], op: "ins" }); j++; }
+  }
+  return out;
 }
 // Lange Body-Diffs (Ticker/Liveblog/Riesenabsatz wie n-tv) auf ZEILEN-Ebene diffen statt
 // Wort-Ebene: ein Wort-LCS über zwei verschobene 1500-Zeichen-Fenster matcht zufällig
@@ -605,8 +678,10 @@ function sealTruncatedTail(ops: Op[], netWd = 0): Op[] {
   // Echter Zugewinn: zeigen — aber OHNE das angeschnittene Alt-Fragment. Die Ergänzung beginnt
   // mit genau diesem Wort, ein durchgestrichenes „e" vor grünem „einigen…" ist reiner Cap-Müll.
   if (netWd > 0 && tailWords <= netWd + 6) return [...ops.slice(0, di), ...ops.slice(di + 1)];
-  return [...ops.slice(0, di), { t: " …", op: "trunc" }];
+  return [...ops.slice(0, di), GAP];
 }
+// Auslassungs-Marker. Trägt bewusst KEINEN Text — gerendert wird eine visuelle Trennung.
+const GAP: Op = { t: "", op: "trunc" };
 // Benachbarte gleichartige Segmente wieder verschmelzen (nach Umklassifizierungen).
 function mergeOps(ops: Op[]): Op[] {
   const out: Op[] = [];
@@ -667,7 +742,7 @@ function sealMisalignedHead(ops: Op[]): Op[] {
   const headLen = head.reduce((s, o) => s + o.t.length, 0);
   if (headLen < 100) return ops;                           // kleiner Vorspann = echte Änderung → zeigen
   if (normTxt(ops[e].t).length < 24) return ops;           // der folgende Anker muss echt sein
-  return [{ t: "… ", op: "trunc" }, ...ops.slice(e)];
+  return [GAP, ...ops.slice(e)];
 }
 // (4) Versatz am ENDE versiegeln — das Gegenstück zu sealMisalignedHead und die Ursache der vom
 // User gemeldeten „mehrfach gelöschten" Passagen (Art. 453089): Bei rollenden Artikeln (oben kommt
@@ -690,7 +765,7 @@ function sealMisalignedTail(ops: Op[], netWd = 0): Op[] {
   if (b && !a.startsWith(b)) return ops;                   // Neu-Rest muss den Alt-Block fortsetzen (Fenster-Überlapp)
   const lostWords = (oldT.match(/\S+/g) ?? []).length;
   if (netWd < 0 && -netWd >= lostWords / 2) return ops;    // Verlust in dieser Größenordnung real → zeigen
-  return [...ops.slice(0, e + 1), { t: " …", op: "trunc" }];
+  return [...ops.slice(0, e + 1), GAP];
 }
 // Alle Aufräum-Schritte in fester Reihenfolge: erst Whitespace-Joins tilgen (vergrößert die echten
 // Anker), dann Konfetti zu Blöcken bündeln, dann Anfangs-/Schluss-Versatz versiegeln.
@@ -732,7 +807,9 @@ function effPublished(pub: string | null, firstSeen: string | null): string | nu
 // Sind mehrere Änderungsstellen weit auseinander, entstehen mehrere Hunks → mehrere kleine
 // Boxen statt einer riesigen (User-Wunsch: „mehrere Boxen statt 1 großen, logisch gesplittet").
 function toHunks(ops: Op[], ctx = 2): Op[][] {
-  const ch = ops.map((o, i) => (o.op !== "eq" ? i : -1)).filter((i) => i >= 0);
+  // Nur ECHTE Änderungen eröffnen einen Hunk — eine Auslassungs-Lücke ist keine Änderung
+  // (sonst entstünde eine eigene „Stelle" die nur aus einem Trenner besteht).
+  const ch = ops.map((o, i) => (o.op === "del" || o.op === "ins" || o.op === "repl" ? i : -1)).filter((i) => i >= 0);
   if (!ch.length) return [];
   const groups: [number, number][] = [];
   let start = ch[0], prev = ch[0];
@@ -744,12 +821,17 @@ function toHunks(ops: Op[], ctx = 2): Op[][] {
   return groups.map(([a, b]) => ops.slice(Math.max(0, a - ctx), Math.min(ops.length, b + ctx + 1)));
 }
 // Lange Kontext-Zeilen an den Hunk-Rändern kürzen (zur Änderung hin), damit ein Hunk kompakt bleibt.
+// Kontext an WORTGRENZEN kappen — ein mitten im Wort beginnender Block („ters. Während…") liest
+// sich wie ein Textfehler. head = Ende behalten (vorne sauber anschneiden), tail = Anfang behalten.
+function cutHead(s: string, n: number): string { return s.slice(-n).replace(/^\S*\s+/u, ""); }
+function cutTail(s: string, n: number): string { return s.slice(0, n).replace(/\s+\S*$/u, ""); }
 function trimHunk(h: Op[]): Op[] {
-  return h.map((o, i) => {
-    if (o.op !== "eq" || o.t.length <= 160) return o;
-    if (i === 0) return { ...o, t: "… " + o.t.slice(-120) };
-    if (i === h.length - 1) return { ...o, t: o.t.slice(0, 120) + " …" };
-    return { ...o, t: o.t.slice(0, 80) + " … " + o.t.slice(-80) };
+  // Gekürzter Kontext wird als visuelle Lücke markiert, NICHT als „…" im Textfluss.
+  return h.flatMap((o, i) => {
+    if (o.op !== "eq" || o.t.length <= 160) return [o];
+    if (i === 0) return [GAP, { ...o, t: cutHead(o.t, 120) }];
+    if (i === h.length - 1) return [{ ...o, t: cutTail(o.t, 120) }, GAP];
+    return [{ ...o, t: cutTail(o.t, 80) }, GAP, { ...o, t: cutHead(o.t, 80) }];
   });
 }
 // Eine einzelne Diff-Box — UNIFIED inline (wie Section 3 der Landingpage): EIN Textfluss,
@@ -766,8 +848,10 @@ function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string 
       ) : (
         <div className="dq-uni">
           {ops.map((o, i) =>
-            o.op === "skip" ? <span key={i} className="dq-uni-skip">{o.t}</span>
-            : o.op === "trunc" ? <span key={i} className="dq-uni-skip" title="Text außerhalb des erfassten Ausschnitts (alte Fassung war gekürzt)">{o.t}</span>
+            // Auslassung = echte visuelle Trennung, KEIN „…" im Textfluss (sonst liest sich ein
+            // Sprung wie fortlaufender Text, obwohl dahinter ein ganz anderer Absatz stehen kann).
+            o.op === "skip" || o.op === "trunc"
+              ? <span key={i} className="dq-gap" role="separator" title="Sprung: Hier fehlt Text — die Blöcke hängen nicht zusammen" />
             : o.op === "del" ? <del key={i} className="dq-uni-del">{o.t}</del>
             : o.op === "ins" || o.op === "repl" ? <ins key={i} className="dq-uni-ins">{o.t}</ins>
             : <span key={i}>{o.t}</span>
@@ -782,22 +866,40 @@ function DiffBox({ ops, label, kind }: { ops: Op[]; label: string; kind: string 
 // gesplittet statt einer riesigen Box.
 function DiffBlock({ oldS, newS, label, kind = "edit", netWd = 0 }: { oldS: string; newS: string; label: string; kind?: "edit" | "title" | "meta"; netWd?: number }) {
   oldS = decodeEntities(oldS); newS = decodeEntities(newS);
-  // Kappungs-Schwanz abfangen: angeschnittenes Endwort aus oldS strippen + neutrales „…" anhängen,
+  // Kappungs-Schwanz abfangen: angeschnittenes Endwort aus oldS strippen + neutrale Lücke anhängen,
   // statt ein halbes Wort („beko", „Arbe") als „gelöscht" zu zeigen. Greift für ALLE Verlage.
+  // WICHTIG: auf den ORIGINAL-Strings prüfen — truncatedFrag verlässt sich auf einen evtl.
+  // vorhandenen „…"-Endmarker, der gleich darunter entfernt wird.
   const frag = truncatedFrag(oldS, newS);
-  const oldE = frag ? oldS.slice(0, oldS.length - frag.length).replace(/\s+$/u, "") : oldS;
-  const seal = (ops: Op[]): Op[] => (frag ? mergeOps([...ops, { t: " …", op: "trunc" }]) : ops);
-  const big = oldE.length + newS.length > 600;
-  if (!big) return <DiffBox ops={seal(finalizeOps(inlineOps(oldE, newS), netWd))} label={label} kind={kind} />;
+  let oldE = frag ? oldS.slice(0, oldS.length - frag.length).replace(/\s+$/u, "") : oldS;
+  let newE = newS;
+  // Der Scraper (diffRegion) klebt „…" an Anfang/Ende des gespeicherten Fensters. Als TEXT gerendert
+  // suggeriert das einen zusammenhängenden Absatz. Marker entfernen → als visuelle Lücke zeigen.
+  const HEAD_ELL = /^\s*…\s*/u, TAIL_ELL = /\s*…\s*$/u;
+  const headGap = HEAD_ELL.test(oldE) && HEAD_ELL.test(newE);
+  if (headGap) {
+    oldE = oldE.replace(HEAD_ELL, ""); newE = newE.replace(HEAD_ELL, "");
+    // Hinter dem Marker steht ein angeschnittenes Wort („…ten: Gmail-Nutzer"). Beide Seiten teilen
+    // denselben Vorspann (diffRegion schneidet sie am selben Offset) → identisch kappen, sonst
+    // entstünde ein Schein-Unterschied. Nur wenn das erste Token wirklich gleich ist.
+    const t1 = oldE.match(/^\S*\s+/u)?.[0], t2 = newE.match(/^\S*\s+/u)?.[0];
+    if (t1 && t2 && t1 === t2) { oldE = oldE.slice(t1.length); newE = newE.slice(t2.length); }
+  }
+  const tailGap = TAIL_ELL.test(oldE) || TAIL_ELL.test(newE) || !!frag;
+  oldE = oldE.replace(TAIL_ELL, ""); newE = newE.replace(TAIL_ELL, "");
+  const seal = (ops: Op[]): Op[] =>
+    mergeOps([...(headGap ? [GAP] : []), ...ops, ...(tailGap ? [GAP] : [])]);
+  const big = oldE.length + newE.length > 600;
+  if (!big) return <DiffBox ops={seal(finalizeOps(inlineOps(oldE, newE), netWd))} label={label} kind={kind} />;
   // METHODENWAHL: WORT-Diff bevorzugen (sauber, markiert nur die geänderten Wörter — auch bei
   // langen Bodys mit verstreuten kleinen Änderungen, Art. 443924). NUR bei KONFETTI (sehr viele
   // verstreute Blöcke, typisch für rollende Ticker mit wiederkehrenden Tokens) auf den ZEILEN-Diff
   // zurückfallen. Anschließend räumt finalizeOps das Ergebnis auf: Whitespace-Joins tilgen,
   // restliches Konfetti zu sauberen Blöcken bündeln, Anfangs-/Schluss-Versatz als „…" versiegeln —
   // damit NIE ein Block durchgestrichen erscheint, der real noch im Artikel steht (Art. 567492).
-  const wordOps = inlineOps(oldE, newS);
+  const wordOps = inlineOps(oldE, newE);
   const changeBlocks = wordOps.reduce((s, o) => s + (o.op !== "eq" ? 1 : 0), 0);
-  const ops = seal(finalizeOps(changeBlocks <= 40 ? wordOps : refineLineOps(lineOps(oldE, newS)), netWd));
+  const ops = seal(finalizeOps(changeBlocks <= 40 ? wordOps : refineLineOps(lineOps(oldE, newE)), netWd));
   const hunks = toHunks(ops).map(trimHunk);
   if (hunks.length <= 1) {
     return <DiffBox ops={hunks[0] ?? ops} label={label} kind={kind} />;

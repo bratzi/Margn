@@ -26,13 +26,36 @@ export type CorpusRow = {
   ptype: string; topic: string | null; author_status: string | null;
   paywalled: boolean | null; language: string | null;
   published_at: string | null; discovered_at: string | null; last_seen: string | null;
+  // link_seen = pages.last_seen = zuletzt VERLINKT gesehen (Startseite/Ressort/Feed/Sitemap).
+  // NICHT last_seen (= articles.last_seen = zuletzt GESCANNT) — der Re-Scan ist budgetiert und
+  // gestaffelt, sein Alter sagt nichts über die Verlinkung. Siehe ONLINE_TOLERANCE_MS.
+  link_seen: string | null;
   word_count: number | null; revision_count: number | null; edit_count: number | null;
   scan_count: number | null; rubric: string | null;
 };
 
 export const CORPUS_COLS =
   "id,article_id,source_id,url,ptype,topic,author_status,paywalled,language," +
-  "published_at,discovered_at,last_seen,word_count,revision_count,edit_count,scan_count,rubric";
+  "published_at,discovered_at,last_seen,link_seen,word_count,revision_count,edit_count,scan_count,rubric";
+
+// Wie lange muss ein Artikel-Link STILL sein, bis wir ihn „rausgeflogen" nennen? Ein Konfidenz-
+// Regler, empirisch gesetzt (Messung 09.07., Link-Alter aller Artikel-Seiten):
+//   0–1 h: 2237  |  1–2 h: 157  |  2–3 h: 83  |  3–6 h: 246  |  6–26 h: ~1000  |  72 h+: 29844
+// Die Discovery läuft stündlich; noch verlinkte Seiten werden ganz überwiegend binnen EINER Stunde
+// wieder gesichtet, danach folgt nur ein Rinnsal. 6 h = sechs verpasste Läufe → robust gegen
+// Fetch-/Sitemap-Budget-Lücken, aber schnell genug, dass Abgänge NOCH AM SELBEN TAG sichtbar werden.
+// (26 h — das Fenster von linked_stale_articles — wäre für die Zustandsfrage zu träge: die
+// „Rausgeflogen"-Kennzahl eines Tages-Zeitraums wäre strukturell immer 0.)
+// Zu kurz wäre falsch: bei 90 min zählten 41 % der noch verlinkten Artikel als Abgang.
+export const ONLINE_TOLERANCE_MS = 6 * 60 * 60 * 1000;
+
+// Grenze für den Online-Bestand: jüngste Link-Sichtung im Korpus − Toleranz. Gegen „jetzt" zu
+// messen wäre falsch, sobald der Crawler pausiert (dann wäre plötzlich alles „raus").
+export function onlineCutFrom(rows: { link_seen?: string | null }[]): string | null {
+  let newest = 0;
+  for (const r of rows) if (r.link_seen) { const t = Date.parse(r.link_seen); if (t > newest) newest = t; }
+  return newest ? new Date(newest - ONLINE_TOLERANCE_MS).toISOString() : null;
+}
 
 // Zeitachse: nach welchem Zeitstempel gefiltert/gebucketet wird.
 //  - "published": wann der Verlag den Artikel veröffentlicht hat (Publikations-Timing).
@@ -51,8 +74,8 @@ export type FilterSnapshot = {
   // Meldungen — sie erschlagen jede Themen-/Quellen-Verteilung. Per Filter zuschaltbar.
   hideRegional: boolean;
   // Online-Bestand: "all" | "online" (noch verlinkt) | "gone" (rausgeflogen).
-  // Grenze ist onlineCut = jüngster Scan-Stand des Corpus − 90 min Crawl-Toleranz
-  // (FilterProvider berechnet ihn; gleiche Definition wie die Fluktuations-KPIs).
+  // Grenze ist onlineCut = jüngste LINK-Sichtung des Corpus − ONLINE_TOLERANCE_MS
+  // (FilterProvider berechnet ihn via onlineCutFrom; gleiche Definition wie die Fluktuations-KPIs).
   linkState: string; onlineCut: string | null;
 };
 
@@ -133,11 +156,11 @@ export function applyServerFilters(q: any, f: FilterSnapshot, subPats: string[],
   if (f.depth === "kurz") q = q.gt("word_count", 0).lt("word_count", 300);
   else if (f.depth === "mittel") q = q.gte("word_count", 300).lte("word_count", 900);
   else if (f.depth === "lang") q = q.gt("word_count", 900);
-  // Online-Bestand: „rausgeflogen" = letzte Sichtung vor onlineCut (seither nicht mehr
-  // verlinkt angetroffen); „noch verlinkt" = im jüngsten Scan-Stand gesehen.
+  // Online-Bestand: „rausgeflogen" = letzte LINK-Sichtung vor onlineCut (seither nirgends mehr
+  // verlinkt angetroffen); „noch verlinkt" = innerhalb der Toleranz verlinkt gesehen.
   if (f.onlineCut) {
-    if (f.linkState === "gone") q = q.lt("last_seen", f.onlineCut);
-    else if (f.linkState === "online") q = q.gte("last_seen", f.onlineCut);
+    if (f.linkState === "gone") q = q.lt("link_seen", f.onlineCut);
+    else if (f.linkState === "online") q = q.gte("link_seen", f.onlineCut);
   }
   if (f.timeAxis === "seen") {
     // Scan-Achse: last_seen ist praktisch immer gesetzt → einfacher Bereichsfilter.
@@ -190,10 +213,10 @@ export function makeMatcher(
     if (f.depth === "kurz") { if (r.word_count == null || r.word_count <= 0 || r.word_count >= 300) return false; }
     else if (f.depth === "mittel") { if (r.word_count == null || r.word_count < 300 || r.word_count > 900) return false; }
     else if (f.depth === "lang") { if (r.word_count == null || r.word_count <= 900) return false; }
-    // Online-Bestand — PostgREST-Semantik gespiegelt: NULL last_seen fällt in beiden Modi raus.
+    // Online-Bestand — PostgREST-Semantik gespiegelt: NULL link_seen fällt in beiden Modi raus.
     if (cutMs !== null && f.linkState !== "all" && (f.linkState === "gone" || f.linkState === "online")) {
-      if (r.last_seen == null) return false;
-      const ls = Date.parse(r.last_seen);
+      if (r.link_seen == null) return false;
+      const ls = Date.parse(r.link_seen);
       if (f.linkState === "gone" ? ls >= cutMs : ls < cutMs) return false;
     }
     if (!skip.time && (fromMs !== null || toMs !== null)) {

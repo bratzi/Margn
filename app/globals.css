@@ -643,6 +643,8 @@ table.dt.dt-fit { width: max-content; }
 .badge.lock{background:var(--red-sub);color:var(--red);} .badge.free{background:var(--green-sub);color:var(--green);}
 .badge.media{background:var(--teal-sub);color:var(--teal);} .badge.info{background:var(--info-sub);color:var(--info);}
 .badge.neutral{background:var(--surface-2);color:var(--muted);}
+/* Online-Bestand: noch verlinkt (Verlag führt ihn weiter) ↔ rausgeflogen (nirgends mehr verlinkt) */
+.badge.online{background:var(--teal-sub);color:var(--teal);} .badge.gone{background:var(--amber-sub);color:var(--amber);}
 
 /* ---------- Pager ---------- */
 .pager { display: flex; align-items: center; justify-content: space-between; margin-top: var(--s4); color: var(--muted); font-size: 12.5px; }
@@ -892,11 +894,12 @@ table.dt.dt-fit { width: max-content; }
 .dq-uni ins.dq-uni-ins {
   color: var(--green); text-decoration: none;
 }
-/* Zusammengefaltete unveränderte Strecke (Zeilen-Diff): dezenter Trenner. */
-.dq-uni .dq-uni-skip {
-  display: block; margin: 7px 0 5px; text-align: center; user-select: none;
-  font-size: 11px; font-style: italic; color: var(--faint);
-  border-top: 1px dashed var(--line-2); padding-top: 6px;
+/* Auslassung/Sprung im Diff (zusammengefaltete Strecke, abgeschnittener Rand, Fenster-Versatz):
+   KEIN „…" im Textfluss — das ließ zwei völlig verschiedene Absätze wie EINEN zusammenhängenden
+   Text wirken. Stattdessen eine echte visuelle Trennung: Absatz-Abstand + dezente Linie. */
+.dq-uni .dq-gap {
+  display: block; height: 0; margin: 15px 0; user-select: none;
+  border-top: 1px dashed var(--line-2);
 }
 .dq-add-body { color: var(--green); background: color-mix(in srgb, var(--green) 6%, transparent); white-space: pre-wrap; }
 .dq-del-body { color: var(--red); background: color-mix(in srgb, var(--red) 6%, transparent); white-space: pre-wrap; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--red) 50%, transparent); }

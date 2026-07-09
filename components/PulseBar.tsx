@@ -64,11 +64,12 @@ export default function PulseBar() {
     const topTopic = [...byTopic.entries()].sort((a, b) => b[1] - a[1])[0];
     const perDay = daysSorted.length ? n / daysSorted.length : 0;
 
-    // Zu-/Abgänge im gewählten Zeitraum: Zugang = erste Sichtung (discovered_at) im
-    // Fenster; Abgang = letzte Sichtung im Fenster UND seit dem jüngsten Scan-Stand
-    // (± 90 min) nicht mehr gesehen — noch verlinkte Seiten sind KEINE Abgänge.
-    // Cutoff kommt zentral aus dem FilterProvider (dieselbe Grenze wie der
-    // Online-Bestand-Filter „Rausgeflogen" — eine Wahrheit).
+    // Zu-/Abgänge im gewählten Zeitraum: Zugang = erste Sichtung (discovered_at) im Fenster;
+    // Abgang = letzte LINK-SICHTUNG (link_seen) im Fenster UND seither nirgends mehr verlinkt.
+    // WICHTIG: NICHT last_seen (= letzter Scan). Der Re-Scan ist budgetiert/altersgestaffelt —
+    // „heute gescannt, aber älter als der Cutoff" traf fast jeden Artikel und meldete massenhaft
+    // Scheinabgänge (Bild 09.07.: 572 statt real ~einem Bruchteil). Cutoff kommt zentral aus dem
+    // FilterProvider (dieselbe Grenze wie der Online-Bestand-Filter „Rausgeflogen" — eine Wahrheit).
     // Zeit-agnostischer Matcher: die beiden Ereignisse haben ihre eigene Zeitachse.
     const matchNT = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
     const fromMs = f.rangeFrom ? Date.parse(f.rangeFrom) : -Infinity;
@@ -83,9 +84,9 @@ export default function PulseBar() {
         const t = Date.parse(r.discovered_at);
         if (t >= fromMs && t <= toMs) { gainsN++; const d = berlinDate(r.discovered_at); gainsByDay.set(d, (gainsByDay.get(d) ?? 0) + 1); }
       }
-      if (r.last_seen) {
-        const t = Date.parse(r.last_seen);
-        if (t < onlineCut && t >= fromMs && t <= toMs) { lossesN++; const d = berlinDate(r.last_seen); lossesByDay.set(d, (lossesByDay.get(d) ?? 0) + 1); }
+      if (r.link_seen) {
+        const t = Date.parse(r.link_seen);
+        if (t < onlineCut && t >= fromMs && t <= toMs) { lossesN++; const d = berlinDate(r.link_seen); lossesByDay.set(d, (lossesByDay.get(d) ?? 0) + 1); }
       }
     }
     // Kontinuierliche Tagesliste (Lücken = 0), damit die Sparklines zeitlich stimmen.
