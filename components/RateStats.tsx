@@ -412,33 +412,27 @@ export default function RateStats() {
   // Y-Skala/Ticks hängen an den getweenten Werten und gleiten mit.
   const displaySeries = useTweenedSeries(displayTarget);
 
-  // Säulen werden GESTAPELT (Sichtungen je Bucket, nach Quelle aufgeteilt) → die Y-Skala muss die
-  // Spaltensumme fassen, nicht den größten Einzelwert. Linienmodus skaliert wie bisher.
-  const displayMaxVal = useMemo(() => {
-    if (!barMode) return Math.max(1, ...displaySeries.flatMap((s) => s.vals));
-    let mx = 1;
-    const n = displaySeries[0]?.vals.length ?? 0;
-    for (let i = 0; i < n; i++) {
-      let sum = 0;
-      for (const s of displaySeries) sum += s.vals[i] ?? 0;
-      if (sum > mx) mx = sum;
-    }
-    return mx;
-  }, [displaySeries, barMode]);
+  // Säulen stehen NEBENEINANDER (gruppiert), nicht gestapelt: gestapelt startet jede Quelle auf
+  // einem anderen Sockel und ist deshalb nicht vergleichbar. Gruppiert misst jede Säule ab der
+  // Nulllinie → die Y-Skala fasst den größten EINZELWERT (wie im Linienmodus).
+  const displayMaxVal = useMemo(
+    () => Math.max(1, ...displaySeries.flatMap((s) => s.vals)),
+    [displaySeries],
+  );
 
-  // Gestapelte Säulen-Geometrie: je Serie/Bucket der Sockel (Summe der darunter liegenden Serien).
+  // Gruppierte Säulen-Geometrie: je Bucket ein Slot, darin S Säulen nebeneinander.
+  // Bei feinen Einheiten (viele Buckets) wird die Einzelsäule sub-pixelig — ein Mindestmaß hält
+  // sie sichtbar; der Chart ist ohnehin horizontal zoom-/scrollbar (Mausrad).
   const barGeom = useMemo(() => {
     if (!barMode) return null;
+    const S = Math.max(1, displaySeries.length);
     const slot = naturalWidth / Math.max(1, NB);
-    const bw = Math.max(1, Math.min(slot * 0.8, 24));
-    const n = displaySeries[0]?.vals.length ?? 0;
-    const base: number[][] = displaySeries.map(() => new Array(n).fill(0));
-    const acc = new Array(n).fill(0);
-    displaySeries.forEach((s, si) => {
-      for (let i = 0; i < n; i++) { base[si][i] = acc[i]; acc[i] += s.vals[i] ?? 0; }
-    });
-    return { bw, base };
-  }, [barMode, displaySeries, naturalWidth, NB]);
+    const groupW = Math.min(slot * 0.82, 26 * S);
+    const bw = Math.max(0.6, groupW / S);
+    // linker Rand der Gruppe, relativ zur Bucket-Mitte X(i)
+    const x0 = -(bw * S) / 2;
+    return { bw, x0 };
+  }, [barMode, displaySeries.length, naturalWidth, NB]);
 
   const yTicks = useMemo(() => {
     const nTicks = 4;
@@ -676,21 +670,22 @@ export default function RateStats() {
                     );
                   })}
                 </defs>
-                {/* Pro Einheit → gestapelte Säulen (Nullwerte liegen exakt auf der Achse).
+                {/* Pro Einheit → GRUPPIERTE Säulen: je Bucket stehen die Verleger nebeneinander,
+                    jede misst ab der Nulllinie und ist damit direkt vergleichbar.
                     Kumuliert → Fläche + Linie (stetiger, monotoner Verlauf). */}
                 {barMode && barGeom ? (
                   displaySeries.map((s, si) => (
                     <g key={`b${s.key}`}>
                       {s.vals.map((v, i) => {
                         if (v <= 0) return null;
-                        const b = barGeom.base[si][i];
-                        const yTop = Y(b + v), yBot = Y(b);
+                        const yTop = Y(v), yBot = Y(0);
+                        const bx = X(i) + barGeom.x0 + si * barGeom.bw;
                         return (
-                          <rect key={i} x={X(i) - barGeom.bw / 2} y={yTop}
+                          <rect key={i} x={bx} y={yTop}
                             width={barGeom.bw} height={Math.max(0.75, yBot - yTop)}
                             fill={s.color} opacity={0.92} shapeRendering="crispEdges"
                             style={{ cursor: presence ? "default" : "pointer" }}
-                            onMouseEnter={() => !panRef.current && setHoverDot({ key: s.key, idx: i, x: X(i), y: yTop })}
+                            onMouseEnter={() => !panRef.current && setHoverDot({ key: s.key, idx: i, x: bx + barGeom.bw / 2, y: yTop })}
                             onMouseLeave={() => setHoverDot((h) => (h?.key === s.key && h?.idx === i ? null : h))}
                             onClick={() => { if (!didPanRef.current && !presence) pinDot(s, i); }} />
                         );
