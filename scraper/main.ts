@@ -73,6 +73,16 @@ function canonUrl(raw: string): string {
       const m = u.pathname.match(/-id(\d+)\.html$/i);
       if (m) return `https://www.n-tv.de/id${m[1]}.html`;
     }
+    // Artikel tragen ihre Identität IMMER im PFAD (Slug + ID). Query/Hash sind bei allen Quellen
+    // reine UI-/Tracking-Zustände (?tab=tools, ?tab=aiAssistant, ?isPreviewManager=true, utm_*,
+    // #ref=rss). Ungestrippt entstand je Variante eine EIGENE pages-Zeile, die nie eine
+    // articles-Zeile bekam (die entsteht unter der kanonischen URL) → im Dashboard ewig
+    // „wird erfasst…", dazu jeden Lauf ein verschwendeter Render.
+    // Sektions-/Suchseiten BRAUCHEN ihre Query (Tagesschau ?datum=…) → nur Artikel-Formen anfassen.
+    if ((u.search || u.hash) && looksLikeArticle(u.origin + u.pathname)) {
+      u.search = ""; u.hash = "";
+      return u.href;
+    }
   } catch { /* ungültige URL → unverändert */ }
   return raw;
 }
@@ -95,7 +105,16 @@ function canonicalArticleUrl(url: string, html: string): string {
   const m = /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i.exec(html)
     ?? /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i.exec(html)
     ?? /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i.exec(html);
-  if (m?.[1] && bildId(m[1]) === id) { try { return new URL(m[1], url).href; } catch {} }
+  if (m?.[1] && bildId(m[1]) === id) {
+    try {
+      const cand = new URL(m[1], url);
+      // ENTARTETER canonical: Bild liefert (auf Consent-/Fehler-Renders) `/article/<hexid>` OHNE
+      // Slug. Übernahm man ihn, entstand ein Artikel namens „Bild" unter einer URL, zu der es gar
+      // keine pages-Zeile gibt (unsichtbar, aber dauerhaft re-gescannt), während die echte
+      // Slug-Seite ewig auf „wird erfasst…" stand. Solche Kanoniken verwerfen.
+      if (!/^\/article\/[0-9a-f]{24}\/?$/i.test(cand.pathname)) return cand.href;
+    } catch {}
+  }
   return url;
 }
 
@@ -1108,6 +1127,18 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
   const pubTrack = freezePubDate(meta, prev as any); // published_at einfrieren, Bump → modified_at + Verlauf
   const id = await upsertArticle(sourceId, url, meta, { scan_count: ((prev as any)?.scan_count ?? 0) + 1, scan_times: appendScan((prev as any)?.scan_times) });
+  // ALIAS-AUFRÄUMEN: Die entdeckte URL war eine andere Schreibweise desselben Artikels (Bild
+  // re-slugt Überschriften, Query-Varianten, n-tv-Ticker-Formen). Die articles-Zeile entsteht
+  // unter der KANONISCHEN URL — die entdeckte pages-Zeile bekäme nie einen Titel, stünde im
+  // Dashboard ewig auf „wird erfasst…" und bliebe im Render-Pool (jeder Lauf ein Render umsonst).
+  // page_overview ist pages-getrieben (pages LEFT JOIN articles ON url) → die kanonische Seite
+  // MUSS es geben, sonst verschwindet der Artikel aus der Übersicht.
+  if (!DRY_RUN && discoveredUrl !== url) {
+    await sb.from("pages").upsert(
+      { source_id: sourceId, url, kind: "article", depth: 1, last_seen: new Date().toISOString() },
+      { onConflict: "url", ignoreDuplicates: true });
+    await sb.from("pages").update({ kind: "alias" }).eq("url", discoveredUrl);
+  }
   await upsertDimensions(id, meta.authors, meta.keywords, meta.categories);
   const tb = trackBody(html, url, rawHtml, art, meta.article_type === "liveblog", meta.title ?? art?.title ?? null, meta.description ?? null);
   if (tb) await trackChanges(id, (prev as PrevState) ?? null, meta.title ?? art?.title ?? null, tb.body, url, tb.isLive, (prev as any)?.published_at ?? null, pubTrack, { description: meta.description, og_image: meta.og_image, paywalled: meta.paywalled, author_status: meta.author_status, topic: meta.topic });
