@@ -695,7 +695,17 @@ function sealMisalignedTail(ops: Op[], netWd = 0): Op[] {
 // Alle Aufräum-Schritte in fester Reihenfolge: erst Whitespace-Joins tilgen (vergrößert die echten
 // Anker), dann Konfetti zu Blöcken bündeln, dann Anfangs-/Schluss-Versatz versiegeln.
 function finalizeOps(ops: Op[], netWd = 0): Op[] {
-  return mergeOps(sealTruncatedTail(sealMisalignedTail(sealMisalignedHead(collapseConfetti(mergeWhitespaceEdits(ops))), netWd), netWd));
+  const cleaned = collapseConfetti(mergeWhitespaceEdits(ops));
+  const sealed = mergeOps(sealTruncatedTail(sealMisalignedTail(sealMisalignedHead(cleaned), netWd), netWd));
+  // Das Versiegeln (Anfangs-/Schluss-Versatz → „…") darf die EINZIGE sichtbare Änderung nicht
+  // wegputzen. Sonst erscheint „Unterschied außerhalb des erfassten Ausschnitts", obwohl real etwas
+  // editiert wurde — typisch eine am Absatzanfang/-ende entfernte Foto-Caption/Zeitmarke oder ein
+  // eingeschobenes Zitat (Art. 1569057, 1504824). Rollende Ticker liefern KEINE old/new-Paare mehr
+  // (isTimeline = nur Zugänge) → ein Rand-del in einem Paar ist stets ein echter Edit, kein Fenster-
+  // Versatz. Bleibt nach dem Versiegeln nichts Sichtbares, aber vorher schon → ungesiegelt zeigen.
+  const visible = (o: Op[]) => o.some((x) => x.op === "del" || x.op === "ins" || x.op === "repl");
+  if (!visible(sealed) && visible(cleaned)) return mergeOps(cleaned);
+  return sealed;
 }
 // Am Zeichen-Cap abgeschnittener Alt-Text: `oldS` endet mit einem Wortfragment (≥4 Buchstaben),
 // dessen vollständige Form (ein längeres Wort mit gleichem Präfix) in `newS` vorkommt → der

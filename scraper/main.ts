@@ -33,11 +33,15 @@ const KNOWN_FEEDS: Record<string, string[]> = {};
 const MIN_BODY = 1200;                                       // viel Fließtext = echter Artikel (Hubs haben wenig)
 // RECENCY-FENSTER (VEREINHEITLICHT die Quellen): Verlage exponieren wild unterschiedlich viele
 // URLs (n-tv: Archiv über dichte Quervernetzung bis 2009; Tagesschau/FAZ: keine Sitemap → wenig).
-// Das Projekt verfolgt STILLE EDITS über Zeit — Jahre alte Archiv-Artikel werden nicht mehr
-// editiert und verbrennen nur Render-Budget. Darum NEUE Artikel nur führen, wenn ihr (präzises)
+// Das Projekt verfolgt STILLE EDITS über Zeit — Wochen/Jahre alte Archiv-Artikel werden nicht mehr
+// editiert und verbrennen nur Render-Budget. Darum NEUE Artikel nur führen, wenn ihr
 // Veröffentlichungsdatum jünger als ARTICLE_MAX_AGE_DAYS ist; ältere → pages.kind='archive'
 // (nicht erneut rendern). So konvergiert jede Quelle aufs gleiche jüngste Fenster.
-const ARTICLE_MAX_AGE_DAYS = Number(process.env.ARTICLE_MAX_AGE_DAYS ?? 90);
+// 30 Tage = deckungsgleich mit der 30-Tage-Retention (maintenance.sql, last_seen) und dem
+// Edit-Fenster (stille Edits passieren Stunden–Tage nach Veröffentlichung, nicht Monate). Bei 90
+// rutschten massenhaft 1–3 Monate alte Evergreens/Backlog-Funde frisch in den Bestand und wirkten
+// „heute erfasst, aber ewig alt" (FAZ Art. 1618981, 88 T; ganze Spike-Tage mit >1500 Alt-Artikeln).
+const ARTICLE_MAX_AGE_DAYS = Number(process.env.ARTICLE_MAX_AGE_DAYS ?? 30);
 const DRY_RUN = process.env.CRAWL_DRY_RUN === "1";           // nur zählen, kein DB-Write
 // "articles":   crawlen + Artikel speichern (Metadaten).
 // "structure":  Rubriken crawlen, Links klassifizieren.
@@ -113,6 +117,16 @@ async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<ty
 // --- Metadaten-Extraktion aus gerendertem HTML ---
 
 const PAYWALL_CSS = /paywall|premium-overlay|piano-|plus-artikel|abo-schranke|metered-wall|subscriber-only|locked-content/i;
+
+// GRATIS-SENDER: gebühren-/werbefinanzierte Angebote OHNE jede Bezahlschranke. Ihr HTML trägt
+// KEIN JSON-LD-Frei-Signal (isAccessibleForFree fehlt), enthält aber seitenweit das Analytics-
+// Framework „Piano" (…piano-…) → PAYWALL_CSS schlug fälschlich an und die sticky-Logik fror den
+// Fehlbefund dauerhaft ein (Art. 1521125, tagesschau). Diese Hosts sind IMMER frei → paywalled=false
+// als verlässliches Frei-Signal, das einen bestehenden Fehl-true über stickyPaywall wieder löst.
+const FREE_OUTLETS = /(^|\.)tagesschau\.de$|(^|\.)n-tv\.de$/i;
+function isFreeOutlet(url: string): boolean {
+  try { return FREE_OUTLETS.test(new URL(url).hostname); } catch { return false; }
+}
 
 function isLiveContent(url: string, title: string | null): boolean {
   const hay = (url + " " + (title ?? "")).toLowerCase();
@@ -196,6 +210,10 @@ function extractKeywords(html: string, article: any): string[] {
   };
   push(article?.keywords);
   push(metaContent(html, "news_keywords", "keywords"));
+  // Verlags-/Vendor-Varianten: JEDES <meta name="…keywords">. Tagesschau spielt SWR-syndizierte
+  // Regionalstücke mit Schlagwörtern NUR in `swr_keywords` aus (kein news_keywords, kein article:tag,
+  // Art. 1521125) → sonst 0 Keywords. Der Suffix-Match deckt swr_/sr_/wdr_… generisch ab.
+  for (const m of html.matchAll(/<meta[^>]+name=["']([a-z0-9_]*keywords)["'][^>]+content=["']([^"']*)["']/gi)) push(m[2]);
   for (const m of html.matchAll(/<meta[^>]+property=["']article:tag["'][^>]+content=["']([^"']+)["']/gi)) parts.push(m[1]);
   for (const t of relTagKeywords(html)) parts.push(t);
   return [...new Set(
@@ -291,7 +309,8 @@ function extractMeta(html: string, url: string) {
   // liefern (Le Monde 402) — die dürfen ein bestehendes paywalled=true NICHT
   // überschreiben. Die Übernahme regelt die sticky-Logik in upsert/enrich.
   const paywalled: boolean | null =
-    iaff.length > 0 ? (iaff.some(notFree) && !iaff.some(isFree))
+    isFreeOutlet(url) ? false                       // Gratis-Sender: immer frei (überstimmt Piano-Fehlalarm)
+    : iaff.length > 0 ? (iaff.some(notFree) && !iaff.some(isFree))
     : PAYWALL_CSS.test(html) ? true
     : null;
 
@@ -963,7 +982,8 @@ function buildChanges(removed: string[], added: string[]): Change[] {
 // Wert behalten. Verhindert, dass Stub-/Teaser-Renders (z.B. Le Monde 402) eine
 // bestehende Paywall fälschlich auf „frei" setzen. Metadaten werden trotzdem geholt.
 function stickyPaywall(prev: boolean | null | undefined, next: boolean | null): boolean | null {
-  if (prev === true) return true;
+  if (next === false) return false;   // VERLÄSSLICHES Frei-Signal (JSON-LD isAccessibleForFree=true ODER Gratis-Sender) löst einen Fehl-true
+  if (prev === true) return true;      // sonst: einmal Paywall → bleibt Paywall (Stub-Renders liefern null, nicht false → unschädlich)
   if (next === null || next === undefined) return prev ?? null;
   return next;
 }
@@ -992,6 +1012,15 @@ function payDiag(html: string, url: string, decided: boolean | null) {
   ];
   const markers = probes.filter(([, re]) => re.test(html)).map(([n]) => n);
   console.log(`PAYDIAG host=${host} decided=${decided} markers=[${markers.join(",")}]`);
+}
+
+// Ein Artikel „lebt" (echt verfolgt), sobald wir je eine ECHTE Änderung sahen (Revision/Erweiterung/
+// Edit). Bis dahin ist er ein statischer Fund → das Recency-Gate greift bei JEDEM Scan, nicht nur beim
+// ersten. Schließt die Lücke: ein Erst-Render (z.B. Paywall-Stub) liefert kein Datum (Gate passt),
+// spätere Renders tragen aber das echte, ALTE Datum nach — der Artikel trägt dann content_hash und
+// würde nie erneut geprüft. So werden auch solche nachträglich als Archiv erkannt und entfernt.
+function neverObservedChange(prev: any): boolean {
+  return !((prev?.revision_count ?? 0) || (prev?.extension_count ?? 0) || (prev?.edit_count ?? 0));
 }
 
 // Artikel vollständig speichern: Metadaten + Dimensionen + Änderungs-Tracking.
@@ -1069,8 +1098,11 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
   // sonst werden Mehrfach-Datum-Seiten fälschlich archiviert (Liveticker: erste Meldung Monate alt;
   // Evergreen mit altem Originaldatum, aber aktueller Sitemap-Zeit). Liveblogs/Ticker NIE archivieren
   // (immer aktuell + editierfreudig). Bereits verfolgte (prev.content_hash) bleiben unangetastet.
-  if (!(prev as any)?.content_hash && isStaleForArchive(meta, (prev as any)?.published_at, url)) {
-    if (!DRY_RUN) await sb.from("pages").update({ kind: "archive" }).in("url", [...new Set([discoveredUrl, url])]);
+  if (neverObservedChange(prev) && isStaleForArchive(meta, (prev as any)?.published_at, url)) {
+    if (!DRY_RUN) {
+      await sb.from("pages").update({ kind: "archive" }).in("url", [...new Set([discoveredUrl, url])]);
+      if (prev) await sb.from("articles").delete().eq("url", url); // schon angelegte, aber noch änderungslose Alt-Zeile mit-entfernen
+    }
     return null;
   }
   meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
@@ -2206,7 +2238,7 @@ async function enrichArticles(sources: Source[]) {
           meta.paywalled = stickyPaywall((prev as any)?.paywalled, meta.paywalled); // Paywall nie fälschlich aufheben
           // Recency-Filter (wie saveArticleFull, frischestes Datum + kein Liveblog): noch nicht
           // verfolgte Alt-Artikel raus → Archiv parken.
-          if (!(prev as any)?.content_hash && isStaleForArchive(meta, (prev as any)?.published_at, item.url)) {
+          if (neverObservedChange(prev) && isStaleForArchive(meta, (prev as any)?.published_at, item.url)) {
             await sb.from("pages").update({ kind: "archive" }).eq("url", item.url);
             await sb.from("articles").delete().eq("id", item.id);
             continue;
