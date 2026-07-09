@@ -118,26 +118,44 @@ function canonicalArticleUrl(url: string, html: string): string {
   return url;
 }
 
-// Bild RE-SLUGT Artikel: dieselbe 24-Hex-ID, aber neuer Slug (oft mit neuer Überschrift UND neu
-// gesetztem Datum). Ohne Abgleich entstünde je Slug eine EIGENE articles-Zeile → dieselbe Story
-// zählt an mehreren Tagen (Art. WM-Trump/Fifa: 05.+06.07. unter 3 Überschriften; bestandsweit 94
-// Gruppen, Spread bis 134 T). Fix: existiert unter der neuen (kanonischen) URL noch kein Artikel,
-// aber ein Bild-Artikel mit GLEICHER Hex-ID unter einer anderen URL, dann die BESTEHENDE Zeile auf
-// die neue URL umziehen (id/Historie/eingefrorenes published_at bleiben) und die Alt-Seite als
-// alias parken. So bleibt es EIN Artikel; der Re-Slug erscheint als stille Titel-/Datums-Änderung.
-async function reconcileBildReslug(sourceId: number, canonUrl2: string): Promise<void> {
+// Verlagsstabile Artikel-ID aus der URL — der Teil, der einen RE-SLUG überlebt. Verlage benennen
+// Artikel um (neue Überschrift → neuer Slug, oft mit neu gesetztem Datum), die CMS-ID bleibt:
+//   Bild:       24-Hex-ID am Slug-Ende          (…-6a4bf145b2ab39bc4a32345b)
+//   Spiegel:    UUID nach „-a-"                 (…-a-350acd2a-26ff-4761-…)
+//   FAZ:        numerische Dokument-ID vor .html (…-faz-200749933.html; Liveblogs re-sluggen
+//               bei JEDER Ticker-Meldung — WM-Blog lag unter 40+ Slugs)
+//   Tagesschau: Sophora-Kurz-ID nach dem KOMMA  (…-fluch,wm-liveblog-100.html — der Vor-Komma-
+//               Teil ist die re-sluggbare Überschrift; wm-liveblog-100 lag unter 72 Slugs)
+//   n-tv:       braucht keinen Key — canonUrl reduziert jede Form auf id<N>.html.
+function articleKey(url: string): string | null {
+  let u: URL; try { u = new URL(url); } catch { return null; }
+  const host = u.hostname.toLowerCase(), path = u.pathname;
+  if (/(^|\.)bild\.de$/.test(host)) return bildId(url);
+  if (/(^|\.)spiegel\.de$/.test(host)) return path.match(/-a-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1]?.toLowerCase() ?? null;
+  if (/(^|\.)faz\.net$/.test(host)) return path.match(/-(\d{8,})\.html$/)?.[1] ?? null;
+  if (/(^|\.)tagesschau\.de$/.test(host)) return path.match(/,([a-z0-9-]+-\d+)\.html$/i)?.[1]?.toLowerCase() ?? null;
+  return null;
+}
+
+// RE-SLUG-ABGLEICH (alle Verlage mit stabiler CMS-ID): Ohne ihn entstünde je Slug eine EIGENE
+// articles-Zeile → dieselbe Story zählt an mehreren Tagen (Bild WM-Trump/Fifa: 05.+06.07. unter
+// 3 Überschriften; bestandsweit Bild 251, FAZ 1.166, Spiegel 551, Tagesschau 266 Extra-Zeilen).
+// Fix: existiert unter der neuen (kanonischen) URL noch kein Artikel, aber einer mit GLEICHER
+// CMS-ID unter anderer URL, dann die BESTEHENDE Zeile auf die neue URL umziehen (id/Historie/
+// eingefrorenes published_at bleiben) und die Alt-Seite als alias parken. So bleibt es EIN
+// Artikel; der Re-Slug erscheint als stille Titel-/Datums-Änderung — genau das Kernsignal.
+async function reconcileReslug(sourceId: number, canonUrl2: string): Promise<void> {
   if (DRY_RUN) return;
-  let host = ""; try { host = new URL(canonUrl2).hostname.toLowerCase(); } catch { return; }
-  if (!/(^|\.)bild\.de$/.test(host)) return;
-  const id = bildId(canonUrl2); if (!id) return;
+  const key = articleKey(canonUrl2); if (!key) return;
   // Schon ein Artikel unter der neuen URL? Dann normaler Upsert-Pfad, nichts zu tun.
   const { data: exists } = await sb.from("articles").select("id").eq("url", canonUrl2).maybeSingle();
   if (exists) return;
-  // Bestehende Zeile(n) mit gleicher Hex-ID unter anderer URL — reichste zuerst (meiste Revisionen).
+  // Bestehende Zeile(n) mit gleicher CMS-ID unter anderer URL — reichste zuerst (meiste Revisionen).
+  // Der articleKey-Gegencheck schließt LIKE-Streutreffer aus (z.B. …-100 in …-1000).
   const { data: olds } = await sb.from("articles")
     .select("id,url,revision_count").eq("source_id", sourceId)
-    .like("url", `%${id}%`).order("revision_count", { ascending: false });
-  const old = (olds ?? []).find((o: any) => o.url !== canonUrl2 && bildId(o.url) === id);
+    .like("url", `%${key}%`).order("revision_count", { ascending: false });
+  const old = (olds ?? []).find((o: any) => o.url !== canonUrl2 && articleKey(o.url) === key);
   if (!old) return;
   await sb.from("articles").update({ url: canonUrl2 }).eq("id", (old as any).id);
   await sb.from("pages").update({ kind: "alias" }).eq("url", (old as any).url);
@@ -1132,9 +1150,9 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
     }
     return null;
   }
-  // Bild-Re-Slug auf die bestehende Zeile umziehen, BEVOR prev gelesen wird → prev findet den
-  // migrierten Artikel, Tracking läuft als stille Änderung weiter (kein Datums-/Zähl-Dopplung).
-  await reconcileBildReslug(sourceId, url);
+  // Re-Slug auf die bestehende Zeile umziehen, BEVOR prev gelesen wird → prev findet den
+  // migrierten Artikel, Tracking läuft als stille Änderung weiter (keine Datums-/Zähl-Dopplung).
+  await reconcileReslug(sourceId, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
     .select(PREV_COLS)
