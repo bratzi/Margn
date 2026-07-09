@@ -15,6 +15,7 @@ const BASE: FilterSnapshot = {
   topics: [], lang: "all", changed: "all", depth: "all",
   rangeFrom: null, rangeTo: null, timeAxis: "published",
   hideRegional: false, // Prüfskript testet die Rohmenge; der Regional-Toggle hat eigene Fälle verdient
+  linkState: "all", onlineCut: null, // Online-Bestand-Filter aus (Rohmenge); eigene Fälle verdient
 };
 
 const day = (offset: number) => {
