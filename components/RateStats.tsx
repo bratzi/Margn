@@ -268,14 +268,15 @@ export default function RateStats() {
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
   const Y = (v: number) => PAD_T + CH - (v / displayMaxVal) * CH;
 
-  // Bei feinen Einheiten (Minute/Stunde) sind viele Buckets leer. Die Linie soll dann NICHT
-  // zwischen den Punkten auf 0 abstürzen, sondern die vorhandenen Punkte direkt verbinden.
-  // → leere Buckets überspringen; nur Punkte mit Wert (plus Rand-Anker) zeichnen.
-  const skipZeros = unit === "minute" || unit === "hour";
+  // „Pro Einheit" = gezählte Werte JE BUCKET → SÄULEN. Eine geglättete Linie war hier die falsche
+  // Darstellungsform: der Crawl arbeitet schubweise, die meisten Minuten-Buckets sind 0. Die alte
+  // Logik warf leere Buckets weg und verband die Reste per Bezier — dadurch (a) behauptete die
+  // Fläche stundenlange Aktivität, wo gar keine war, und (b) fiel die Kurve nie auf 0 zurück, ihre
+  // scheinbare Nulllinie schwebte also ÜBER der Achse. Säulen sitzen zwangsläufig auf Y(0).
+  // Die kumulierte Sicht („Kumuliert") bleibt eine Linie — dort ist der Verlauf stetig und monoton.
+  const barMode = timeFormat === "rel";
   function linePoints(vals: number[]): [number, number][] {
-    if (!skipZeros) return vals.map((v, i) => [X(i), Y(v)] as [number, number]);
-    const pts = vals.map((v, i) => [v, i] as [number, number]).filter(([v]) => v > 0).map(([v, i]) => [X(i), Y(v)] as [number, number]);
-    return pts.length >= 2 ? pts : vals.map((v, i) => [X(i), Y(v)] as [number, number]);
+    return vals.map((v, i) => [X(i), Y(v)] as [number, number]);
   }
   function pathThrough(pts: [number, number][]): string {
     if (pts.length < 2) return "";
@@ -411,10 +412,33 @@ export default function RateStats() {
   // Y-Skala/Ticks hängen an den getweenten Werten und gleiten mit.
   const displaySeries = useTweenedSeries(displayTarget);
 
-  const displayMaxVal = useMemo(
-    () => Math.max(1, ...displaySeries.flatMap((s) => s.vals)),
-    [displaySeries],
-  );
+  // Säulen werden GESTAPELT (Sichtungen je Bucket, nach Quelle aufgeteilt) → die Y-Skala muss die
+  // Spaltensumme fassen, nicht den größten Einzelwert. Linienmodus skaliert wie bisher.
+  const displayMaxVal = useMemo(() => {
+    if (!barMode) return Math.max(1, ...displaySeries.flatMap((s) => s.vals));
+    let mx = 1;
+    const n = displaySeries[0]?.vals.length ?? 0;
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (const s of displaySeries) sum += s.vals[i] ?? 0;
+      if (sum > mx) mx = sum;
+    }
+    return mx;
+  }, [displaySeries, barMode]);
+
+  // Gestapelte Säulen-Geometrie: je Serie/Bucket der Sockel (Summe der darunter liegenden Serien).
+  const barGeom = useMemo(() => {
+    if (!barMode) return null;
+    const slot = naturalWidth / Math.max(1, NB);
+    const bw = Math.max(1, Math.min(slot * 0.8, 24));
+    const n = displaySeries[0]?.vals.length ?? 0;
+    const base: number[][] = displaySeries.map(() => new Array(n).fill(0));
+    const acc = new Array(n).fill(0);
+    displaySeries.forEach((s, si) => {
+      for (let i = 0; i < n; i++) { base[si][i] = acc[i]; acc[i] += s.vals[i] ?? 0; }
+    });
+    return { bw, base };
+  }, [barMode, displaySeries, naturalWidth, NB]);
 
   const yTicks = useMemo(() => {
     const nTicks = 4;
@@ -548,10 +572,11 @@ export default function RateStats() {
           <button className={chartMode === "topics" ? "on" : ""} onClick={() => setChartMode("topics")} title="Linien je Thema (Top 10)">Themen</button>
         </div>
         <div className="seg" style={{ marginLeft: 6 }}>
+          {/* „Rel./Abs." las sich wie Prozent vs. Anzahl — gemeint ist Rate vs. Kumulation. */}
           <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")}
-            title={presence ? "Sichtungen pro Zeiteinheit — wie viele Seiten der Crawl in diesem Zeitfenster verlinkt gesehen hat" : "Pro Zeiteinheit (relative Häufigkeit)"}>Rel.</button>
+            title={presence ? "Säulen: Sichtungen je Zeiteinheit — wie viele Seiten der Crawl in diesem Fenster verlinkt gesehen hat" : "Säulen: Artikel je Zeiteinheit"}>Je Einheit</button>
           <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")}
-            title={presence ? "Tageszähler: jeder Crawl addiert seine Sichtungen — Reset um 00:00" : "Kumuliert je Tag (Reset um 00:00)"}>Abs.</button>
+            title={presence ? "Linie: Tageszähler — jeder Crawl addiert seine Sichtungen, Reset um 00:00" : "Linie: kumuliert je Tag (Reset um 00:00)"}>Kumuliert</button>
           <div style={{ width: 1, background: "var(--line)", margin: "0 4px" }} />
           <button className={manual === "auto" ? "on" : ""} onClick={() => setManual("auto")} title="Dynamisch">⟳ Dynamisch</button>
           {/* Minuten nur bei kurzem Zeitraum (sonst zu viele Buckets für die RPC) */}
@@ -651,15 +676,40 @@ export default function RateStats() {
                     );
                   })}
                 </defs>
-                {displaySeries.map((s) => (
-                  <path key={`a${s.key}`} d={areaPath(s.vals)}
-                    fill={`url(#rs-grad-${String(s.key).replace(/[^a-zA-Z0-9_-]/g, "")})`} />
-                ))}
-                {displaySeries.map((s) => (
-                  <path key={`l${s.key}`} d={smoothPath(s.vals)} fill="none"
-                    stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    vectorEffect="non-scaling-stroke" />
-                ))}
+                {/* Pro Einheit → gestapelte Säulen (Nullwerte liegen exakt auf der Achse).
+                    Kumuliert → Fläche + Linie (stetiger, monotoner Verlauf). */}
+                {barMode && barGeom ? (
+                  displaySeries.map((s, si) => (
+                    <g key={`b${s.key}`}>
+                      {s.vals.map((v, i) => {
+                        if (v <= 0) return null;
+                        const b = barGeom.base[si][i];
+                        const yTop = Y(b + v), yBot = Y(b);
+                        return (
+                          <rect key={i} x={X(i) - barGeom.bw / 2} y={yTop}
+                            width={barGeom.bw} height={Math.max(0.75, yBot - yTop)}
+                            fill={s.color} opacity={0.92} shapeRendering="crispEdges"
+                            style={{ cursor: presence ? "default" : "pointer" }}
+                            onMouseEnter={() => !panRef.current && setHoverDot({ key: s.key, idx: i, x: X(i), y: yTop })}
+                            onMouseLeave={() => setHoverDot((h) => (h?.key === s.key && h?.idx === i ? null : h))}
+                            onClick={() => { if (!didPanRef.current && !presence) pinDot(s, i); }} />
+                        );
+                      })}
+                    </g>
+                  ))
+                ) : (
+                  <>
+                    {displaySeries.map((s) => (
+                      <path key={`a${s.key}`} d={areaPath(s.vals)}
+                        fill={`url(#rs-grad-${String(s.key).replace(/[^a-zA-Z0-9_-]/g, "")})`} />
+                    ))}
+                    {displaySeries.map((s) => (
+                      <path key={`l${s.key}`} d={smoothPath(s.vals)} fill="none"
+                        stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke" />
+                    ))}
+                  </>
+                )}
 
                 {/* „Jetzt"-Marker: dezente vertikale Linie an der aktuellen Uhrzeit, läuft mit. */}
                 {nowX != null && (
@@ -672,8 +722,9 @@ export default function RateStats() {
                   </g>
                 )}
 
-                {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot */}
-                {showDots && displaySeries.map((s) => s.vals.map((v, i) => {
+                {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot.
+                    Im Säulenmodus überflüssig: dort trägt die Säule selbst den Tooltip. */}
+                {!barMode && showDots && displaySeries.map((s) => s.vals.map((v, i) => {
                   if ((origById.get(s.key)?.[i] ?? 0) <= 0) return null;
                   const isHover = hoverDot?.key === s.key && hoverDot?.idx === i;
                   return (
