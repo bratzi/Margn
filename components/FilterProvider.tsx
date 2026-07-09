@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel, TOPICS_SANS_REGIONAL } from "@/lib/topics";
 import { fetchAllRows } from "@/lib/pgFetch";
-import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, makeBerlinDays, berlinDayBoundsUTC, onlineCutFrom, type CorpusRow, type TimeAxis } from "@/lib/filterCorpus";
+import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, makeBerlinDays, berlinDayBoundsUTC, onlineCutsFrom, type CorpusRow, type TimeAxis } from "@/lib/filterCorpus";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
 type Opt = { key: string; label: string; n: number };
@@ -110,8 +110,8 @@ type Ctx = {
   // und erschlagen jede Verteilung. Zuschaltbar über den Filter.
   hideRegional: boolean; setHideRegional: (b: boolean) => void;
   // Online-Bestand: "all" | "online" (noch verlinkt) | "gone" (rausgeflogen — letzte
-  // Sichtung vor onlineCut). onlineCut = jüngster Scan-Stand des Corpus − 90 min.
-  linkState: string; setLinkState: (v: string) => void; onlineCut: string | null;
+  // Sichtung vor dem Quellen-Cut). onlineCut = Cuts je Quelle (source_id → ISO).
+  linkState: string; setLinkState: (v: string) => void; onlineCut: Record<string, string> | null;
   keyword: string; setKeyword: (v: string) => void;
   // Volltextsuche über alle Eigenschaften (Titel/URL/Teaser/Thema/Schlagwörter/Rubriken/Inhalt).
   search: string; setSearch: (v: string) => void; searchPending: boolean; searchCount: number | null;
@@ -376,13 +376,12 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [needsCorpus]);
 
-  // Grenze „noch verlinkt" ↔ „rausgeflogen": jüngste LINK-SICHTUNG über den GESAMTEN Corpus
-  // minus ONLINE_TOLERANCE_MS. Vorher stand hier der jüngste SCAN-Stand − 90 min — das war die
-  // falsche Größe: Re-Scans sind budgetiert/altersgestaffelt (Median-Scanalter ~225 h), also
-  // wirkten 41 % der noch verlinkten Artikel wie Abgänge (alle Verlage, alle Typen).
-  // EINE Wahrheit für den Bestand-Filter (makeMatcher + applyServerFilters) UND die
-  // Fluktuations-KPIs in PulseBar.
-  const onlineCut = useMemo(() => onlineCutFrom(corpus), [corpus]);
+  // Grenze „noch verlinkt" ↔ „rausgeflogen": JE QUELLE die jüngste LINK-SICHTUNG minus die
+  // quellenspezifische Toleranz (Discovery-Abdeckung ist strukturell verschieden — n-tv wird
+  // stündlich komplett gesehen, Tagesschau/FAZ ohne Sitemap nur gesampelt; s. ONLINE_TOLERANCE_H).
+  // Vorher: jüngster SCAN-Stand − 90 min (falsche Größe, 41 % Scheinabgänge), dann globale 6 h
+  // (für Tagesschau 78 % Fehlalarm). EINE Wahrheit für Bestand-Filter + Fluktuations-KPIs.
+  const onlineCut = useMemo(() => onlineCutsFrom(corpus), [corpus]);
 
   // Keyword → Artikel-IDs (zentral, damit Tabelle UND Analytics dieselbe Menge nutzen)
   const [kwIds, setKwIds] = useState<number[] | null>(null);

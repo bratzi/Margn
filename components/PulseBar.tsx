@@ -74,7 +74,10 @@ export default function PulseBar() {
     const matchNT = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
     const fromMs = f.rangeFrom ? Date.parse(f.rangeFrom) : -Infinity;
     const toMs = f.rangeTo ? Date.parse(f.rangeTo) : Infinity;
-    const onlineCut = f.onlineCut ? Date.parse(f.onlineCut) : -Infinity;
+    // Quellen-Cuts (source_id → ms); Quelle ohne Cut → kein Abgangs-Urteil möglich.
+    const cutBySid = f.onlineCut
+      ? new Map(Object.entries(f.onlineCut).map(([sid, iso]) => [Number(sid), Date.parse(iso)]))
+      : null;
     let gainsN = 0, lossesN = 0;
     const gainsByDay = new Map<string, number>(), lossesByDay = new Map<string, number>();
     for (const r of f.corpus) {
@@ -84,9 +87,10 @@ export default function PulseBar() {
         const t = Date.parse(r.discovered_at);
         if (t >= fromMs && t <= toMs) { gainsN++; const d = berlinDate(r.discovered_at); gainsByDay.set(d, (gainsByDay.get(d) ?? 0) + 1); }
       }
-      if (r.link_seen) {
+      if (r.link_seen && cutBySid) {
+        const cut = cutBySid.get(r.source_id);
         const t = Date.parse(r.link_seen);
-        if (t < onlineCut && t >= fromMs && t <= toMs) { lossesN++; const d = berlinDate(r.link_seen); lossesByDay.set(d, (lossesByDay.get(d) ?? 0) + 1); }
+        if (cut != null && t < cut && t >= fromMs && t <= toMs) { lossesN++; const d = berlinDate(r.link_seen); lossesByDay.set(d, (lossesByDay.get(d) ?? 0) + 1); }
       }
     }
     // Kontinuierliche Tagesliste (Lücken = 0), damit die Sparklines zeitlich stimmen.

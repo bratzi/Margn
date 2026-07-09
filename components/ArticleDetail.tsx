@@ -5,7 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder, Link2, Link2Off } from "@/components/icons";
 import { topicLabel } from "@/lib/topics";
-import { ALLOWED_PTYPES, ONLINE_TOLERANCE_MS } from "@/lib/filterCorpus";
+import { ALLOWED_PTYPES, onlineToleranceMs } from "@/lib/filterCorpus";
 import ScanTimeline from "@/components/ScanTimeline";
 import ExtLink from "@/components/ExtLink";
 
@@ -87,12 +87,17 @@ export default function ArticleDetail({ id }: { id: number }) {
         supabase.from("article_keywords").select("keywords(term)").eq("article_id", id),
         supabase.from("article_categories").select("categories(name)").eq("article_id", id),
         supabase.from("article_snapshots").select("*").eq("article_id", id).order("captured_at", { ascending: true }),
-        // Jüngste Link-Sichtung des GESAMTEN Bestands = Bezugspunkt für „noch verlinkt".
-        // Gegen „jetzt" zu messen wäre falsch, sobald der Crawler pausiert (dann wäre alles „raus").
-        supabase.from("page_overview").select("link_seen").order("link_seen", { ascending: false, nullsFirst: false }).limit(1),
+        // Jüngste Link-Sichtung DERSELBEN QUELLE = Bezugspunkt für „noch verlinkt" — deren
+        // Crawl-Rhythmus zählt, nicht der einer anderen. Gegen „jetzt" zu messen wäre falsch,
+        // sobald der Crawler pausiert (dann wäre alles „raus"). Toleranz quellenspezifisch
+        // (Discovery-Abdeckung: n-tv stündlich komplett, Tagesschau/FAZ nur gesampelt).
+        supabase.from("page_overview").select("link_seen").eq("source_id", (data as Detail).source_id)
+          .order("link_seen", { ascending: false, nullsFirst: false }).limit(1),
       ]);
       const newestLink = ((cut.data ?? []) as any[])[0]?.link_seen as string | undefined;
-      setOnlineCut(newestLink ? new Date(Date.parse(newestLink) - ONLINE_TOLERANCE_MS).toISOString() : null);
+      setOnlineCut(newestLink
+        ? new Date(Date.parse(newestLink) - onlineToleranceMs((data as Detail).source_id)).toISOString()
+        : null);
       setAuthors(((au.data ?? []) as any[]).map((r) => r.authors?.name).filter(Boolean));
       setKeywords(((kw.data ?? []) as any[]).map((r) => r.keywords?.term).filter(Boolean));
       setCategories(((cat.data ?? []) as any[]).map((r) => r.categories?.name).filter(Boolean));

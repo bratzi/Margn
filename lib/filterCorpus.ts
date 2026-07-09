@@ -38,23 +38,39 @@ export const CORPUS_COLS =
   "id,article_id,source_id,url,ptype,topic,author_status,paywalled,language," +
   "published_at,discovered_at,last_seen,link_seen,word_count,revision_count,edit_count,scan_count,rubric";
 
-// Wie lange muss ein Artikel-Link STILL sein, bis wir ihn „rausgeflogen" nennen? Ein Konfidenz-
-// Regler, empirisch gesetzt (Messung 09.07., Link-Alter aller Artikel-Seiten):
-//   0–1 h: 2237  |  1–2 h: 157  |  2–3 h: 83  |  3–6 h: 246  |  6–26 h: ~1000  |  72 h+: 29844
-// Die Discovery läuft stündlich; noch verlinkte Seiten werden ganz überwiegend binnen EINER Stunde
-// wieder gesichtet, danach folgt nur ein Rinnsal. 6 h = sechs verpasste Läufe → robust gegen
-// Fetch-/Sitemap-Budget-Lücken, aber schnell genug, dass Abgänge NOCH AM SELBEN TAG sichtbar werden.
-// (26 h — das Fenster von linked_stale_articles — wäre für die Zustandsfrage zu träge: die
-// „Rausgeflogen"-Kennzahl eines Tages-Zeitraums wäre strukturell immer 0.)
-// Zu kurz wäre falsch: bei 90 min zählten 41 % der noch verlinkten Artikel als Abgang.
-export const ONLINE_TOLERANCE_MS = 6 * 60 * 60 * 1000;
+// Wie lange muss ein Artikel-Link STILL sein, bis wir ihn „rausgeflogen" nennen? QUELLENSPEZIFISCH —
+// die Discovery-Abdeckung ist strukturell verschieden (Messung 09.07., Anteil der in den letzten
+// 48 h entdeckten — also praktisch sicher noch verlinkten — Artikel, deren Link binnen X erneut
+// gesichtet wurde):
+//              1 h    6 h    26 h
+//   n-tv       99 %   99 %   99 %   (dichte Quervernetzung + Sitemap → jede Stunde gesehen)
+//   FAZ        58 %   63 %   80 %   (keine Sitemap → Startseite/Ressorts/Feeds gesampelt)
+//   Spiegel    48 %   61 %   86 %
+//   Bild       23 %   36 %   74 %
+//   Tagesschau 20 %   22 %   51 %   (keine Sitemap, riesiges Regional-Volumen)
+// Eine GLOBALE Toleranz kann also nie stimmen: 6 h erklärte 78 % der frischen Tagesschau-Artikel
+// für tot (Fehlalarm, z.B. FAZ-Feuilleton Art. 1655177: 1 Sichtung, dann Nische). Je spärlicher
+// die Abdeckung, desto träger muss das Urteil sein — ehrlich: für Tagesschau/Bild ist ein Abgang
+// erst nach Tagen belegbar. Schlüssel = source_id (1 Tagesschau, 3 Spiegel, 4 FAZ, 5 n-tv, 6 Bild).
+export const ONLINE_TOLERANCE_H: Record<number, number> = { 1: 72, 3: 26, 4: 26, 5: 6, 6: 36 };
+export const ONLINE_TOLERANCE_DEFAULT_H = 26;
+export function onlineToleranceMs(sourceId: number): number {
+  return (ONLINE_TOLERANCE_H[sourceId] ?? ONLINE_TOLERANCE_DEFAULT_H) * 3600_000;
+}
 
-// Grenze für den Online-Bestand: jüngste Link-Sichtung im Korpus − Toleranz. Gegen „jetzt" zu
-// messen wäre falsch, sobald der Crawler pausiert (dann wäre plötzlich alles „raus").
-export function onlineCutFrom(rows: { link_seen?: string | null }[]): string | null {
-  let newest = 0;
-  for (const r of rows) if (r.link_seen) { const t = Date.parse(r.link_seen); if (t > newest) newest = t; }
-  return newest ? new Date(newest - ONLINE_TOLERANCE_MS).toISOString() : null;
+// Cuts je Quelle: jüngste Link-Sichtung DIESER Quelle − ihre Toleranz. Gegen „jetzt" zu messen
+// wäre falsch, sobald der Crawler pausiert (dann wäre plötzlich alles „raus"); gegen die jüngste
+// Sichtung EINER ANDEREN Quelle ebenso (deren Crawl-Rhythmus sagt nichts über diese).
+export function onlineCutsFrom(rows: { source_id: number; link_seen?: string | null }[]): Record<string, string> | null {
+  const newest = new Map<number, number>();
+  for (const r of rows) if (r.link_seen) {
+    const t = Date.parse(r.link_seen);
+    if (t > (newest.get(r.source_id) ?? 0)) newest.set(r.source_id, t);
+  }
+  if (!newest.size) return null;
+  const out: Record<string, string> = {};
+  for (const [sid, t] of newest) out[String(sid)] = new Date(t - onlineToleranceMs(sid)).toISOString();
+  return out;
 }
 
 // Zeitachse: nach welchem Zeitstempel gefiltert/gebucketet wird.
@@ -74,9 +90,9 @@ export type FilterSnapshot = {
   // Meldungen — sie erschlagen jede Themen-/Quellen-Verteilung. Per Filter zuschaltbar.
   hideRegional: boolean;
   // Online-Bestand: "all" | "online" (noch verlinkt) | "gone" (rausgeflogen).
-  // Grenze ist onlineCut = jüngste LINK-Sichtung des Corpus − ONLINE_TOLERANCE_MS
-  // (FilterProvider berechnet ihn via onlineCutFrom; gleiche Definition wie die Fluktuations-KPIs).
-  linkState: string; onlineCut: string | null;
+  // onlineCut = Cuts JE QUELLE (source_id → ISO): jüngste Link-Sichtung der Quelle − ihre
+  // Toleranz (FilterProvider via onlineCutsFrom; gleiche Definition wie die Fluktuations-KPIs).
+  linkState: string; onlineCut: Record<string, string> | null;
 };
 
 type TimedRow = { published_at: string | null; discovered_at: string | null; last_seen?: string | null };
@@ -156,11 +172,15 @@ export function applyServerFilters(q: any, f: FilterSnapshot, subPats: string[],
   if (f.depth === "kurz") q = q.gt("word_count", 0).lt("word_count", 300);
   else if (f.depth === "mittel") q = q.gte("word_count", 300).lte("word_count", 900);
   else if (f.depth === "lang") q = q.gt("word_count", 900);
-  // Online-Bestand: „rausgeflogen" = letzte LINK-Sichtung vor onlineCut (seither nirgends mehr
-  // verlinkt angetroffen); „noch verlinkt" = innerhalb der Toleranz verlinkt gesehen.
-  if (f.onlineCut) {
-    if (f.linkState === "gone") q = q.lt("link_seen", f.onlineCut);
-    else if (f.linkState === "online") q = q.gte("link_seen", f.onlineCut);
+  // Online-Bestand: „rausgeflogen" = letzte LINK-Sichtung vor dem QUELLEN-Cut (seither nirgends
+  // mehr verlinkt angetroffen); „noch verlinkt" = innerhalb der Quellen-Toleranz gesehen.
+  // Je Quelle ein eigener Cut → OR über and(source_id, link_seen)-Zweige. Quellen ohne Cut
+  // (keine Sichtung im Korpus) fallen in beiden Modi raus — Zustand unbekannt.
+  if (f.onlineCut && (f.linkState === "gone" || f.linkState === "online")) {
+    const op = f.linkState === "gone" ? "lt" : "gte";
+    const branches = Object.entries(f.onlineCut)
+      .map(([sid, cut]) => `and(source_id.eq.${sid},link_seen.${op}.${cut})`);
+    if (branches.length) q = q.or(branches.join(","));
   }
   if (f.timeAxis === "seen") {
     // Scan-Achse: last_seen ist praktisch immer gesetzt → einfacher Bereichsfilter.
@@ -188,7 +208,10 @@ export function makeMatcher(
 ): (r: CorpusRow) => boolean {
   const fromMs = f.rangeFrom ? Date.parse(f.rangeFrom) : null;
   const toMs = f.rangeTo ? Date.parse(f.rangeTo) : null;
-  const cutMs = f.onlineCut ? Date.parse(f.onlineCut) : null;
+  // Quellen-Cuts einmal parsen (source_id → ms)
+  const cutMsBySid = f.onlineCut
+    ? new Map(Object.entries(f.onlineCut).map(([sid, iso]) => [Number(sid), Date.parse(iso)]))
+    : null;
   const topicSet = new Set(f.topics);
   const pats = subPats.map((s) => `/${s.toLowerCase()}/`);
   return (r: CorpusRow) => {
@@ -213,9 +236,12 @@ export function makeMatcher(
     if (f.depth === "kurz") { if (r.word_count == null || r.word_count <= 0 || r.word_count >= 300) return false; }
     else if (f.depth === "mittel") { if (r.word_count == null || r.word_count < 300 || r.word_count > 900) return false; }
     else if (f.depth === "lang") { if (r.word_count == null || r.word_count <= 900) return false; }
-    // Online-Bestand — PostgREST-Semantik gespiegelt: NULL link_seen fällt in beiden Modi raus.
-    if (cutMs !== null && f.linkState !== "all" && (f.linkState === "gone" || f.linkState === "online")) {
+    // Online-Bestand — PostgREST-Semantik gespiegelt: NULL link_seen UND Quellen ohne Cut
+    // fallen in beiden Modi raus (Zustand unbekannt).
+    if (cutMsBySid !== null && (f.linkState === "gone" || f.linkState === "online")) {
       if (r.link_seen == null) return false;
+      const cutMs = cutMsBySid.get(r.source_id);
+      if (cutMs == null) return false;
       const ls = Date.parse(r.link_seen);
       if (f.linkState === "gone" ? ls >= cutMs : ls < cutMs) return false;
     }
@@ -243,6 +269,6 @@ export function snapshotOf(f: FilterSnapshot & Record<string, unknown>): FilterS
     topics: f.topics, lang: f.lang, changed: f.changed, depth: f.depth,
     rangeFrom: f.rangeFrom, rangeTo: f.rangeTo, timeAxis: (f.timeAxis as TimeAxis) ?? "published",
     hideRegional: !!f.hideRegional,
-    linkState: (f.linkState as string) ?? "all", onlineCut: (f.onlineCut as string | null) ?? null,
+    linkState: (f.linkState as string) ?? "all", onlineCut: (f.onlineCut as Record<string, string> | null) ?? null,
   };
 }
