@@ -118,6 +118,31 @@ function canonicalArticleUrl(url: string, html: string): string {
   return url;
 }
 
+// Bild RE-SLUGT Artikel: dieselbe 24-Hex-ID, aber neuer Slug (oft mit neuer Überschrift UND neu
+// gesetztem Datum). Ohne Abgleich entstünde je Slug eine EIGENE articles-Zeile → dieselbe Story
+// zählt an mehreren Tagen (Art. WM-Trump/Fifa: 05.+06.07. unter 3 Überschriften; bestandsweit 94
+// Gruppen, Spread bis 134 T). Fix: existiert unter der neuen (kanonischen) URL noch kein Artikel,
+// aber ein Bild-Artikel mit GLEICHER Hex-ID unter einer anderen URL, dann die BESTEHENDE Zeile auf
+// die neue URL umziehen (id/Historie/eingefrorenes published_at bleiben) und die Alt-Seite als
+// alias parken. So bleibt es EIN Artikel; der Re-Slug erscheint als stille Titel-/Datums-Änderung.
+async function reconcileBildReslug(sourceId: number, canonUrl2: string): Promise<void> {
+  if (DRY_RUN) return;
+  let host = ""; try { host = new URL(canonUrl2).hostname.toLowerCase(); } catch { return; }
+  if (!/(^|\.)bild\.de$/.test(host)) return;
+  const id = bildId(canonUrl2); if (!id) return;
+  // Schon ein Artikel unter der neuen URL? Dann normaler Upsert-Pfad, nichts zu tun.
+  const { data: exists } = await sb.from("articles").select("id").eq("url", canonUrl2).maybeSingle();
+  if (exists) return;
+  // Bestehende Zeile(n) mit gleicher Hex-ID unter anderer URL — reichste zuerst (meiste Revisionen).
+  const { data: olds } = await sb.from("articles")
+    .select("id,url,revision_count").eq("source_id", sourceId)
+    .like("url", `%${id}%`).order("revision_count", { ascending: false });
+  const old = (olds ?? []).find((o: any) => o.url !== canonUrl2 && bildId(o.url) === id);
+  if (!old) return;
+  await sb.from("articles").update({ url: canonUrl2 }).eq("id", (old as any).id);
+  await sb.from("pages").update({ kind: "alias" }).eq("url", (old as any).url);
+}
+
 async function upsertArticle(sourceId: number, url: string, meta?: ReturnType<typeof extractMeta>, extra?: Record<string, unknown>): Promise<number> {
   url = canonUrl(url);
   const row: Record<string, unknown> = { source_id: sourceId, url, last_seen: new Date().toISOString() };
@@ -1107,6 +1132,9 @@ async function saveArticleFull(sourceId: number, url: string, html: string, rawH
     }
     return null;
   }
+  // Bild-Re-Slug auf die bestehende Zeile umziehen, BEVOR prev gelesen wird → prev findet den
+  // migrierten Artikel, Tracking läuft als stille Änderung weiter (kein Datums-/Zähl-Dopplung).
+  await reconcileBildReslug(sourceId, url);
   // Vorzustand VOR dem Upsert lesen (sonst überschreibt upsertArticle den alten Titel).
   const { data: prev } = await sb.from("articles")
     .select(PREV_COLS)
