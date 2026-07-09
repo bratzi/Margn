@@ -144,20 +144,23 @@ export default function RateStats() {
   // viele Artikel-Links jeder Lauf sieht (Rel. = pro Zeiteinheit; Abs. = Tageszähler,
   // Reset um 00:00). Die „Veröffentlicht"-Achse bleibt unverändert (1 Artikel = 1 Bucket).
   const presence = f.timeAxis === "seen";
+  // Bestand „Rausgeflogen": Sichtungen wären hier irreführend (sie zählen ALLE Link-
+  // Sichtungen) — die last_seen-Verteilung der gefilterten Abgänge ist die richtige Kurve.
+  const useSight = presence && f.linkState !== "gone";
 
   // Sichtungs-Events laden (RPC aggregiert serverseitig auf Minuten- bzw. Stunden-Körnung,
   // hält den Egress klein). null = noch nicht geladen, [] = keine Events im Fenster.
   const [sightRows, setSightRows] = useState<{ source_id: number; bucket: string; n: number }[] | null>(null);
   const sightGran = unit === "minute" ? "minute" : "hour";
   useEffect(() => {
-    if (!presence) { setSightRows(null); return; }
+    if (!useSight) { setSightRows(null); return; }
     let cancelled = false;
     (async () => {
       const { data, error } = await supabase.rpc("sighting_buckets", { p_from: fromIso, p_to: toIso, p_gran: sightGran });
       if (!cancelled) setSightRows(error ? [] : ((data ?? []) as { source_id: number; bucket: string; n: number }[]));
     })();
     return () => { cancelled = true; };
-  }, [presence, fromIso, toIso, sightGran, f.corpusLoadedAt]);
+  }, [useSight, fromIso, toIso, sightGran, f.corpusLoadedAt]);
 
   const { series, total, isSightings } = useMemo(() => {
     // „Zuletzt gesehen" + Verleger: ECHTE Crawl-Sichtungen aus der sightings-Tabelle —
@@ -165,7 +168,7 @@ export default function RateStats() {
     // Rampe während des ~30-min-Laufs, Plateau bis zum nächsten Lauf. Fällt auf die
     // last_seen-Verteilung zurück, solange noch keine Events gesammelt sind (Tabelle neu)
     // oder im Themen-Modus (Sichtungen sind nur je Quelle erfasst, nicht je Thema).
-    if (presence && chartMode === "publishers" && sightRows && sightRows.length) {
+    if (useSight && chartMode === "publishers" && sightRows && sightRows.length) {
       const starts = buckets.map((b) => Date.parse(b));
       const stepMs = unit === "minute" ? 60000 : unit === "hour" ? 3600000 : unit === "day" ? 86400000 : 604800000;
       const windowTo = (starts[starts.length - 1] ?? 0) + stepMs;
@@ -239,9 +242,9 @@ export default function RateStats() {
       vals: buckets.map((b) => map.get(s.id)?.get(b) ?? 0),
     }));
     return { series: ser, total: tot, isSightings: false };
-  }, [chartMode, presence, sightRows, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
+  }, [chartMode, useSight, sightRows, f.corpus, f.corpusReady, sources, act, buckets, unit, fromIso, toIso, f.timeAxis,
       f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
-      f.hideRegional, f.subPats.join("|"), f.kwIdSet]);
+      f.hideRegional, f.linkState, f.onlineCut, f.subPats.join("|"), f.kwIdSet]);
 
   const NB = buckets.length;
   const availW = (containerW > 0 ? containerW : VW) - PAD_L - PAD_R;

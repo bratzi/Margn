@@ -67,13 +67,13 @@ export default function PulseBar() {
     // Zu-/Abgänge im gewählten Zeitraum: Zugang = erste Sichtung (discovered_at) im
     // Fenster; Abgang = letzte Sichtung im Fenster UND seit dem jüngsten Scan-Stand
     // (± 90 min) nicht mehr gesehen — noch verlinkte Seiten sind KEINE Abgänge.
+    // Cutoff kommt zentral aus dem FilterProvider (dieselbe Grenze wie der
+    // Online-Bestand-Filter „Rausgeflogen" — eine Wahrheit).
     // Zeit-agnostischer Matcher: die beiden Ereignisse haben ihre eigene Zeitachse.
     const matchNT = makeMatcher(snap, f.subPats, f.kwIdSet, { time: true });
     const fromMs = f.rangeFrom ? Date.parse(f.rangeFrom) : -Infinity;
     const toMs = f.rangeTo ? Date.parse(f.rangeTo) : Infinity;
-    let newestSeen = 0;
-    for (const r of f.corpus) { if (r.last_seen) { const t = Date.parse(r.last_seen); if (t > newestSeen) newestSeen = t; } }
-    const onlineCut = newestSeen - 90 * 60000;
+    const onlineCut = f.onlineCut ? Date.parse(f.onlineCut) : -Infinity;
     let gainsN = 0, lossesN = 0;
     const gainsByDay = new Map<string, number>(), lossesByDay = new Map<string, number>();
     for (const r of f.corpus) {
@@ -112,7 +112,7 @@ export default function PulseBar() {
       topTopic: topTopic ? { key: topTopic[0], n: topTopic[1], sh: pct(topTopic[1], n) } : null,
     };
   }, [f.corpus, f.corpusReady, f.active, f.status, f.paywall, f.atype, f.author,
-      f.topics.join(","), f.lang, f.changed, f.depth, f.hideRegional, f.rangeFrom, f.rangeTo, f.timeAxis,
+      f.topics.join(","), f.lang, f.changed, f.depth, f.hideRegional, f.linkState, f.onlineCut, f.rangeFrom, f.rangeTo, f.timeAxis,
       f.subPats.join("|"), f.kwIdSet, nameById]);
 
   // Count-up: Kennzahlen zählen weich zum neuen Wert statt hart umzuspringen.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { useFilters, WINDOW_OPTS } from "@/components/FilterProvider";
 import { axisTime, berlinDate, berlinDayBoundsUTC, makeMatcher, snapshotOf, TIME_AXIS_LABEL } from "@/lib/filterCorpus";
 import { topicLabel } from "@/lib/topics";
@@ -41,12 +42,52 @@ export default function TimeRangeFilter() {
   const colorById = useMemo(() => new Map(sources.map((s, i) => [s.id, PUB_COLORS[i % PUB_COLORS.length]])), [sources]);
   const act = useMemo(() => new Set(activeArr), [activeArr]);
 
+  // „Zuletzt gesehen"-Achse: Balken = echte Crawl-Sichtungen je Berlin-Tag (RPC-Tages-
+  // Körnung, ~300 Zeilen je 30 T). Die frühere last_seen-Verteilung zeigte vor heute nur
+  // die ABGÄNGE (noch Verlinktes wird bei jedem Lauf auf „heute" gebumpt) — dieser Blick
+  // ist jetzt bewusst der Bestand-Filter „Rausgeflogen": dann sind die last_seen-Balken
+  // genau richtig (wann flog was raus?) und Sichtungen bleiben aus. Fallback auf die
+  // Verteilung auch, solange noch keine Events im Fenster liegen (Tabelle neu, wie RateStats).
+  const wantSight = f.timeAxis === "seen" && f.linkState !== "gone";
+  const [sightRows, setSightRows] = useState<{ source_id: number; bucket: string; n: number }[] | null>(null);
+  useEffect(() => {
+    if (!wantSight) { setSightRows(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("sighting_buckets", {
+        p_from: berlinDayBoundsUTC(days[0]).from,
+        p_to: berlinDayBoundsUTC(days[days.length - 1]).to,
+        p_gran: "day",
+      });
+      if (!cancelled) setSightRows(error ? [] : ((data ?? []) as { source_id: number; bucket: string; n: number }[]));
+    })();
+    return () => { cancelled = true; };
+  }, [wantSight, days, f.corpusLoadedAt]);
+
+  const sightSeries = useMemo(() => {
+    if (!wantSight || !sightRows?.length) return null;
+    const dayIdx = new Map(days.map((d, i) => [d, i]));
+    const map = new Map<number, number[]>();
+    for (const r of sightRows) {
+      if (!act.has(r.source_id)) continue;
+      const i = dayIdx.get(berlinDate(r.bucket));
+      if (i === undefined) continue;
+      let vals = map.get(r.source_id);
+      if (!vals) { vals = new Array(days.length).fill(0); map.set(r.source_id, vals); }
+      vals[i] += r.n;
+    }
+    return sources.filter((s) => act.has(s.id)).map((s) => ({
+      id: String(s.id), color: colorById.get(s.id)!, label: short(s.name),
+      vals: map.get(s.id) ?? new Array(days.length).fill(0),
+    }));
+  }, [wantSight, sightRows, act, sources, colorById, days]);
+
   // Säulen direkt aus dem gemeinsamen Corpus — GLEICHES Prädikat wie die Tabelle,
   // nur ohne Zeitfilter (die Zeitachse ist ja der Chart selbst). Damit stimmen die
   // Balken exakt mit den Tabellen-Treffern des jeweiligen Tages überein.
   const corpusDeps = [f.corpus, f.corpusReady, days, f.timeAxis,
     f.status, f.paywall, f.atype, f.author, f.topics.join(","), f.lang, f.changed, f.depth,
-    f.hideRegional, f.subPats.join("|"), f.kwIdSet] as const;
+    f.hideRegional, f.linkState, f.onlineCut, f.subPats.join("|"), f.kwIdSet] as const;
 
   const series = useMemo(() => {
     const snap = snapshotOf(f as any);
@@ -95,15 +136,19 @@ export default function TimeRangeFilter() {
       }));
   }, [act, ...corpusDeps]);
 
-  const activeSeries = chartMode === "topics" ? topicSeries : series;
+  // Verleger-Modus zeigt Sichtungen, sobald Events da sind; Themen-Modus bleibt beim
+  // Corpus (Sichtungen sind nur je Quelle erfasst, nicht je Thema).
+  const isSightings = chartMode === "publishers" && sightSeries != null;
+  const activeSeries = chartMode === "topics" ? topicSeries : (sightSeries ?? series);
   // Getweente Kopie NUR für die Balken-Geometrie (weiches Morphen bei Filter-/Achsen-
   // Wechseln); Tooltip + Legende lesen weiter die ganzzahligen Ziel-Werte.
   const animSeries = useTweenedSeries(activeSeries);
 
   const maxTotal = useMemo(() => {
-    const tot = days.map((_, i) => series.reduce((sum, s) => sum + s.vals[i], 0));
+    const base = isSightings ? sightSeries! : series;
+    const tot = days.map((_, i) => base.reduce((sum, s) => sum + s.vals[i], 0));
     return Math.max(1, ...tot);
-  }, [series, days]);
+  }, [isSightings, sightSeries, series, days]);
   const animMaxTotal = Math.max(1, useTweenedNumber(maxTotal));
 
   const X = (i: number) => (i / (N - 1)) * VW;
@@ -227,7 +272,7 @@ export default function TimeRangeFilter() {
           const fromRight = rect ? rect.width - relX < 160 : false;
           return (
             <div className="trf-tt" style={{ left: fromRight ? undefined : `${(relX / (rect?.width ?? 1)) * 100}%`, right: fromRight ? `${100 - (relX / (rect?.width ?? 1)) * 100}%` : undefined }}>
-              <div className="trf-tt-day">{fmtDay(days[hoverDay.idx])}</div>
+              <div className="trf-tt-day">{fmtDay(days[hoverDay.idx])}{isSightings ? " · Sichtungen" : f.timeAxis === "seen" && f.linkState === "gone" ? " · rausgeflogen" : ""}</div>
               {dayData.map((s) => (
                 <div key={s.id} className="trf-tt-row">
                   <i style={{ background: s.color }} />

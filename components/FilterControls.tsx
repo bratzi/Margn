@@ -28,7 +28,7 @@ export default function FilterControls() {
     f.activeArr.length !== f.sources.length || f.status !== "all" || f.paywall !== "all" ||
     f.author !== "all" || f.atype !== "all" || f.topics.length > 0 || f.subcats.length > 0 ||
     f.keyword !== "all" || f.lang !== "all" || f.changed !== "all" || f.depth !== "all" ||
-    f.search.trim().length > 0 || f.searchTerms.length > 0 || !f.hideRegional;
+    f.search.trim().length > 0 || f.searchTerms.length > 0 || !f.hideRegional || f.linkState !== "all";
 
   return (
     <div className="filters">
@@ -101,6 +101,27 @@ export default function FilterControls() {
       </div>
 
       <Group label="Erfassung" value={f.status} on={f.setStatus} opts={[["all", "Alle"], ["new", "Neu"], ["rescanned", "Wiederholt"]]} />
+
+      {/* Online-Bestand: „Rausgeflogen" = letzte Sichtung liegt vor dem jüngsten Scan-Stand
+          (−90 min Toleranz) — der Crawl trifft die Seite nicht mehr verlinkt an. Zusammen mit
+          der Achse „Zuletzt gesehen" zeigt der Zeitstrahl dann, WANN Artikel verschwanden. */}
+      <div className="fgroup">
+        <div className="fglabel">Online-Bestand</div>
+        <div className="seg fseg">
+          <button className={f.linkState === "all" ? "on" : ""} onClick={() => f.setLinkState("all")} title="Kein Bestand-Filter">Alle</button>
+          <button className={f.linkState === "online" ? "on" : ""} onClick={() => f.setLinkState("online")} title="Nur Artikel, die der jüngste Crawl noch verlinkt gesehen hat">Verlinkt</button>
+          <button className={f.linkState === "gone" ? "on" : ""} onClick={() => f.setLinkState("gone")} title="Nur Artikel, die seit dem jüngsten Scan-Stand nicht mehr verlinkt angetroffen wurden">Rausgeflogen</button>
+        </div>
+        {f.linkState === "gone" && (
+          <div className="fsearch-hint">
+            Von den Portalen entfernte Artikel. {f.timeAxis === "seen"
+              ? "Der Zeitstrahl zeigt, wann sie zuletzt verlinkt waren."
+              : `Achse „Zuletzt gesehen" wählen, um zu sehen, wann sie verschwanden.`}
+          </div>
+        )}
+        {f.linkState === "online" && <div className="fsearch-hint">Nur der aktuell verlinkte Bestand (jüngster Scan-Stand).</div>}
+      </div>
+
       <Group label="Bezahlschranke" value={f.paywall} on={f.setPaywall} opts={[["all", "Alle"], ["no", "Frei"], ["yes", "Paywall"]]} />
       <Group label="Autor" value={f.author} on={f.setAuthor} opts={[["all", "Alle"], ["named", "Namentl."], ["anonymous", "Anonym"], ["none", "Ohne"]]} />
       {/* Stille Änderungen: das Alleinstellungsmerkmal des Observatoriums als Filter */}

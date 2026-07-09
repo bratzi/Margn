@@ -50,6 +50,10 @@ export type FilterSnapshot = {
   // „Regional & Lokales" ausblenden (Default AN): ~24 % des Gesamtvolumens sind Regional-
   // Meldungen — sie erschlagen jede Themen-/Quellen-Verteilung. Per Filter zuschaltbar.
   hideRegional: boolean;
+  // Online-Bestand: "all" | "online" (noch verlinkt) | "gone" (rausgeflogen).
+  // Grenze ist onlineCut = jüngster Scan-Stand des Corpus − 90 min Crawl-Toleranz
+  // (FilterProvider berechnet ihn; gleiche Definition wie die Fluktuations-KPIs).
+  linkState: string; onlineCut: string | null;
 };
 
 type TimedRow = { published_at: string | null; discovered_at: string | null; last_seen?: string | null };
@@ -129,6 +133,12 @@ export function applyServerFilters(q: any, f: FilterSnapshot, subPats: string[],
   if (f.depth === "kurz") q = q.gt("word_count", 0).lt("word_count", 300);
   else if (f.depth === "mittel") q = q.gte("word_count", 300).lte("word_count", 900);
   else if (f.depth === "lang") q = q.gt("word_count", 900);
+  // Online-Bestand: „rausgeflogen" = letzte Sichtung vor onlineCut (seither nicht mehr
+  // verlinkt angetroffen); „noch verlinkt" = im jüngsten Scan-Stand gesehen.
+  if (f.onlineCut) {
+    if (f.linkState === "gone") q = q.lt("last_seen", f.onlineCut);
+    else if (f.linkState === "online") q = q.gte("last_seen", f.onlineCut);
+  }
   if (f.timeAxis === "seen") {
     // Scan-Achse: last_seen ist praktisch immer gesetzt → einfacher Bereichsfilter.
     if (f.rangeFrom) q = q.gte("last_seen", f.rangeFrom);
@@ -155,6 +165,7 @@ export function makeMatcher(
 ): (r: CorpusRow) => boolean {
   const fromMs = f.rangeFrom ? Date.parse(f.rangeFrom) : null;
   const toMs = f.rangeTo ? Date.parse(f.rangeTo) : null;
+  const cutMs = f.onlineCut ? Date.parse(f.onlineCut) : null;
   const topicSet = new Set(f.topics);
   const pats = subPats.map((s) => `/${s.toLowerCase()}/`);
   return (r: CorpusRow) => {
@@ -179,6 +190,12 @@ export function makeMatcher(
     if (f.depth === "kurz") { if (r.word_count == null || r.word_count <= 0 || r.word_count >= 300) return false; }
     else if (f.depth === "mittel") { if (r.word_count == null || r.word_count < 300 || r.word_count > 900) return false; }
     else if (f.depth === "lang") { if (r.word_count == null || r.word_count <= 900) return false; }
+    // Online-Bestand — PostgREST-Semantik gespiegelt: NULL last_seen fällt in beiden Modi raus.
+    if (cutMs !== null && f.linkState !== "all" && (f.linkState === "gone" || f.linkState === "online")) {
+      if (r.last_seen == null) return false;
+      const ls = Date.parse(r.last_seen);
+      if (f.linkState === "gone" ? ls >= cutMs : ls < cutMs) return false;
+    }
     if (!skip.time && (fromMs !== null || toMs !== null)) {
       const t = axisTime(r, f.timeAxis);
       if (!t) return false;
@@ -203,5 +220,6 @@ export function snapshotOf(f: FilterSnapshot & Record<string, unknown>): FilterS
     topics: f.topics, lang: f.lang, changed: f.changed, depth: f.depth,
     rangeFrom: f.rangeFrom, rangeTo: f.rangeTo, timeAxis: (f.timeAxis as TimeAxis) ?? "published",
     hideRegional: !!f.hideRegional,
+    linkState: (f.linkState as string) ?? "all", onlineCut: (f.onlineCut as string | null) ?? null,
   };
 }

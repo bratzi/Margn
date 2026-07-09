@@ -54,6 +54,7 @@ export default function Sidebar() {
     depth: f.depth !== "all",
     search: f.search.trim().length >= 2 || f.searchTerms.length > 0,
     regional: !f.hideRegional, // Einbeziehen = Abweichung vom Standard (ausgeblendet)
+    linkState: f.linkState !== "all",
     range: !(f.rangeIdx.from === 0 && f.rangeIdx.to === f.days.length - 1) || !!f.pinpoint,
   };
   const activeCount =
@@ -61,7 +62,7 @@ export default function Sidebar() {
     (ind.author ? 1 : 0) + (ind.atype ? 1 : 0) + (ind.topics ? 1 : 0) +
     (ind.subcats ? 1 : 0) + (ind.lang ? 1 : 0) + (ind.keyword ? 1 : 0) +
     (ind.changed ? 1 : 0) + (ind.depth ? 1 : 0) + (ind.search ? 1 : 0) +
-    (ind.regional ? 1 : 0) + (ind.range ? 1 : 0);
+    (ind.regional ? 1 : 0) + (ind.linkState ? 1 : 0) + (ind.range ? 1 : 0);
 
   // Landingpage + Login sind full-bleed ohne App-Chrome.
   // WICHTIG: erst NACH allen Hooks returnen (Rules of Hooks — Layout persistiert über Routen).

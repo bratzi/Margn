@@ -109,6 +109,9 @@ type Ctx = {
   // „Regional & Lokales" ausblenden (Default AN): ~24 % des Volumens sind Regional-Meldungen
   // und erschlagen jede Verteilung. Zuschaltbar über den Filter.
   hideRegional: boolean; setHideRegional: (b: boolean) => void;
+  // Online-Bestand: "all" | "online" (noch verlinkt) | "gone" (rausgeflogen — letzte
+  // Sichtung vor onlineCut). onlineCut = jüngster Scan-Stand des Corpus − 90 min.
+  linkState: string; setLinkState: (v: string) => void; onlineCut: string | null;
   keyword: string; setKeyword: (v: string) => void;
   // Volltextsuche über alle Eigenschaften (Titel/URL/Teaser/Thema/Schlagwörter/Rubriken/Inhalt).
   search: string; setSearch: (v: string) => void; searchPending: boolean; searchCount: number | null;
@@ -191,6 +194,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [lang, setLang] = useState("all");
   const [changed, setChanged] = useState("all");
   const [depth, setDepth] = useState("all");
+  const [linkState, setLinkState] = useState("all");
   const [windowDays, _setWindowDays] = useState(30);
   // setWindowDays: Fensterbreite wechseln und Slider + Pinpoint sofort zurücksetzen.
   const setWindowDays = (n: number) => { _setWindowDays(n); setRangeIdx({ from: 0, to: n - 1 }); setPinpoint(null); };
@@ -243,6 +247,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (f.lang) setLang(f.lang);
       if (f.changed) setChanged(f.changed);
       if (f.depth) setDepth(f.depth);
+      if (f.linkState === "online" || f.linkState === "gone") setLinkState(f.linkState);
       if (f.timeAxis === "published" || f.timeAxis === "seen") _setTimeAxis(f.timeAxis);
       if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
       // windowDays zuerst setzen (nicht setWindowDays, um rangeIdx nicht automatisch zu resetten),
@@ -273,10 +278,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!sources.length) return;
     try {
       localStorage.setItem("margn-filters", JSON.stringify({
-        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, searchTerms, hideRegional,
+        activeIds: [...active], status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, searchTerms, hideRegional, linkState,
       }));
     } catch {}
-  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, searchTerms, hideRegional, sources.length]);
+  }, [active, status, paywall, atype, author, topics, keyword, lang, changed, depth, trfOpen, rangeIdx, windowDays, timeAxis, searchTerms, hideRegional, linkState, sources.length]);
 
   const nn = (v: string) => (v === "all" ? null : v);
 
@@ -371,6 +376,16 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [needsCorpus]);
 
+  // Grenze „noch verlinkt" ↔ „rausgeflogen": jüngster Scan-Stand über den GESAMTEN Corpus
+  // minus 90 min Crawl-Toleranz (ein Lauf dauert ~30 min; Seiten, die der laufende Scan noch
+  // nicht erreicht hat, sind keine Abgänge). EINE Wahrheit für den Bestand-Filter
+  // (makeMatcher + applyServerFilters) UND die Fluktuations-KPIs in PulseBar.
+  const onlineCut = useMemo(() => {
+    let newest = 0;
+    for (const r of corpus) if (r.last_seen) { const t = Date.parse(r.last_seen); if (t > newest) newest = t; }
+    return newest ? new Date(newest - 90 * 60000).toISOString() : null;
+  }, [corpus]);
+
   // Keyword → Artikel-IDs (zentral, damit Tabelle UND Analytics dieselbe Menge nutzen)
   const [kwIds, setKwIds] = useState<number[] | null>(null);
   useEffect(() => {
@@ -451,7 +466,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   // (alle Filter außer Themen/Rubriken selbst). Zählt damit exakt das, was die Tabelle zeigt.
   useEffect(() => {
     if (!active.size || !corpusReady) { if (!active.size) setTopicOpts([]); return; }
-    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo, timeAxis, hideRegional } as any);
+    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo, timeAxis, hideRegional, linkState, onlineCut } as any);
     const match = makeMatcher(snap, [], kwIdSet, { topics: true });
     const counts = new Map<string, number>();
     for (const r of corpus) {
@@ -462,7 +477,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     }
     setTopicOpts([...counts.entries()].sort((a, b) => b[1] - a[1])
       .map(([key, n]) => ({ key, label: topicLabel(key), n })));
-  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, hideRegional, rangeFrom, rangeTo, timeAxis, kwIdSet]);
+  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, hideRegional, linkState, onlineCut, rangeFrom, rangeTo, timeAxis, kwIdSet]);
 
   // Unterthemen-Baum: verlagseigene Rubriken je kanonischem Topic — abgeleitet aus dem
   // URL-PFAD (nicht aus article_categories, das bei Bild/FAZ/n-tv/Tagesschau leer ist).
@@ -470,7 +485,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const [catTree, setCatTree] = useState<Map<string, SubOpt[]>>(new Map());
   useEffect(() => {
     if (!active.size || !corpusReady) { if (!active.size) setCatTree(new Map()); return; }
-    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo, timeAxis, hideRegional } as any);
+    const snap = snapshotOf({ status, paywall, atype, author, topics, lang, changed, depth, rangeFrom, rangeTo, timeAxis, hideRegional, linkState, onlineCut } as any);
     const match = makeMatcher(snap, [], kwIdSet, { topics: true });
     // raw-Rubriken je Topic sammeln (alle aktiven Quellen)
     const agg = new Map<string, Map<string, { label: string; n: number; src: Set<number> }>>();
@@ -513,7 +528,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (list.length) tree.set(topic, list);
     }
     setCatTree(tree);
-  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, hideRegional, rangeFrom, rangeTo, timeAxis, kwIdSet]);
+  }, [corpus, corpusReady, active, status, paywall, atype, author, lang, changed, depth, hideRegional, linkState, onlineCut, rangeFrom, rangeTo, timeAxis, kwIdSet]);
 
   // Gewählte Sub-Rubriken → rohe URL-Muster (mehrsprachig, quellenübergreifend)
   const subPats = useMemo(() => {
@@ -551,7 +566,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const resetAll = () => {
     setStatus("all"); setPaywall("all"); setAtype("all"); setAuthor("all");
     setTopics([]); setSubcats([]); setKeyword("all"); setSearch(""); setSearchTerms([]); setLang("all");
-    _setHideRegional(true);
+    _setHideRegional(true); setLinkState("all");
     setChanged("all"); setDepth("all"); setPinpoint(null);
     _setWindowDays(30); setRangeIdx({ from: 0, to: 29 }); _setTimeAxis("published");
     setActive(new Set(sources.map((s) => s.id)));
@@ -560,7 +575,8 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const value: Ctx = {
     sources, active, activeArr, toggle, setAll,
     status, setStatus, paywall, setPaywall, atype, setAtype, author, setAuthor,
-    topics, toggleTopic, setTopics, subcats, toggleSubcat, hideRegional, setHideRegional, keyword, setKeyword,
+    topics, toggleTopic, setTopics, subcats, toggleSubcat, hideRegional, setHideRegional,
+    linkState, setLinkState, onlineCut, keyword, setKeyword,
     search, setSearch, searchPending, searchCount,
     searchTerms, addSearchTerm, removeSearchTerm, termCounts, lang, setLang,
     changed, setChanged, depth, setDepth, resetAll,
