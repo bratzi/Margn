@@ -13,7 +13,7 @@ const fraunces = Fraunces({ subsets: ["latin"], variable: "--font-display", disp
 
 export const metadata: Metadata = {
   title: "margn — Medienobservatorium",
-  description: "Offenes Medienobservatorium: wie Nachrichtenseiten ihre Artikel veröffentlichen, strukturieren und über die Zeit verändern.",
+  description: "Medienobservatorium im Aufbau: wie Nachrichtenseiten ihre Artikel veröffentlichen, strukturieren und über die Zeit verändern. Zugang derzeit beschränkt.",
 };
 
 const themeInit = `(function(){try{var t=localStorage.getItem('margn-theme');if(!t){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();`;

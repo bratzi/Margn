@@ -23,24 +23,6 @@ function W({ children }: { children: React.ReactNode }) {
   );
 }
 
-const STEPS = [
-  {
-    n: "01",
-    title: "Erfassen",
-    text: "Fünf führende deutsche Leitmedien werden stündlich erfasst — vollautomatisch und zurückhaltend über Feeds, Sitemaps und behutsames Crawling.",
-  },
-  {
-    n: "02",
-    title: "Versionieren",
-    text: "Jeder Artikel wird bei jedem Scan verglichen. Änderungen an Titel, Text und Metadaten — bis zum still verschobenen Veröffentlichungsdatum — werden als Revision festgehalten, mit Zeitstempel.",
-  },
-  {
-    n: "03",
-    title: "Auswerten",
-    text: "Themen, Paywall, Autoren, Tiefe: alle Dimensionen werden publizistenübergreifend normalisiert und vergleichbar gemacht.",
-  },
-];
-
 const TRUST = [
   {
     n: "§ 01",
@@ -49,13 +31,13 @@ const TRUST = [
   },
   {
     n: "§ 02",
-    title: "Offen einsehbar",
-    text: "Das Dashboard ist ohne Anmeldung zugänglich. Jede Kennzahl lässt sich bis zum einzelnen Artikel und Scan zurückverfolgen.",
+    title: "Kontrollierter Zugang",
+    text: "Das Dashboard ist während der Aufbauphase nicht öffentlich. Sobald das Observatorium einen reifen Stand erreicht hat, wird es kontrolliert veröffentlicht.",
   },
   {
     n: "§ 03",
-    title: "Nachvollziehbare Methodik",
-    text: "Spezialisierungs-Indizes, Share of Voice und Themen-Vielfalt folgen etablierten Maßen der Agenda-Setting-Forschung.",
+    title: "Zurückhaltung bei Daten",
+    text: "Öffentlich werden nur Metadaten und eigene Auswertungen. Volltexte werden nicht gespiegelt, sondern zur Quelle verlinkt.",
   },
 ];
 
@@ -200,17 +182,6 @@ export default function LandingPage() {
         });
       });
 
-      /* ---------- Methodik: Linie zeichnen ---------- */
-      gsap.utils.toArray<HTMLElement>(".mg-steps .wire").forEach((wire) => {
-        gsap.to(wire, {
-          scaleX: 1,
-          scaleY: 1,
-          duration: 1.6,
-          ease: "power2.inOut",
-          scrollTrigger: { trigger: ".mg-steps", start: "top 70%" },
-        });
-      });
-
       /* ---------- Zähler ---------- */
       gsap.utils.toArray<HTMLElement>("[data-count]").forEach((el) => {
         const target = parseFloat(el.dataset.count || "0");
@@ -313,9 +284,9 @@ export default function LandingPage() {
           <nav className="mg-nav-links" aria-label="Sektionen">
             <a href="#anatomie">Anatomie</a>
             <a href="#funktionen">Funktionen</a>
-            <a href="#methodik">Methodik</a>
+            <a href="#status">Status</a>
             <a href="#abdeckung">Abdeckung</a>
-            <a href="#transparenz">Transparenz</a>
+            <a href="#transparenz">Grundsätze</a>
           </nav>
           <Link href="/articles" className="mg-btn sm">
             <span>Dashboard</span>
@@ -327,7 +298,7 @@ export default function LandingPage() {
       {/* ---------------- Hero ---------------- */}
       <section className="mg-hero">
         <HeroCanvas />
-        <p className="mg-overline">Offenes Medienobservatorium · fünf deutsche Leitmedien</p>
+        <p className="mg-overline">Medienobservatorium im Aufbau · fünf deutsche Leitmedien</p>
         <h1 className="mg-h1">
           <W>Was</W> <W>Nachrichtenseiten</W>{" "}
           <W>
@@ -341,7 +312,7 @@ export default function LandingPage() {
         </h1>
         <p className="mg-hero-sub">
           margn beobachtet fünf führende deutsche Leitmedien, versioniert
-          jeden Artikel stündlich und macht sichtbar, was zwischen den Zeilen
+          jeden Artikel fortlaufend und macht sichtbar, was zwischen den Zeilen
           passiert: <strong>stille Edits</strong>, umdatierte Artikel,
           Agenda-Profile, Paywall-Strategien.
         </p>
@@ -359,7 +330,7 @@ export default function LandingPage() {
           <span className="mg-scrollhint">
             Scrollen <i />
           </span>
-          <span className="mg-rev">rev 2026.07 · stündlich aktualisiert</span>
+          <span className="mg-rev">Private Preview · Zugang beschränkt</span>
         </div>
       </section>
 
@@ -374,57 +345,52 @@ export default function LandingPage() {
         <div className="mg-stats-in">
           <div className="mg-stat" data-reveal="0">
             <span className="v">
-              <span data-count="60">0</span>
-              <small>min</small>
-            </span>
-            <span className="l">Scan-Takt</span>
-            <span className="s">jede Quelle, rund um die Uhr</span>
-          </div>
-          <div className="mg-stat" data-reveal="0.08">
-            <span className="v">
               <span data-count="5">0</span>
             </span>
             <span className="l">Leitmedien</span>
             <span className="s">Tagesschau · Spiegel · FAZ · Bild · n-tv</span>
           </div>
+          <div className="mg-stat" data-reveal="0.08">
+            <span className="v">
+              <span data-count="8">0</span>
+            </span>
+            <span className="l">Analyse-Blickwinkel</span>
+            <span className="s">von Silent Edits bis Datums-Forensik</span>
+          </div>
           <div className="mg-stat" data-reveal="0.16">
             <span className="v">
-              <span data-count="30">0</span>
-              <small>Tage</small>
+              <span data-count="16">0</span>
             </span>
-            <span className="l">Änderungshistorie</span>
-            <span className="s">jede Version, jeder Zeitstempel</span>
+            <span className="l">Bundesländer</span>
+            <span className="s">Regionalberichterstattung inklusive</span>
           </div>
           <div className="mg-stat" data-reveal="0.24">
             <span className="v">24/7</span>
             <span className="l">Beobachtung</span>
-            <span className="s">serverlos &amp; automatisiert</span>
+            <span className="s">vollautomatisch im Hintergrund</span>
           </div>
         </div>
       </section>
 
-      {/* ---------------- Methodik ---------------- */}
-      <section className="mg-method" id="methodik">
+      {/* ---------------- Status ---------------- */}
+      <section className="mg-method" id="status">
         <div className="mg-section">
           <div className="mg-head">
-            <p className="mg-overline">Methodik</p>
+            <p className="mg-overline">Status</p>
             <h2 className="mg-h2" data-split>
-              Drei Schritte, <em>stündlich</em> wiederholt
+              Im Aufbau — Veröffentlichung <em>kontrolliert</em>
             </h2>
-          </div>
-          <div className="mg-steps">
-            <span className="wire" aria-hidden />
-            {STEPS.map((s) => (
-              <div className="mg-step" key={s.n} data-reveal="0">
-                <div className="dot">{s.n}</div>
-                <h3>{s.title}</h3>
-                <p>{s.text}</p>
-              </div>
-            ))}
+            <p className="mg-lede" data-reveal="0">
+              margn ist ein laufendes Aufbauprojekt. Das Dashboard ist derzeit
+              nicht öffentlich zugänglich; Datenbasis und Auswertungen werden
+              fortlaufend erweitert und geprüft. Sobald das Observatorium
+              einen reifen Stand erreicht hat, wird es kontrolliert
+              veröffentlicht.
+            </p>
           </div>
           <p className="mg-method-note" data-reveal="0">
             <span className="pulse" />
-            läuft automatisch · GitHub Actions · seit 2026
+            in aktiver Entwicklung · Zugang beschränkt
           </p>
         </div>
       </section>
@@ -527,9 +493,9 @@ export default function LandingPage() {
       {/* ---------------- Transparenz ---------------- */}
       <section className="mg-section" id="transparenz">
         <div className="mg-head">
-          <p className="mg-overline">Transparenz</p>
+          <p className="mg-overline">Grundsätze</p>
           <h2 className="mg-h2" data-split>
-            Nichts versteckt — alles <em>nachvollziehbar.</em>
+            Mit Sorgfalt gebaut, mit <em>Zurückhaltung</em> geteilt.
           </h2>
         </div>
         <div className="mg-trust" data-reveal="0">
@@ -549,17 +515,18 @@ export default function LandingPage() {
           Sehen, was <del>geschrieben</del> <ins>umgeschrieben</ins> wurde.
         </h2>
         <p className="mg-lede" data-reveal="0">
-          Das Dashboard ist offen — keine Anmeldung, nachvollziehbare
-          Auswertungen bis zum einzelnen Artikel.
+          margn ist im Aufbau und derzeit nicht frei zugänglich. Die
+          Veröffentlichung folgt kontrolliert, sobald Datenbasis und
+          Auswertungen einen reifen Stand erreicht haben.
         </p>
         <div className="mg-hero-cta" data-reveal="0.1">
           <Link href="/articles" className="mg-btn xl">
-            <span>Dashboard öffnen</span>
+            <span>Zum Dashboard</span>
             <span className="arr">→</span>
           </Link>
         </div>
         <p className="mg-final-rev" data-reveal="0.15">
-          margn · offenes Medienobservatorium · rev 2026.07
+          margn · Medienobservatorium · Private Preview
         </p>
       </section>
 
@@ -574,7 +541,7 @@ export default function LandingPage() {
             <p className="mg-foot-claim">
               Liest, was zwischen den Zeilen steht: stille Änderungen,
               umdatierte Artikel, Agenda-Profile und Paywall-Strategien
-              von fünf führenden deutschen Leitmedien — stündlich erfasst,
+              von fünf führenden deutschen Leitmedien — fortlaufend erfasst,
               versioniert, nachvollziehbar.
             </p>
           </div>
@@ -596,10 +563,10 @@ export default function LandingPage() {
             <h4>Prinzipien</h4>
             <ul>
               <li>
-                <a href="#methodik">Methodik</a>
+                <a href="#status">Status</a>
               </li>
               <li>
-                <a href="#transparenz">Transparenz</a>
+                <a href="#transparenz">Grundsätze</a>
               </li>
             </ul>
           </div>
@@ -607,8 +574,8 @@ export default function LandingPage() {
         <div className="mg-foot-mark" aria-hidden>margn</div>
         <div className="mg-foot-base">
           <div>
-            <span>© 2026 margn — offenes Medienobservatorium</span>
-            <span>Offenes Dashboard · nachvollziehbare Methodik</span>
+            <span>© 2026 margn — Medienobservatorium</span>
+            <span>Im Aufbau · kontrollierte Veröffentlichung geplant</span>
           </div>
           <div className="mg-foot-legal">
             <Link href="/impressum">Impressum</Link>
