@@ -179,8 +179,8 @@ export default function TimeRangeFilter() {
       for (let i = 0; i < N; i++) base[i] += s.vals[i] ?? 0;
       const upper = base.slice();
       if (!upper.some((v, i) => v - lower[i] > 0)) return null;
-      const top: [number, number][] = upper.map((v, i) => [X(i), Yv(v)]);
-      const bot: [number, number][] = lower.map((v, i) => [X(i), Yv(v)]).reverse();
+      const top = upper.map((v, i): [number, number] => [X(i), Yv(v)]);
+      const bot = lower.map((v, i): [number, number] => [X(i), Yv(v)]).reverse();
       // Oberkante hin, Unterkante (rückwärts) zurück — geschlossenes Band.
       const back = curveThrough(bot).replace(/^M[^C]+/, "");
       return { id: s.id, color: s.color, d: `${curveThrough(top)} L${bot[0][0].toFixed(1)},${bot[0][1].toFixed(1)} ${back} Z` };
