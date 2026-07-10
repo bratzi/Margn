@@ -313,6 +313,17 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .rate-zoomreset { margin-left: auto; background: var(--accent-sub); color: var(--accent); border: 0; border-radius: 999px;
   font: inherit; font-size: 10.5px; font-weight: 600; padding: 3px 10px; cursor: pointer; transition: background .12s; }
 .rate-zoomreset:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+/* Umschalter Säulen ↔ Kurve — dezentes Badge im Chart (oben rechts), s. ChartStyleToggle */
+.cst { display: inline-flex; gap: 1px; padding: 2px; border: 1px solid color-mix(in srgb, var(--line-2) 80%, transparent);
+  border-radius: 7px; background: color-mix(in srgb, var(--surface) 72%, transparent);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  opacity: .55; transition: opacity .15s; }
+.cst:hover { opacity: 1; }
+.cst button { display: grid; place-items: center; width: 22px; height: 18px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--faint); cursor: pointer; padding: 0; transition: color .12s, background .12s; }
+.cst button:hover { color: var(--muted); }
+.cst button.on { background: var(--accent-sub); color: var(--accent); }
+.cst-abs { position: absolute; top: 6px; right: 8px; z-index: 6; }
 /* Cursor-Tooltip — kompakt, semi-transparent */
 /* Theme-konsistent (hell+dunkel) und betont transparent: Surface-Grund + Ink-Text. */
 .rate-cursor-tip { position: absolute; top: 6px; transform: translateX(-50%); pointer-events: none; z-index: 10;

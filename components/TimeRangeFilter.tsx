@@ -6,6 +6,7 @@ import { useFilters, WINDOW_OPTS } from "@/components/FilterProvider";
 import { axisTime, berlinDate, berlinDayBoundsUTC, makeMatcher, snapshotOf, TIME_AXIS_LABEL } from "@/lib/filterCorpus";
 import { topicLabel } from "@/lib/topics";
 import { useTweenedNumber, useTweenedSeries } from "@/lib/chartTween";
+import ChartStyleToggle, { type ChartStyle } from "@/components/ChartStyleToggle";
 
 // Serien-Slots aus globals.css (--c1..--c8): je Theme eigene, validierte Stufen.
 // Feste Slot-Reihenfolge = CVD-Sicherheit — nicht umsortieren, nur dort ändern.
@@ -28,6 +29,8 @@ export default function TimeRangeFilter() {
   const N = days.length;
   const [h, setH] = useState(168);
   const [chartMode, setChartMode] = useState<ChartMode>("publishers");
+  // Darstellung Säulen ↔ Kurve — frei wählbar über das Badge im Chart (wie RateStats).
+  const [chartStyle, setChartStyle] = useState<ChartStyle>("bars");
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<null | "from" | "to" | "band" | "resize">(null);
   const dragRef = useRef<{ start: number; f: number; t: number } | null>(null);
@@ -153,6 +156,36 @@ export default function TimeRangeFilter() {
 
   const X = (i: number) => (i / (N - 1)) * VW;
   const colW = (VW / N) * 0.72;
+
+  // Kurven-Modus: dieselben gestapelten Tageswerte als geglättete Flächenbänder.
+  // Band s reicht von der Stapel-Oberkante der Serien darunter bis zur eigenen —
+  // Lesart und Skala (animMaxTotal) sind mit den gestapelten Säulen identisch.
+  const Yv = (v: number) => VH - (v / animMaxTotal) * VH;
+  const curveThrough = (pts: [number, number][]) => {
+    if (pts.length < 2) return "";
+    let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+      const cp = (x1 - x0) * 0.45;
+      d += ` C${(x0 + cp).toFixed(1)},${y0.toFixed(1)} ${(x1 - cp).toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+    }
+    return d;
+  };
+  const stackBands = useMemo(() => {
+    if (chartStyle !== "curve") return null;
+    const base: number[] = new Array(N).fill(0);
+    return animSeries.map((s) => {
+      const lower = base.slice();
+      for (let i = 0; i < N; i++) base[i] += s.vals[i] ?? 0;
+      const upper = base.slice();
+      if (!upper.some((v, i) => v - lower[i] > 0)) return null;
+      const top: [number, number][] = upper.map((v, i) => [X(i), Yv(v)]);
+      const bot: [number, number][] = lower.map((v, i) => [X(i), Yv(v)]).reverse();
+      // Oberkante hin, Unterkante (rückwärts) zurück — geschlossenes Band.
+      const back = curveThrough(bot).replace(/^M[^C]+/, "");
+      return { id: s.id, color: s.color, d: `${curveThrough(top)} L${bot[0][0].toFixed(1)},${bot[0][1].toFixed(1)} ${back} Z` };
+    }).filter(Boolean) as { id: string; color: string; d: string }[];
+  }, [chartStyle, animSeries, N, animMaxTotal]);
   const pctOf = (i: number) => (i / (N - 1)) * 100;
   const halfColPct = (colW / 2 / VW) * 100;
   const edgeLeft = (i: number) => Math.max(0, pctOf(i) - halfColPct);
@@ -241,14 +274,21 @@ export default function TimeRangeFilter() {
         className="trf-chart" ref={trackRef} style={{ height: chartH }}
         onDoubleClick={(e) => { const i = idxFromClient(e.clientX); setLive({ from: i, to: i }); setRangeIdx({ from: i, to: i }); }}
         onMouseLeave={() => setHoverDay(null)}
-        title="Doppelklick: nur diesen Tag · Klick auf Balken: alle Artikel dieses Tages"
+        title="Doppelklick: nur diesen Tag · Klick: alle Artikel dieses Tages"
       >
-        <svg key={`${chartMode}-${N}`} className="trf-svg chart-swap" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
-          {days.map((_, i) => {
-            let yb = VH;
-            return <g key={i}>{animSeries.map((s) => { const ht = (s.vals[i] / animMaxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
-          })}
+        <svg key={`${chartMode}-${N}-${chartStyle}`} className="trf-svg chart-swap" viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none">
+          {stackBands ? (
+            stackBands.map((b) => <path key={b.id} d={b.d} fill={b.color} opacity={0.92} />)
+          ) : (
+            days.map((_, i) => {
+              let yb = VH;
+              return <g key={i}>{animSeries.map((s) => { const ht = (s.vals[i] / animMaxTotal) * VH; if (ht <= 0) return null; const y = yb - ht; yb = y; return <rect key={s.id} x={X(i) - colW / 2} y={y} width={colW} height={ht} fill={s.color} opacity={0.92} />; })}</g>;
+            })
+          )}
         </svg>
+
+        {/* Darstellung Säulen ↔ Kurve — dezentes Badge, oben rechts im Chart */}
+        <ChartStyleToggle className="cst-abs" value={chartStyle} onChange={setChartStyle} />
 
         {/* Transparente Hover-Overlays je Tag – fangen Hover + Klick ab */}
         {days.map((_, i) => (

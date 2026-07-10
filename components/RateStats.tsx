@@ -7,6 +7,7 @@ import { PUB_COLORS, TOPIC_COLORS } from "@/components/TimeRangeFilter";
 import { axisTime, berlinDayBoundsUTC, makeMatcher, snapshotOf } from "@/lib/filterCorpus";
 import { topicLabel } from "@/lib/topics";
 import { useTweenedSeries } from "@/lib/chartTween";
+import ChartStyleToggle, { type ChartStyle } from "@/components/ChartStyleToggle";
 
 type Unit = "minute" | "hour" | "day" | "week";
 type ChartMode = "publishers" | "topics";
@@ -268,13 +269,14 @@ export default function RateStats() {
   const X = (i: number) => PAD_L + (i / Math.max(1, NB - 1)) * naturalWidth;
   const Y = (v: number) => PAD_T + CH - (v / displayMaxVal) * CH;
 
-  // „Pro Einheit" = gezählte Werte JE BUCKET → SÄULEN. Eine geglättete Linie war hier die falsche
-  // Darstellungsform: der Crawl arbeitet schubweise, die meisten Minuten-Buckets sind 0. Die alte
-  // Logik warf leere Buckets weg und verband die Reste per Bezier — dadurch (a) behauptete die
-  // Fläche stundenlange Aktivität, wo gar keine war, und (b) fiel die Kurve nie auf 0 zurück, ihre
-  // scheinbare Nulllinie schwebte also ÜBER der Achse. Säulen sitzen zwangsläufig auf Y(0).
-  // Die kumulierte Sicht („Kumuliert") bleibt eine Linie — dort ist der Verlauf stetig und monoton.
-  const barMode = timeFormat === "rel";
+  // Darstellung Säulen ↔ Kurve: FREI wählbar (Badge im Chart), unabhängig vom Modus.
+  // DEFAULT folgt weiterhin dem Modus: „Je Einheit" = Säulen (der Crawl arbeitet schubweise,
+  // die meisten Minuten-Buckets sind 0 — eine Kurve über die Nullen wirkt wie Dauer-Aktivität),
+  // „Kumuliert" = Kurve (stetiger, monotoner Verlauf). Eine explizite Wahl überstimmt den
+  // Default und gilt in beiden Modi weiter.
+  const [styleChoice, setStyleChoice] = useState<ChartStyle | null>(null);
+  const chartStyle: ChartStyle = styleChoice ?? (timeFormat === "rel" ? "bars" : "curve");
+  const barMode = chartStyle === "bars";
   function linePoints(vals: number[]): [number, number][] {
     return vals.map((v, i) => [X(i), Y(v)] as [number, number]);
   }
@@ -614,9 +616,9 @@ export default function RateStats() {
         <div className="seg" style={{ marginLeft: 6 }}>
           {/* „Rel./Abs." las sich wie Prozent vs. Anzahl — gemeint ist Rate vs. Kumulation. */}
           <button className={timeFormat === "rel" ? "on" : ""} onClick={() => setTimeFormat("rel")}
-            title={presence ? "Säulen: Sichtungen je Zeiteinheit — wie viele Seiten der Crawl in diesem Fenster verlinkt gesehen hat" : "Säulen: Artikel je Zeiteinheit"}>Je Einheit</button>
+            title={presence ? "Sichtungen je Zeiteinheit — wie viele Seiten der Crawl in diesem Fenster verlinkt gesehen hat" : "Artikel je Zeiteinheit"}>Je Einheit</button>
           <button className={timeFormat === "abs" ? "on" : ""} onClick={() => setTimeFormat("abs")}
-            title={presence ? "Linie: Tageszähler — jeder Crawl addiert seine Sichtungen, Reset um 00:00" : "Linie: kumuliert je Tag (Reset um 00:00)"}>Kumuliert</button>
+            title={presence ? "Tageszähler — jeder Crawl addiert seine Sichtungen, Reset um 00:00" : "Kumuliert je Tag (Reset um 00:00)"}>Kumuliert</button>
           <div style={{ width: 1, background: "var(--line)", margin: "0 4px" }} />
           <button className={manual === "auto" ? "on" : ""} onClick={() => setManual("auto")} title="Dynamisch">⟳ Dynamisch</button>
           {/* Minuten nur bei kurzem Zeitraum (sonst zu viele Buckets für die RPC) */}
@@ -674,7 +676,7 @@ export default function RateStats() {
                 }}
               >
               <svg
-                key={`${unit}-${NB}-${displayTarget.map((s) => s.key).join(",")}`}
+                key={`${unit}-${NB}-${chartStyle}-${displayTarget.map((s) => s.key).join(",")}`}
                 viewBox={`0 0 ${totalSvgW} ${VH}`}
                 width={totalSvgW}
                 height={VH}
@@ -812,6 +814,10 @@ export default function RateStats() {
                 </div>
               )}
             </div>
+
+            {/* Darstellung Säulen ↔ Kurve — dezentes Badge, oben rechts im Chart.
+                Bewusst AUSSERHALB des Scroll-Containers (scrollt sonst beim Pannen mit raus). */}
+            <ChartStyleToggle className="cst-abs" value={chartStyle} onChange={setStyleChoice} />
             </div>
 
             <div className="rate-axis-wrap" ref={axisRef}>
