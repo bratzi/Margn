@@ -23,21 +23,24 @@ function W({ children }: { children: React.ReactNode }) {
   );
 }
 
-const TRUST = [
+// Methodik BEWUSST ohne Zahlen, Zeiten und Mengen (kein Takt, keine Retention, kein
+// Technik-Stack) — nur das Prinzip. Betriebsdetails bleiben privat, solange das
+// Projekt nicht kontrolliert veröffentlicht ist.
+const STEPS = [
   {
-    n: "§ 01",
-    title: "Schonende Erfassung",
-    text: "Die Quellen werden vollautomatisch und zurückhaltend im Hintergrund erfasst — ohne sie zu belasten.",
+    n: "01",
+    title: "Erfassen",
+    text: "Fünf führende deutsche Leitmedien werden fortlaufend beobachtet — vollautomatisch, zurückhaltend und ohne die Quellen zu belasten.",
   },
   {
-    n: "§ 02",
-    title: "Kontrollierter Zugang",
-    text: "Das Dashboard ist während der Aufbauphase nicht öffentlich. Sobald das Observatorium einen reifen Stand erreicht hat, wird es kontrolliert veröffentlicht.",
+    n: "02",
+    title: "Versionieren",
+    text: "Jeder Artikel wird bei jedem Besuch verglichen. Änderungen an Titel, Text und Metadaten — bis zum still verschobenen Veröffentlichungsdatum — werden als Revision festgehalten, mit Zeitstempel.",
   },
   {
-    n: "§ 03",
-    title: "Zurückhaltung bei Daten",
-    text: "Öffentlich werden nur Metadaten und eigene Auswertungen. Volltexte werden nicht gespiegelt, sondern zur Quelle verlinkt.",
+    n: "03",
+    title: "Auswerten",
+    text: "Themen, Paywall, Autoren, Tiefe: alle Dimensionen werden publizistenübergreifend normalisiert und vergleichbar gemacht.",
   },
 ];
 
@@ -182,6 +185,17 @@ export default function LandingPage() {
         });
       });
 
+      /* ---------- Methodik: Linie zeichnen ---------- */
+      gsap.utils.toArray<HTMLElement>(".mg-steps .wire").forEach((wire) => {
+        gsap.to(wire, {
+          scaleX: 1,
+          scaleY: 1,
+          duration: 1.6,
+          ease: "power2.inOut",
+          scrollTrigger: { trigger: ".mg-steps", start: "top 70%" },
+        });
+      });
+
       /* ---------- Zähler ---------- */
       gsap.utils.toArray<HTMLElement>("[data-count]").forEach((el) => {
         const target = parseFloat(el.dataset.count || "0");
@@ -284,9 +298,9 @@ export default function LandingPage() {
           <nav className="mg-nav-links" aria-label="Sektionen">
             <a href="#anatomie">Anatomie</a>
             <a href="#funktionen">Funktionen</a>
-            <a href="#status">Status</a>
+            <a href="#methodik">Methodik</a>
             <a href="#abdeckung">Abdeckung</a>
-            <a href="#transparenz">Grundsätze</a>
+            <a href="#status">Status</a>
           </nav>
           <Link href="/articles" className="mg-btn sm">
             <span>Dashboard</span>
@@ -372,25 +386,28 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---------------- Status ---------------- */}
-      <section className="mg-method" id="status">
+      {/* ---------------- Methodik ---------------- */}
+      <section className="mg-method" id="methodik">
         <div className="mg-section">
           <div className="mg-head">
-            <p className="mg-overline">Status</p>
+            <p className="mg-overline">Methodik</p>
             <h2 className="mg-h2" data-split>
-              Im Aufbau — Veröffentlichung <em>kontrolliert</em>
+              Drei Schritte, <em>fortlaufend</em> wiederholt
             </h2>
-            <p className="mg-lede" data-reveal="0">
-              margn ist ein laufendes Aufbauprojekt. Das Dashboard ist derzeit
-              nicht öffentlich zugänglich; Datenbasis und Auswertungen werden
-              fortlaufend erweitert und geprüft. Sobald das Observatorium
-              einen reifen Stand erreicht hat, wird es kontrolliert
-              veröffentlicht.
-            </p>
+          </div>
+          <div className="mg-steps">
+            <span className="wire" aria-hidden />
+            {STEPS.map((s) => (
+              <div className="mg-step" key={s.n} data-reveal="0">
+                <div className="dot">{s.n}</div>
+                <h3>{s.title}</h3>
+                <p>{s.text}</p>
+              </div>
+            ))}
           </div>
           <p className="mg-method-note" data-reveal="0">
             <span className="pulse" />
-            in aktiver Entwicklung · Zugang beschränkt
+            läuft vollautomatisch im Hintergrund
           </p>
         </div>
       </section>
@@ -490,23 +507,24 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---------------- Transparenz ---------------- */}
-      <section className="mg-section" id="transparenz">
+      {/* ---------------- Status ---------------- */}
+      <section className="mg-section" id="status">
         <div className="mg-head">
-          <p className="mg-overline">Grundsätze</p>
+          <p className="mg-overline">Status</p>
           <h2 className="mg-h2" data-split>
-            Mit Sorgfalt gebaut, mit <em>Zurückhaltung</em> geteilt.
+            Im Aufbau — Veröffentlichung <em>kontrolliert</em>
           </h2>
+          <p className="mg-lede" data-reveal="0">
+            margn ist ein laufendes Aufbauprojekt. Das Dashboard ist derzeit
+            nicht öffentlich zugänglich; Datenbasis und Auswertungen werden
+            fortlaufend erweitert und geprüft. Sobald das Observatorium einen
+            reifen Stand erreicht hat, wird es kontrolliert veröffentlicht.
+          </p>
         </div>
-        <div className="mg-trust" data-reveal="0">
-          {TRUST.map((t) => (
-            <div className="mg-trust-item" key={t.n}>
-              <span className="t-n">{t.n}</span>
-              <h3>{t.title}</h3>
-              <p>{t.text}</p>
-            </div>
-          ))}
-        </div>
+        <p className="mg-method-note" data-reveal="0">
+          <span className="pulse" />
+          in aktiver Entwicklung · Zugang beschränkt
+        </p>
       </section>
 
       {/* ---------------- Finale ---------------- */}
@@ -563,10 +581,10 @@ export default function LandingPage() {
             <h4>Prinzipien</h4>
             <ul>
               <li>
-                <a href="#status">Status</a>
+                <a href="#methodik">Methodik</a>
               </li>
               <li>
-                <a href="#transparenz">Grundsätze</a>
+                <a href="#status">Status</a>
               </li>
             </ul>
           </div>
