@@ -383,11 +383,57 @@ export default function RateStats() {
 
   const fromD = new Date(fromIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
   const toD = new Date(toIso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
-  // X-Achsen-Dichte richtet sich nach der ECHTEN Breite: je weiter gezoomt (mehr px je
-  // Bucket), desto mehr Zeitpunkte werden beschriftet. Mindestabstand ~64 px pro Label.
+  // X-Achsen-Beschriftung auf RUNDEN Zeitpunkten: Der frühere Index-Schritt (jedes k-te
+  // Bucket) erzeugte bei krummem k „zufällige" Label wie 04:46, 05:23 … Jetzt wird der
+  // kleinste „schöne" Schritt (5/10/15/30 min, 1/2/3/6/12 h, 1/2/7 Tage) gewählt, der den
+  // Mindestabstand (~64 px) einhält — und beschriftet wird nur ein Bucket, dessen LOKALE
+  // Zeit ein Vielfaches des Schritts ist. Die Ticks liegen damit gleichbleibend auf
+  // 04:00 / 04:15 / 04:30 … und bleiben beim Zoomen/Scrollen stabil verankert.
   const LABEL_MIN_PX = 64;
-  const maxLabels = Math.max(2, Math.floor(naturalWidth / LABEL_MIN_PX));
-  const axisStep = Math.max(1, Math.ceil((NB - 1) / maxLabels));
+  const axisTicks = useMemo(() => {
+    const set = new Set<number>();
+    const bucketPx = Math.max(0.0001, effDens); // px je Bucket
+    let stepMin = 0; // gewählter Schritt in Minuten (nur minute/hour) — steuert das Tick-Format
+    if (unit === "minute" || unit === "hour") {
+      const bucketMin = unit === "minute" ? 1 : 60;
+      // Schritt-Leiter in Minuten; ab 2880 = Mehr-Tages-Schritte (nur Mitternachten).
+      const LADDER = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 4320, 10080];
+      const needMin = (LABEL_MIN_PX / bucketPx) * bucketMin;
+      const step = LADDER.find((s) => s >= bucketMin && s >= needMin) ?? LADDER[LADDER.length - 1];
+      stepMin = step;
+      for (let i = 0; i < buckets.length; i++) {
+        const d = new Date(buckets[i]);
+        const minOfDay = d.getHours() * 60 + d.getMinutes();
+        if (step <= 1440) { if (minOfDay % step === 0) set.add(i); }
+        else if (minOfDay === 0) {
+          // Mehr-Tages-Schritt: Mitternacht jedes n-ten Tages, verankert am Epochentag
+          // (stabil — unabhängig vom Fensterstart).
+          const dayNum = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+          if (dayNum % (step / 1440) === 0) set.add(i);
+        }
+      }
+    } else if (unit === "day") {
+      const needDays = LABEL_MIN_PX / bucketPx;
+      const step = [1, 2, 7, 14].find((s) => s >= needDays) ?? 14;
+      for (let i = 0; i < buckets.length; i++) {
+        const d = new Date(buckets[i]);
+        const dayNum = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+        // Ab Wochen-Schritt auf Montage legen (14 Tage = Montage gerader ISO-Wochen).
+        if (step < 7 ? dayNum % step === 0 : d.getDay() === 1 && (step === 7 || isoWeek(d) % 2 === 0)) set.add(i);
+      }
+    } else {
+      // Wochen beginnen ohnehin einheitlich montags → gleichmäßiger Index-Schritt reicht.
+      const step = Math.max(1, Math.ceil(LABEL_MIN_PX / bucketPx));
+      for (let i = 0; i < buckets.length; i += step) set.add(i);
+    }
+    return { set, stepMin };
+  }, [unit, buckets, effDens]);
+  // Ab Tages-Schritt zeigen die Ticks das DATUM: „00:00 | 00:00 | 00:00 …" (jede Mitternacht)
+  // wäre korrekt gerundet, aber nichtssagend.
+  const fmtTick = (iso: string) =>
+    axisTicks.stepMin >= 1440
+      ? new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })
+      : fmtAxis(iso);
 
   // Im "abs"-Modus: Tageskumulierung — Reset auf 0 bei Tageswechsel (Lokalzeit).
   // Auf der Sichtungs-Achse ergibt das den erwarteten Tageszähler: jeder Crawl addiert
@@ -771,13 +817,13 @@ export default function RateStats() {
             <div className="rate-axis-wrap" ref={axisRef}>
               <div className="rate-axis" style={{ width: totalSvgW, position: "relative" }}>
                 {buckets.map((b, i) => {
-                  if (i % axisStep !== 0) return null;
+                  if (!axisTicks.set.has(i)) return null;
                   return (
                     <span key={b} style={{
                       position: "absolute",
                       left: X(i),
                       transform: i === 0 ? "none" : i >= NB - 2 ? "translateX(-100%)" : "translateX(-50%)",
-                    }}>{fmtAxis(b)}</span>
+                    }}>{fmtTick(b)}</span>
                   );
                 })}
               </div>
