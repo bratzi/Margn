@@ -126,13 +126,19 @@ export default function ScanTimeline({ firstSeen, lastSeen, scanTimes, changeTim
           </div>
         ))}
 
-        {/* Rausgeflogen-Marker: letzter Ort, an dem der Crawl den Link noch verlinkt fand.
-            Danach tauchte er auf keiner Startseite, keinem Ressort, Feed oder Sitemap mehr auf. */}
+        {/* Rausgeflogen-GRENZE: letzte bestätigte Link-Sichtung. Ein bloßer Punkt zwischen den
+            Scan-Punkten las sich wie „hier ist Schluss" und widersprach den Scans danach —
+            dabei sind das zwei Ebenen: Scans prüfen die ARTIKELSEITE (läuft in der Nachfrist
+            weiter), die Grenze markiert die VERLINKUNG. Darum: vertikale Linie + rot getönter
+            Abschnitt „nicht mehr verlinkt" dahinter. */}
         {goneX != null && goneT != null && (
-          <div className="scant-gone" style={{ left: `${goneX}%` }}
-            title={`Link nicht mehr gefunden — zuletzt verlinkt gesehen ${fmtFull(goneT)}`}>
-            <span className="scant-gone-dot" />
-          </div>
+          <>
+            <div className="scant-offline" style={{ left: `${goneX}%`, width: `${Math.max(0, 100 - goneX)}%` }} />
+            <div className="scant-gone" style={{ left: `${goneX}%` }}
+              title={`Ab hier nicht mehr verlinkt — zuletzt gesehen ${fmtFull(goneT)}. Spätere Punkte sind Nachkontroll-Scans der Artikelseite.`}>
+              <span className="scant-gone-dot" />
+            </div>
+          </>
         )}
 
         {/* Scan-Punkte */}
@@ -165,7 +171,7 @@ export default function ScanTimeline({ firstSeen, lastSeen, scanTimes, changeTim
       <div className="scant-legend">
         <span><i className="scant-dot-leg" /> Scan</span>
         <span><i className="scant-dot-leg change" /> Scan mit Änderung</span>
-        {goneX != null && <span><i className="scant-dot-leg gone" /> Link nicht mehr gefunden</span>}
+        {goneX != null && <span><i className="scant-dot-leg gone" /> ab hier nicht mehr verlinkt (spätere Punkte = Nachkontrollen)</span>}
         {baseline && <span className="faint">· Einzel-Scans werden ab jetzt erfasst</span>}
       </div>
     </div>

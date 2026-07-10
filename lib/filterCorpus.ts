@@ -28,15 +28,19 @@ export type CorpusRow = {
   published_at: string | null; discovered_at: string | null; last_seen: string | null;
   // link_seen = pages.last_seen = zuletzt VERLINKT gesehen (Startseite/Ressort/Feed/Sitemap).
   // NICHT last_seen (= articles.last_seen = zuletzt GESCANNT) — der Re-Scan ist budgetiert und
-  // gestaffelt, sein Alter sagt nichts über die Verlinkung. Siehe ONLINE_TOLERANCE_MS.
+  // gestaffelt, sein Alter sagt nichts über die Verlinkung. Siehe ONLINE_TOLERANCE_H.
   link_seen: string | null;
+  // Wurde der Link nach der Entdeckung ERNEUT gesichtet (>2 h später = späterer Lauf)? Nur dann
+  // liegt der Artikel in der Sichtungs-Umlaufbahn und Stille ist ein Abgangs-BELEG. Einmal-
+  // Sichtungen (Nischen-Ressorts, Art. 1640704 FAZ-Feuilleton) = Zustand unbekannt, NIE „gone".
+  link_resighted: boolean | null;
   word_count: number | null; revision_count: number | null; edit_count: number | null;
   scan_count: number | null; rubric: string | null;
 };
 
 export const CORPUS_COLS =
   "id,article_id,source_id,url,ptype,topic,author_status,paywalled,language," +
-  "published_at,discovered_at,last_seen,link_seen,word_count,revision_count,edit_count,scan_count,rubric";
+  "published_at,discovered_at,last_seen,link_seen,link_resighted,word_count,revision_count,edit_count,scan_count,rubric";
 
 // Wie lange muss ein Artikel-Link STILL sein, bis wir ihn „rausgeflogen" nennen? QUELLENSPEZIFISCH —
 // die Discovery-Abdeckung ist strukturell verschieden (Messung 09.07., Anteil der in den letzten
@@ -177,9 +181,12 @@ export function applyServerFilters(q: any, f: FilterSnapshot, subPats: string[],
   // Je Quelle ein eigener Cut → OR über and(source_id, link_seen)-Zweige. Quellen ohne Cut
   // (keine Sichtung im Korpus) fallen in beiden Modi raus — Zustand unbekannt.
   if (f.onlineCut && (f.linkState === "gone" || f.linkState === "online")) {
-    const op = f.linkState === "gone" ? "lt" : "gte";
-    const branches = Object.entries(f.onlineCut)
-      .map(([sid, cut]) => `and(source_id.eq.${sid},link_seen.${op}.${cut})`);
+    // gone verlangt zusätzlich link_resighted: nur wer je WIEDER-gesichtet wurde, liegt in der
+    // Beobachtungs-Umlaufbahn — sonst ist Stille kein Beleg (Einmal-Sichtung = unbekannt).
+    const branches = Object.entries(f.onlineCut).map(([sid, cut]) =>
+      f.linkState === "gone"
+        ? `and(source_id.eq.${sid},link_seen.lt.${cut},link_resighted.is.true)`
+        : `and(source_id.eq.${sid},link_seen.gte.${cut})`);
     if (branches.length) q = q.or(branches.join(","));
   }
   if (f.timeAxis === "seen") {
@@ -237,13 +244,14 @@ export function makeMatcher(
     else if (f.depth === "mittel") { if (r.word_count == null || r.word_count < 300 || r.word_count > 900) return false; }
     else if (f.depth === "lang") { if (r.word_count == null || r.word_count <= 900) return false; }
     // Online-Bestand — PostgREST-Semantik gespiegelt: NULL link_seen UND Quellen ohne Cut
-    // fallen in beiden Modi raus (Zustand unbekannt).
+    // fallen in beiden Modi raus (Zustand unbekannt). „gone" nur mit Wieder-Sichtungs-Beleg.
     if (cutMsBySid !== null && (f.linkState === "gone" || f.linkState === "online")) {
       if (r.link_seen == null) return false;
       const cutMs = cutMsBySid.get(r.source_id);
       if (cutMs == null) return false;
       const ls = Date.parse(r.link_seen);
-      if (f.linkState === "gone" ? ls >= cutMs : ls < cutMs) return false;
+      if (f.linkState === "gone") { if (ls >= cutMs || r.link_resighted !== true) return false; }
+      else if (ls < cutMs) return false;
     }
     if (!skip.time && (fromMs !== null || toMs !== null)) {
       const t = axisTime(r, f.timeAxis);

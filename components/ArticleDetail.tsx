@@ -15,7 +15,8 @@ type Detail = {
   word_count: number | null; reading_min: number | null; article_type: string | null;
   lang_detected: string | null; first_seen: string | null; last_seen: string | null; author_status: string | null; topic: string | null;
   // link_seen = pages.last_seen = zuletzt VERLINKT gesehen (nicht: zuletzt gescannt).
-  link_seen: string | null;
+  // link_resighted = nach der Entdeckung erneut gesichtet → Stille ist ein Abgangs-Beleg.
+  link_seen: string | null; link_resighted: boolean | null;
   outlet: string; country: string; base_url: string; depth: number | null;
   revision_count: number | null; extension_count: number | null; edit_count: number | null;
   scan_count: number | null; scan_times: string[] | null;
@@ -265,12 +266,19 @@ export default function ArticleDetail({ id }: { id: number }) {
 
   const segs = (() => { try { return new URL(a.url).pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean); } catch { return []; } })();
   const type = a.article_type ?? "news";
-  // Online-Bestand: „noch verlinkt" = letzte LINK-Sichtung innerhalb der Toleranz. Ist der Artikel
-  // rausgeflogen, ist genau diese Sichtung der Zeitpunkt, ab dem er nirgends mehr auftauchte.
-  // Bezugsgröße ist NICHT der letzte Scan (der ist budgetiert und sagt nichts über Verlinkung).
-  const link = a.link_seen && onlineCut
-    ? { gone: Date.parse(a.link_seen) < Date.parse(onlineCut), since: a.link_seen }
-    : null;
+  // Online-Bestand, DREI Zustände: „noch verlinkt" = letzte LINK-Sichtung innerhalb der Toleranz.
+  // „rausgeflogen" = Sichtung älter als Toleranz UND der Link wurde nach der Entdeckung je
+  // WIEDER-gesichtet (link_resighted) — nur dann ist Stille ein Beleg. Einmal-Sichtungen
+  // (Nischen-Ressorts außerhalb der Sampling-Umlaufbahn, Art. 1640704) = „unbekannt": kein
+  // Badge, kein roter Punkt. Bezugsgröße ist NIE der letzte Scan (budgetiert, sagt nichts).
+  const link: { state: "online" | "gone" | "unknown"; since: string } | null =
+    a.link_seen && onlineCut
+      ? Date.parse(a.link_seen) >= Date.parse(onlineCut)
+        ? { state: "online", since: a.link_seen }
+        : a.link_resighted === true
+          ? { state: "gone", since: a.link_seen }
+          : { state: "unknown", since: a.link_seen }
+      : null;
 
   return (
     <div className="page detail">
@@ -284,9 +292,8 @@ export default function ArticleDetail({ id }: { id: number }) {
         <TypeBadge type={type} />
         {a.paywalled === true && <span className="badge lock"><Lock /> Paywall</span>}
         {a.paywalled === false && <span className="badge free"><LockOpen /> Frei zugänglich</span>}
-        {link && (link.gone
-          ? <span className="badge gone"><Link2Off /> Rausgeflogen</span>
-          : <span className="badge online"><Link2 /> Noch verlinkt</span>)}
+        {link?.state === "gone" && <span className="badge gone"><Link2Off /> Rausgeflogen</span>}
+        {link?.state === "online" && <span className="badge online"><Link2 /> Noch verlinkt</span>}
       </div>
       <h1 className="d-title">{a.title ?? a.url.replace(/^https?:\/\/(www\.)?/, "")}</h1>
       {a.description && <p className="d-dek">{a.description}</p>}
@@ -326,7 +333,7 @@ export default function ArticleDetail({ id }: { id: number }) {
           <DL h="Online-Bestand">
             {!link ? (
               <span className="faint" style={{ fontSize: 13 }}>Verlinkung unbekannt — für diese Seite liegt keine Link-Sichtung vor.</span>
-            ) : link.gone ? (
+            ) : link.state === "gone" ? (
               <>
                 <span className="badge gone"><Link2Off /> Rausgeflogen</span>
                 <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>
@@ -335,7 +342,7 @@ export default function ArticleDetail({ id }: { id: number }) {
                   (seit {timeDelta(link.since, new Date().toISOString())}).
                 </p>
               </>
-            ) : (
+            ) : link.state === "online" ? (
               <>
                 <span className="badge online"><Link2 /> Noch verlinkt</span>
                 <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>
@@ -343,13 +350,20 @@ export default function ArticleDetail({ id }: { id: number }) {
                   weiterhin auf mindestens einer Übersichtsseite, im Feed oder in der Sitemap.
                 </p>
               </>
+            ) : (
+              <p className="faint" style={{ fontSize: 13, margin: 0 }}>
+                Verlinkung unbekannt — der Link wurde nur bei der Entdeckung gesehen
+                ({fmtDate(link.since)}). Sein Ressort liegt außerhalb der regelmäßigen
+                Beobachtung, daher ist das Ausbleiben weiterer Sichtungen kein Beleg für
+                einen Abgang.
+              </p>
             )}
           </DL>
 
           <DL h="Scan-Verlauf">
             <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
               changeTimes={snaps.map((s) => s.captured_at)}
-              goneAt={link?.gone ? link.since : null} />
+              goneAt={link?.state === "gone" ? link.since : null} />
           </DL>
 
           <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>

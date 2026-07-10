@@ -2177,6 +2177,42 @@ async function analyzeBacklog() {
           if (!inQueue.has(r.url)) { queue.push({ url: r.url, sid: r.source_id }); inQueue.add(r.url); remaining--; }
         }
       }
+
+      // RAUSGEFLOGENE NICHT MEHR RE-SCANNEN (User-Entscheid 10.07.): Ein Artikel, dessen LINK
+      // seit der Quellen-Toleranz nirgends mehr gesichtet wurde (Startseite/Ressorts/Feeds/
+      // Sitemap → pages.last_seen), ist abgemeldet — weitere Edit-Prüfungen verbrennen nur
+      // Render-Budget. Die frei werdenden Slots wandern automatisch in die Wasserstand-
+      // Auffüllung (neue Artikel). Zwei Guards gegen Fehl-Stopps:
+      //  * WIEDER-SICHTUNGS-BELEG: nur wer nach der Entdeckung erneut gesichtet wurde
+      //    (last_seen − first_seen > 2 h), liegt in der Sampling-Umlaufbahn — Einmal-Sichtungen
+      //    aus Nischen-Ressorts (FAZ-Feuilleton, Art. 1640704) sind KEIN Abgang → weiter scannen.
+      //  * Toleranzen = dieselbe Tabelle wie das Frontend (lib/filterCorpus.ts ONLINE_TOLERANCE_H,
+      //    Abdeckungs-Messung 09.07.; bei Änderung BEIDE Stellen pflegen).
+      // Kein pages-Eintrag → behalten (fail-open).
+      {
+        const LINK_TOLERANCE_H: Record<number, number> = { 1: 72, 3: 26, 4: 26, 5: 6, 6: 36 };
+        const RESIGHT_MIN_MS = 2 * H;
+        const rescans = queue.slice(newCount0);
+        const linkSeen = new Map<string, { sid: number; ms: number; resighted: boolean }>();
+        for (let i = 0; i < rescans.length; i += 200) {
+          const chunk = rescans.slice(i, i + 200).map((r) => r.url);
+          const { data } = await sb.from("pages").select("url,source_id,last_seen,first_seen").in("url", chunk);
+          for (const p of (data ?? []) as any[]) if (p.last_seen) linkSeen.set(p.url, {
+            sid: p.source_id, ms: Date.parse(p.last_seen),
+            resighted: p.first_seen ? Date.parse(p.last_seen) - Date.parse(p.first_seen) > RESIGHT_MIN_MS : false,
+          });
+        }
+        const before = queue.length;
+        const kept = queue.slice(0, newCount0);
+        for (const r of rescans) {
+          const ls = linkSeen.get(r.url);
+          const tolMs = (LINK_TOLERANCE_H[r.sid] ?? 26) * H;
+          if (!ls || !ls.resighted || ls.ms >= now - tolMs) kept.push(r);
+        }
+        queue.length = 0; queue.push(...kept);
+        const dropped = before - queue.length;
+        if (dropped > 0) console.log(`Re-Scan: ${dropped} rausgeflogene Artikel übersprungen (Link seit Quellen-Toleranz nicht mehr gesichtet)`);
+      }
     }
     console.log(`Re-Scan reserviert: ${queue.length - newCount0} Artikel (altersgestaffelt: frisch≫jung≫alt, cap ${RESCAN_CAP})`);
   }

@@ -774,11 +774,16 @@ table.dt.dt-fit { width: max-content; }
 .scant-dot-leg { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); border: 2px solid var(--surface); box-shadow: 0 0 0 1.5px var(--line-2); }
 .scant-dot-leg.change { background: var(--amber); box-shadow: 0 0 0 2px var(--marker-sub); }
 .scant-dot-leg.gone { background: var(--red); box-shadow: 0 0 0 2px var(--red-sub); }
-/* Rausgeflogen-Marker auf der Zeitlinie: roter Punkt am Ort der letzten Link-Sichtung.
-   z-index über den Scan-Punkten — der Moment des Verschwindens ist die wichtigere Information. */
-.scant-gone { position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 5; pointer-events: auto; }
-.scant-gone-dot { display: block; width: 12px; height: 12px; border-radius: 50%;
-  background: var(--red); border: 2px solid var(--surface); box-shadow: 0 0 0 3px var(--red-sub); }
+/* Rausgeflogen-GRENZE auf der Zeitlinie: vertikale Linie + Punkt an der letzten Link-Sichtung,
+   dahinter rot getönter „nicht mehr verlinkt"-Abschnitt. Die Scans danach (Nachkontrollen der
+   Artikelseite) bleiben sichtbar, lesen sich aber nicht mehr als Widerspruch. */
+.scant-gone { position: absolute; top: -4px; bottom: -4px; width: 0; transform: translateX(-50%);
+  border-left: 2px dashed var(--red); z-index: 5; pointer-events: auto; opacity: .85; }
+.scant-gone-dot { position: absolute; top: -5px; left: 0; transform: translateX(-50%);
+  display: block; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--red); border: 2px solid var(--surface); box-shadow: 0 0 0 2px var(--red-sub); }
+.scant-offline { position: absolute; top: 50%; height: 3px; transform: translateY(-50%);
+  border-radius: 99px; background: var(--red); opacity: .22; z-index: 1; pointer-events: none; }
 
 /* ---------- Timeline ---------- */
 .tl { position: relative; padding-left: 24px; }

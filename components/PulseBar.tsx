@@ -87,7 +87,9 @@ export default function PulseBar() {
         const t = Date.parse(r.discovered_at);
         if (t >= fromMs && t <= toMs) { gainsN++; const d = berlinDate(r.discovered_at); gainsByDay.set(d, (gainsByDay.get(d) ?? 0) + 1); }
       }
-      if (r.link_seen && cutBySid) {
+      // Abgang nur MIT Wieder-Sichtungs-Beleg (link_resighted): Einmal-Sichtungen aus
+      // Nischen-Ressorts sind kein Abgang, sondern unbeobachtet (Zustand unbekannt).
+      if (r.link_seen && r.link_resighted === true && cutBySid) {
         const cut = cutBySid.get(r.source_id);
         const t = Date.parse(r.link_seen);
         if (cut != null && t < cut && t >= fromMs && t <= toMs) { lossesN++; const d = berlinDate(r.link_seen); lossesByDay.set(d, (lossesByDay.get(d) ?? 0) + 1); }
