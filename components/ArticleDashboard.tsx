@@ -179,9 +179,9 @@ export default function ArticleDashboard() {
       <FilterPills />
 
       <div className="page wide">
-        <TopicCards />
+        
         <SubTopicBar />
-
+<TopicCards />
         <PulseBar />
 
         <RateStats />
