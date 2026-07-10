@@ -4,7 +4,7 @@ import { createContext, useContext, useCallback, useEffect, useMemo, useRef, use
 import { usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel, TOPICS_SANS_REGIONAL } from "@/lib/topics";
-import { fetchAllRows } from "@/lib/pgFetch";
+import { fetchAllRows, timeoutSignal } from "@/lib/pgFetch";
 import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, makeBerlinDays, berlinDayBoundsUTC, onlineCutsFrom, type CorpusRow, type TimeAxis } from "@/lib/filterCorpus";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
@@ -262,15 +262,30 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     } catch {}
   }, []);
 
-  // Quellen laden
+  // Quellen laden — MIT Timeout + Retry: das ist der Torwächter der ganzen Seite (ohne
+  // sources lädt weder Corpus noch Tabelle). Ein einzelner hängender Request ließ das
+  // Dashboard sonst dauerhaft leer stehen.
   useEffect(() => {
-    supabase.from("sources").select("id,name,base_url,country").eq("active", true).then(({ data }) => {
-      const s = (data as Src[]) ?? []; const ids = s.map((x) => x.id);
-      const saved = savedActiveRef.current;
-      setSources(s);
-      setActive(new Set(saved && saved.length ? saved.filter((id) => ids.includes(id)) : ids));
-      setReady(true);
-    });
+    let cancelled = false;
+    (async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const ts = timeoutSignal();
+        const { data, error } = await supabase.from("sources").select("id,name,base_url,country")
+          .eq("active", true).abortSignal(ts.signal);
+        ts.done();
+        if (cancelled) return;
+        if (!error && data) {
+          const s = (data as Src[]) ?? []; const ids = s.map((x) => x.id);
+          const saved = savedActiveRef.current;
+          setSources(s);
+          setActive(new Set(saved && saved.length ? saved.filter((id) => ids.includes(id)) : ids));
+          setReady(true);
+          return;
+        }
+        if (attempt < 2) await new Promise((res) => setTimeout(res, 600 * (attempt + 1)));
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // persistieren
@@ -323,15 +338,15 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     // Sonst fehlten auf der Scan-Achse ältere, aber heute noch online/gescannte Artikel.
     const corpusFilter = `published_at.gte.${cf},and(published_at.is.null,discovered_at.gte.${cf}),last_seen.gte.${cf}`;
     const load = () => fetchAllRows<CorpusRow>(
-      () => supabase.from("page_overview").select("id", { count: "exact", head: true })
-        .in("ptype", ALLOWED_PTYPES).or(corpusFilter),
+      (signal) => supabase.from("page_overview").select("id", { count: "exact", head: true })
+        .in("ptype", ALLOWED_PTYPES).or(corpusFilter).abortSignal(signal),
       // WICHTIG: nach dem EINDEUTIGEN PK `id` paginieren, nicht nach
       // discovered_at. Bei gleichen discovered_at-Werten (Batch-Inserts) ist die
       // Sortierung über parallele Range-Requests sonst nicht stabil → Zeilen
       // fallen zwischen Seiten raus → Corpus unvollständig → Charts zählen
       // weniger als die Tabelle. id desc ≈ neueste zuerst und ist eindeutig.
-      (a, b) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
-        .or(corpusFilter).order("id", { ascending: false }).range(a, b) as any,
+      (a, b, signal) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
+        .or(corpusFilter).order("id", { ascending: false }).range(a, b).abortSignal(signal) as any,
       // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
       // Aggregation server-seitig (RPC), dann cap-frei.
       100000,
@@ -405,8 +420,11 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     let cancelled = false;
     setSearchPending(true);
     const run = (attempt: number) => {
+      const ts = timeoutSignal();
       supabase.rpc("search_articles", { p_q: q, p_sources: active.size ? [...active] : null, p_limit: 1200 })
+        .abortSignal(ts.signal)
         .then(({ data, error }) => {
+          ts.done();
           if (cancelled) return;
           if (error) { if (attempt < 1) { setTimeout(() => run(attempt + 1), 500); return; } setSearchIds([]); setSearchPending(false); return; }
           setSearchIds((data ?? []).map((r: any) => r.article_id)); setSearchPending(false);
@@ -425,7 +443,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     (async () => {
       const entries = await Promise.all(searchTerms.map(async (t): Promise<[string, number[]]> => {
         for (let attempt = 0; ; attempt++) {
-          const { data, error } = await supabase.rpc("search_articles", { p_q: t, p_sources: active.size ? [...active] : null, p_limit: 1200 });
+          const ts = timeoutSignal();
+          const { data, error } = await supabase.rpc("search_articles", { p_q: t, p_sources: active.size ? [...active] : null, p_limit: 1200 }).abortSignal(ts.signal);
+          ts.done();
           if (!error) return [t, (data ?? []).map((r: any) => r.article_id)];
           if (attempt >= 1) return [t, []];
           await new Promise((res) => setTimeout(res, 500));

@@ -8,16 +8,29 @@
 const BATCH_SIZE = 5; // max. parallele Supabase-Requests gleichzeitig
 const RETRY = 3;      // max. Versuche pro Seite
 
+// Hartes Abbruch-Timeout je Request: Ein still hängender Fetch (Verbindungs-Stall, Proxy,
+// Rechner-Aufwachen) blockierte sonst das await ENDLOS — der Retry griff nie, der ganze
+// Ladevorgang „hängt ewig". Der Abbruch macht aus dem Stall einen normalen Fehlversuch,
+// den die vorhandene Retry-Logik auffängt. Die Aufrufer MÜSSEN das Signal per
+// .abortSignal(signal) an die Supabase-Query hängen.
+const REQ_TIMEOUT_MS = 15000;
+export function timeoutSignal(ms = REQ_TIMEOUT_MS): { signal: AbortSignal; done: () => void } {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return { signal: ctrl.signal, done: () => clearTimeout(t) };
+}
+
 export async function fetchAllRows<T>(
-  countQ: () => PromiseLike<{ count: number | null }>,
-  pageQ: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  countQ: (signal: AbortSignal) => PromiseLike<{ count: number | null }>,
+  pageQ: (from: number, to: number, signal: AbortSignal) => PromiseLike<{ data: T[] | null; error: unknown }>,
   maxRows = 30000,
 ): Promise<T[]> {
   // Count MIT Retry und hartem Fehler: fiele er still auf null zurück, würde nur EINE Seite
   // (1000 Zeilen) geladen und als Erfolg gemeldet — Charts zeigten dann ~2 % der Daten.
   let count: number | null = null;
   for (let attempt = 0; attempt < RETRY; attempt++) {
-    try { count = (await countQ()).count ?? null; } catch { count = null; }
+    const ts = timeoutSignal();
+    try { count = (await countQ(ts.signal)).count ?? null; } catch { count = null; } finally { ts.done(); }
     if (count !== null) break;
     if (attempt < RETRY - 1) await new Promise((res) => setTimeout(res, 350 * (attempt + 1)));
   }
@@ -26,10 +39,12 @@ export async function fetchAllRows<T>(
 
   const fetchPage = async (from: number, to: number): Promise<T[] | null> => {
     for (let attempt = 0; attempt < RETRY; attempt++) {
+      const ts = timeoutSignal();
       try {
-        const r = await pageQ(from, to);
+        const r = await pageQ(from, to, ts.signal);
         if (!r.error && r.data) return r.data as T[];
       } catch {} // Netzwerk-Reject zählt wie ein PostgREST-Fehler: erneut versuchen
+      finally { ts.done(); }
       if (attempt < RETRY - 1) await new Promise((res) => setTimeout(res, 350 * (attempt + 1)));
     }
     return null;
