@@ -888,139 +888,16 @@ html.lenis, html.lenis body { height: auto; }
 /* ---------------------------------------------------------------- Reveals */
 [data-reveal] { will-change: transform, opacity; }
 
-/* ----------------------------------------------- Scroll-Spine (mitlaufende Linie) */
-/* Anker: .mg muss positioniert sein, damit die absolute Spine an der Seite klebt. */
+/* ScrollSpine (mitlaufende Linie + Checkpoints + Verlaufs-Karten) 2026-07-11 KOMPLETT
+   entfernt — Nutzer: überflüssig, auf Mobile störend. Komponente + Styles (.mg-spine*,
+   .mg-cp*, .mg-cpn*, is-arrived-CTA-Zündung) gelöscht. */
 .mg { position: relative; }
-.mg-spine {
-  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  z-index: 4;                 /* über den Sektionen, unter Nav (60)/Progress (70)/Grain (80) */
-  pointer-events: none; overflow: visible;
-  /* mix-blend-mode: screen entfernt: erzwang bei jedem Scroll-Frame ein Neu-Komponieren
-     des seitenhohen SVG gegen den Hintergrund (Haupt-Scroll-Ruckler). Die helle Linie auf
-     dunklem Grund bleibt auch ohne Blend gut sichtbar. */
-}
-/* Vorschau des noch nicht gezeichneten Wegs — nur ein Hauch */
-.mg-spine-ghost {
-  stroke: rgba(159, 178, 255, 0.09); stroke-width: 1.4;
-  vector-effect: non-scaling-stroke;
-}
-/* gezeichneter, leuchtender Teil (Farbverlauf je Sektion via #mgSpineGrad) */
-.mg-spine-draw {
-  stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round;
-  vector-effect: non-scaling-stroke; opacity: 0.95;
-  will-change: stroke-dashoffset;
-}
-/* glühender Kopf, der dem Scroll vorauseilt */
-.mg-spine-head {
-  fill: #f4f6ff; opacity: 0;
-  /* nur EIN drop-shadow statt zwei: der Kopf wird pro Scroll-Frame neu positioniert,
-     und Filter sind paint-teuer — ein Schatten halbiert die Kosten, glüht weiter. */
-  filter: drop-shadow(0 0 8px rgba(110, 138, 255, 0.9));
-  transition: opacity 0.3s ease;
-}
-@media (max-width: 640px) { .mg-spine { opacity: 0.5; } }
 
-/* ---------- Checkpoints auf der Linie — dramatischer Dot ---------- */
-.mg-cp { --cp: #6e8aff; --ws: 5.4; }
-/* Variation je Änderungstyp: Wachstum/Echo schlägt weite Wellen, stille Edits enger & schärfer */
-.mg-cp[data-k="ext"], .mg-cp[data-k="echo"], .mg-cp[data-k="now"] { --ws: 7.6; }
-.mg-cp[data-k="edit"], .mg-cp[data-k="date"] { --ws: 4.2; }
-.mg-cp[data-k="paywall"] { --ws: 5; }
-.mg-cp-core { fill: #0a0b0f; stroke: var(--cp); stroke-width: 1.6; transform-box: fill-box; transform-origin: center;
-  transition: fill 0.35s ease, stroke-width 0.35s ease; }
-.mg-cp-ring { fill: none; stroke: var(--cp); stroke-width: 1.1; opacity: 0.16; transform-box: fill-box; transform-origin: center;
-  transition: opacity 0.35s ease, stroke-width 0.35s ease; }
-.mg-cp-wave, .mg-cp-wave2, .mg-cp-flash { transform-box: fill-box; transform-origin: center; opacity: 0; }
-.mg-cp-wave, .mg-cp-wave2 { fill: none; stroke: var(--cp); stroke-width: 2; }
-.mg-cp-flash { fill: var(--cp); stroke: none; }
-/* erreicht: Ring leuchtet, Kern füllt sich + glüht und atmet leise weiter */
-.mg-cp.is-hit .mg-cp-ring { opacity: 0.9; stroke-width: 2; }
-.mg-cp.is-hit .mg-cp-core { fill: var(--cp); stroke-width: 2.4; filter: drop-shadow(0 0 7px var(--cp)); animation: mgCpBreathe 2.6s ease-in-out infinite; }
-/* Impact beim Anfahren (Klasse pro Treffer neu gesetzt → retriggert): doppelte Schockwelle + Flash + Punch */
-.mg-cp.pulse .mg-cp-wave  { animation: mgCpWave 0.9s cubic-bezier(.15,.7,.25,1) forwards; }
-.mg-cp.pulse .mg-cp-wave2 { animation: mgCpWave 1.15s 0.13s cubic-bezier(.15,.7,.25,1) forwards; }
-.mg-cp.pulse .mg-cp-flash { animation: mgCpFlash 0.5s ease-out forwards; }
-.mg-cp.pulse .mg-cp-core  { animation: mgCpPop 0.55s cubic-bezier(.2,.85,.2,1); }
-@keyframes mgCpWave  { 0% { opacity: 0.9; transform: scale(0.3); } 100% { opacity: 0; transform: scale(var(--ws, 5.6)); } }
-@keyframes mgCpFlash { 0% { opacity: 0.7; transform: scale(0.5); } 100% { opacity: 0; transform: scale(2.6); } }
-@keyframes mgCpPop   { 0% { transform: scale(1); } 36% { transform: scale(2.1); } 100% { transform: scale(1); } }
-@keyframes mgCpBreathe { 0%,100% { filter: drop-shadow(0 0 5px var(--cp)); } 50% { filter: drop-shadow(0 0 12px var(--cp)); } }
 
-/* ---------- Verlaufs-Karten, an den Checkpoints verankert ---------- */
-.mg-spine-notes { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
-.mg-cpn { position: absolute; --cp: #6e8aff; }
-.mg-cpn-card {
-  position: absolute; width: 236px;
-  background: rgba(11, 12, 16, 0.93); border: 1px solid color-mix(in srgb, var(--cp) 28%, transparent);
-  border-left: 2px solid var(--cp); border-radius: 13px; padding: 11px 13px 12px;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0,0,0,0.2);
-  opacity: 0; transition: opacity 0.5s ease, transform 0.55s cubic-bezier(.2,.7,.3,1);
-  transition-delay: var(--d, 0s);
-}
-.mg-cpn-link { position: absolute; background: var(--cp); opacity: 0; transition: opacity 0.4s ease; transition-delay: var(--d, 0s); }
-/* rechts vom Dot */
-.mg-cpn[data-side="r"] .mg-cpn-card { left: 26px; top: 0; transform: translateY(-50%) translateX(16px); }
-.mg-cpn[data-side="r"] .mg-cpn-link { left: 7px; top: 0; width: 19px; height: 1.5px; transform: translateY(-50%); }
-/* links vom Dot */
-.mg-cpn[data-side="l"] .mg-cpn-card { right: 26px; top: 0; transform: translateY(-50%) translateX(-16px); }
-.mg-cpn[data-side="l"] .mg-cpn-link { right: 7px; top: 0; width: 19px; height: 1.5px; transform: translateY(-50%); }
-/* unter dem Dot (schmal) */
-.mg-cpn[data-side="b"] .mg-cpn-card { left: 0; top: 22px; width: min(236px, 78vw); transform: translateX(-50%) translateY(14px); }
-.mg-cpn[data-side="b"] .mg-cpn-link { left: 0; top: 7px; width: 1.5px; height: 16px; transform: translateX(-50%); }
-/* eingeblendet, wenn der Dot getroffen wurde */
-.mg-cpn.show .mg-cpn-card { opacity: 1; }
-.mg-cpn.show .mg-cpn-link { opacity: 0.85; }
-.mg-cpn.show[data-side="r"] .mg-cpn-card { transform: translateY(-50%) translateX(0); }
-.mg-cpn.show[data-side="l"] .mg-cpn-card { transform: translateY(-50%) translateX(0); }
-.mg-cpn.show[data-side="b"] .mg-cpn-card { transform: translateX(-50%) translateY(0); }
-.mg-cpn-pub { display: flex; align-items: center; gap: 6px; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; color: var(--cp); margin-bottom: 7px; }
-.mg-cpn-pub i { width: 6px; height: 6px; border-radius: 50%; background: var(--cp); box-shadow: 0 0 8px var(--cp); flex-shrink: 0; }
-.mg-cpn-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-.mg-cpn-kind { font-size: 10px; font-weight: 700; color: #cfd5e6; letter-spacing: 0.02em; }
-.mg-cpn-t { font-size: 10.5px; color: #8a8f9e; font-variant-numeric: tabular-nums; margin-left: auto; font-family: var(--mg-mono); }
-.mg-cpn-title { font-size: 13.5px; font-weight: 600; color: #f2f4fb; line-height: 1.3; }
-.mg-cpn-detail { font-size: 12px; color: #aeb3c2; line-height: 1.5; margin-top: 4px; }
-@media (max-width: 760px) { .mg-cpn-card { width: min(220px, 74vw); } }
-
-/* ---------- Finale: die Linie verschwindet HINTER dem Button (z-index 6 > Spine 4),
-   dann zündet ein langer, schriller Eyecatcher. ::before ist die Button-Füllung —
-   nicht anfassen; Impact läuft am Element (box-shadow + brightness) + ::after (Schockwelle→Puls). */
-/* WICHTIG: Der CTA-Wrapper trägt data-reveal → will-change:transform (Zeile ~855)
-   bildet einen EIGENEN Stacking-Context und sperrt den Button (z-index 6) darin ein.
-   Ohne explizites z-index lag der ganze Wrapper bei z-index auto (0) UNTER der Spine
-   (4) → die Linie lief über den Button. Wrapper über Spine (4) + Notes (5) heben,
-   erst dadurch greift der Button-z-index überhaupt → Button liegt über der Linie. */
-.mg-final .mg-hero-cta { position: relative; z-index: 7; }
-.mg-final .mg-btn { position: relative; z-index: 6; }
-.mg-final .mg-btn.is-arrived { animation: mgCtaArrive 1.45s cubic-bezier(.2,.8,.2,1); }
-.mg-final .mg-btn.is-arrived::after {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1;
-  animation: mgCtaShock 1s ease-out, mgCtaPulse 2s ease-out 1.15s infinite;
-}
-@keyframes mgCtaArrive {
-  0%   { transform: scale(0.95); filter: brightness(1); box-shadow: 0 0 0 0 rgba(159,178,255,0); }
-  13%  { transform: scale(1.15); filter: brightness(1.8); box-shadow: 0 0 0 0 rgba(159,178,255,0.95), 0 0 46px rgba(110,138,255,0.95); }
-  30%  { filter: brightness(1.15); }
-  42%  { transform: scale(0.985); }
-  62%  { transform: scale(1.05); }
-  100% { transform: scale(1); filter: brightness(1); box-shadow: 0 0 0 52px rgba(110,138,255,0), 0 0 24px rgba(110,138,255,0.4); }
-}
-@keyframes mgCtaShock {
-  0%   { box-shadow: 0 0 0 0 rgba(159,178,255,0.7); }
-  100% { box-shadow: 0 0 0 64px rgba(159,178,255,0); }
-}
-@keyframes mgCtaPulse {
-  0%   { box-shadow: 0 0 0 0 rgba(110,138,255,0.6), 0 0 24px rgba(110,138,255,0.5); }
-  70%  { box-shadow: 0 0 0 20px rgba(110,138,255,0), 0 0 32px rgba(110,138,255,0.35); }
-  100% { box-shadow: 0 0 0 0 rgba(110,138,255,0), 0 0 18px rgba(110,138,255,0.2); }
-}
 
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   .mg-grain, .mg-marquee-track, .mg-scrollhint i::after, .mg-pair-link .line, .mg-method-note .pulse::after { animation: none !important; }
-  .mg-cp.pulse .mg-cp-wave, .mg-cp.pulse .mg-cp-wave2, .mg-cp.pulse .mg-cp-flash, .mg-cp.pulse .mg-cp-core, .mg-cp.is-hit .mg-cp-core { animation: none !important; }
   .mg-section::before { animation: none !important; }
-  .mg-final .mg-btn.is-arrived, .mg-final .mg-btn.is-arrived::before, .mg-final .mg-btn.is-arrived::after { animation: none !important; }
   .mg *, .mg *::before, .mg *::after { transition-duration: 0.01ms !important; }
-  .mg-spine-draw { opacity: 0.6; }
 }

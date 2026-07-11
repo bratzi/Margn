@@ -250,6 +250,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       if (f.linkState === "online" || f.linkState === "gone") setLinkState(f.linkState);
       if (f.timeAxis === "published" || f.timeAxis === "seen") _setTimeAxis(f.timeAxis);
       if (typeof f.trfOpen === "boolean") setTrfOpen(f.trfOpen);
+      // Ohne gespeicherte Wahl: auf Mobilgeräten eingeklappt starten — der offene
+      // Zeitstrahl belegt sonst dauerhaft ~40 % des kleinen Screens.
+      else if (typeof window !== "undefined" && window.innerWidth <= 860) setTrfOpen(false);
       // windowDays zuerst setzen (nicht setWindowDays, um rangeIdx nicht automatisch zu resetten),
       // dann rangeIdx manuell klemmen — so bleibt ein gespeicherter Teilbereich erhalten.
       const savedW = (WINDOW_OPTS as readonly number[]).includes(f.windowDays) ? f.windowDays as number : 30;

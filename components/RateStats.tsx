@@ -572,6 +572,51 @@ export default function RateStats() {
     clearCross();
   };
 
+  // PINCH-ZOOM (Touch): Zwei Finger auf dem Chart skalieren die Dichte — das Mausrad-Zoom
+  // gibt es auf dem Handy nicht. touch-action "pan-x pan-y" am SVG erlaubt weiterhin
+  // natives Scrollen (horizontal im Chart, vertikal die Seite — vorher sperrte "pan-x"
+  // das vertikale Weiterscrollen der Seite, sobald der Finger auf dem Chart landete),
+  // unterbindet aber den Browser-Pinch → die zwei Pointer bleiben für uns auswertbar.
+  const touchPtsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ dist: number; dens: number } | null>(null);
+  function pinchDown(e: React.PointerEvent<SVGSVGElement>) {
+    if (e.pointerType !== "touch") return;
+    touchPtsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touchPtsRef.current.size === 2) {
+      const [a, b] = [...touchPtsRef.current.values()];
+      pinchRef.current = { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), dens: effDens };
+      setHoverDot(null);
+      clearCross();
+    }
+  }
+  function pinchMove(e: React.PointerEvent<SVGSVGElement>) {
+    if (e.pointerType !== "touch" || !touchPtsRef.current.has(e.pointerId)) return;
+    touchPtsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = pinchRef.current;
+    if (!p || touchPtsRef.current.size !== 2) return;
+    const [a, b] = [...touchPtsRef.current.values()];
+    const next = Math.max(minDens, Math.min(maxDens, p.dens * (Math.hypot(a.x - b.x, a.y - b.y) / p.dist)));
+    const el = scrollRef.current;
+    if (!el) { setDens(next); return; }
+    // Punkt zwischen den Fingern verankern (gleiche Logik wie beim Mausrad-Zoom).
+    const rect = el.getBoundingClientRect();
+    const midPx = (a.x + b.x) / 2 - rect.left;
+    const ratio = (el.scrollLeft + midPx) / totalSvgW;
+    setDens(next);
+    const nextTotal = Math.max(availW, next * Math.max(1, NB - 1)) + PAD_L + PAD_R;
+    requestAnimationFrame(() => {
+      const el2 = scrollRef.current;
+      if (!el2) return;
+      el2.scrollLeft = Math.max(0, ratio * nextTotal - midPx);
+      if (axisRef.current) axisRef.current.scrollLeft = el2.scrollLeft;
+    });
+  }
+  function pinchEnd(e: React.PointerEvent<SVGSVGElement>) {
+    if (e.pointerType !== "touch") return;
+    touchPtsRef.current.delete(e.pointerId);
+    if (touchPtsRef.current.size < 2) pinchRef.current = null;
+  }
+
   // Click-and-Drag verschiebt die X-Achse (Pan). Nur sinnvoll wenn gescrollt werden kann.
   function handleDown(e: React.MouseEvent<SVGSVGElement>) {
     if (e.button !== 0 || !scrollRef.current || !stretched) return;
@@ -653,7 +698,8 @@ export default function RateStats() {
           <>
             <div className="rate-legend">
               {series.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}
-              <span className="rate-hint">Mausrad: stauchen / strecken{stretched ? " · ziehen verschiebt" : ""}</span>
+              <span className="rate-hint hint-fine">Mausrad: stauchen / strecken{stretched ? " · ziehen verschiebt" : ""}</span>
+              <span className="rate-hint hint-coarse">Zwei Finger: zoomen{stretched ? " · wischen verschiebt" : ""}</span>
               {zoomMod && <button className="rate-zoomreset" onClick={resetZoom} title="Ansicht zurücksetzen">⤢ zurücksetzen</button>}
               <span style={{ marginLeft: zoomMod ? 0 : "auto", color: "var(--faint)" }}>
                 Einheit: <b className="fx-text" key={unitLabel} style={{ color: "var(--accent)" }}>{unitLabel}</b>{manual === "auto" ? " (dynamisch)" : ""}
@@ -698,11 +744,15 @@ export default function RateStats() {
                 width={totalSvgW}
                 height={VH}
                 className="rate-svg-inner chart-swap"
-                style={{ display: "block", touchAction: "pan-x" }}
+                style={{ display: "block", touchAction: "pan-x pan-y" }}
                 onMouseDown={handleDown}
                 onMouseMove={handleMove}
                 onMouseUp={handleUp}
                 onMouseLeave={() => { handleUp(); setHoverDot(null); clearCross(); }}
+                onPointerDown={pinchDown}
+                onPointerMove={pinchMove}
+                onPointerUp={pinchEnd}
+                onPointerCancel={pinchEnd}
               >
                 {yTicks.map((v) => (
                   <g key={v}>

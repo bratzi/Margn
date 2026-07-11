@@ -481,6 +481,39 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 /* Abs/Rel Schalter */
 .trf-mode-seg { margin-left: 4px; }
 .seg-xs button { padding: 2px 8px; font-size: 11px; }
+
+/* ---------- Touch/Mobile-Bedienbarkeit ---------- */
+/* Größere, sichtbare Griff-Knäufe auf Touch-Geräten. Die eigentliche TREFFERZONE liefert
+   die Pointer-Delegation in TimeRangeFilter (chartPointerDown, Nähe-Test) — nötig, weil die
+   Tages-Hover-Flächen (.trf-col-hit, z4) ÜBER den Griffen (z3) liegen und die Griffe sonst
+   gar keine Pointer-Events bekommen (elementFromPoint-verifiziert). z-Anheben wäre falsch:
+   bei Voll-Auswahl (Default) läge sonst das Band über ALLEN Tagen → keine Tooltips mehr. */
+@media (pointer: coarse) {
+  .trf-h span { width: 18px; height: 36px; border-radius: 7px; }
+  .trf-resize { height: 18px; top: -9px; }
+}
+/* iOS zoomt die ganze Seite, wenn ein fokussiertes Input < 16px Schrift hat — der
+   Filter-Drawer wirkte dadurch „nicht ausfüllbar". 16px unterbindet den Auto-Zoom. */
+@media (max-width: 860px) {
+  .fsearch input, .filters select { font-size: 16px; }
+  .filters .fseg button { padding: 8px 4px; }
+}
+/* Chart-Kopf-Controls (RateStats): auf schmalen Screens umbrechen statt rechts abzuschneiden. */
+@media (max-width: 700px) {
+  .section-h .seg { flex-wrap: wrap; }
+}
+/* Zeitstrahl mobil kompakter: Legende raus, engere Abstände. */
+@media (max-width: 640px) {
+  .trf-open { padding: 10px 10px 6px; }
+  .trf-head { gap: 8px; margin-bottom: 6px; }
+  .trf-legend { display: none; }
+}
+/* Zoom-Hinweis je Eingabegerät: Maus-Text auf Touch ausblenden und umgekehrt. */
+.rate-hint.hint-coarse { display: none; }
+@media (pointer: coarse) {
+  .rate-hint.hint-coarse { display: inline; }
+  .rate-hint.hint-fine { display: none; }
+}
 /* Zeitachsen-Umschalter (Veröffentlicht ↔ Zuletzt gesehen) — längere Labels nicht umbrechen. */
 .trf-axissel button { white-space: nowrap; }
 

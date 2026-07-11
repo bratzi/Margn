@@ -197,9 +197,15 @@ export default function TimeRangeFilter() {
     return Math.max(0, Math.min(N - 1, Math.round(((clientX - rect.left) / rect.width) * (N - 1))));
   }, [N]);
 
+  // Echte Bewegung seit Pointer-Down? Unterscheidet Drag von Klick — ein Tages-Klick
+  // (Pinpoint) darf nach einem Griff-/Band-Drag nicht zusätzlich feuern.
+  const movedRef = useRef(false);
+  const downXRef = useRef(0);
+
   useEffect(() => {
     if (!drag) return;
     const move = (e: PointerEvent) => {
+      if (Math.abs(e.clientX - downXRef.current) > 4) movedRef.current = true;
       if (drag === "resize") { setH(Math.max(96, Math.min(440, window.innerHeight - e.clientY))); return; }
       const i = idxFromClient(e.clientX);
       const cur = liveRef.current;
@@ -222,8 +228,32 @@ export default function TimeRangeFilter() {
 
   const start = (k: typeof drag, e: React.PointerEvent) => {
     document.body.style.userSelect = "none";
+    movedRef.current = false;
+    downXRef.current = e.clientX;
     if (k === "band") dragRef.current = { start: idxFromClient(e.clientX), f: liveRef.current.from, t: liveRef.current.to };
     setDrag(k);
+  };
+
+  // Pointer-DELEGATION für Griffe + Band: Die Tages-Hover-Flächen (.trf-col-hit, z4) liegen
+  // ÜBER Griffen (z3) und Band — deren eigene onPointerDown feuern also fast nie
+  // (elementFromPoint am Knauf trifft trf-col-hit; auf Touch war der Range so gar nicht
+  // verstellbar). z-Anheben wäre die falsche Kur: bei Voll-Auswahl (Default) deckte das Band
+  // dann ALLE Tage ab → keine Tooltips/Tages-Klicks mehr. Stattdessen entscheidet der
+  // Chart-Container per Nähe-Test, ob ein Pointer-Down einen Griff (Toleranz fein 12 px,
+  // Touch 26 px) oder das Band (nur bei echter Teil-Auswahl) meint.
+  const chartPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    if ((e.target as HTMLElement).closest(".trf-h, .trf-bandsel, .trf-resize")) return; // Direkt-Treffer laufen wie gehabt
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const xFrom = (edgeLeft(liveRef.current.from) / 100) * rect.width;
+    const xTo = (edgeRight(liveRef.current.to) / 100) * rect.width;
+    const NEAR = e.pointerType === "touch" ? 26 : 12;
+    // Näherer Griff gewinnt (bei Einzeltag liegen beide fast aufeinander).
+    const dFrom = Math.abs(x - xFrom), dTo = Math.abs(x - xTo);
+    if (dFrom <= NEAR || dTo <= NEAR) { start(dFrom <= dTo ? "from" : "to", e); return; }
+    if (x > xFrom && x < xTo && (liveRef.current.from > 0 || liveRef.current.to < N - 1)) start("band", e);
   };
   const fmtDay = (ds: string) => new Date(ds + "T00:00:00Z").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 
@@ -272,6 +302,7 @@ export default function TimeRangeFilter() {
 
       <div
         className="trf-chart" ref={trackRef} style={{ height: chartH }}
+        onPointerDown={chartPointerDown}
         onDoubleClick={(e) => { const i = idxFromClient(e.clientX); setLive({ from: i, to: i }); setRangeIdx({ from: i, to: i }); }}
         onMouseLeave={() => setHoverDay(null)}
         title="Doppelklick: nur diesen Tag · Klick: alle Artikel dieses Tages"
@@ -298,7 +329,7 @@ export default function TimeRangeFilter() {
             style={{ left: `${edgeLeft(i)}%`, width: `${Math.max(edgeRight(i) - edgeLeft(i), 1)}%` }}
             onMouseEnter={(e) => setHoverDay({ idx: i, clientX: e.clientX, clientY: e.clientY })}
             onMouseMove={(e) => setHoverDay((h) => h ? { ...h, clientX: e.clientX, clientY: e.clientY } : h)}
-            onClick={() => handleDayClick(i)}
+            onClick={() => { if (!movedRef.current) handleDayClick(i); }}
           />
         ))}
 
