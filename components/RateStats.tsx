@@ -334,6 +334,23 @@ export default function RateStats() {
     return X(Math.min(frac, NB - 1));
   }, [buckets, nowMs, unit, naturalWidth, NB]);
 
+  // Letzter bereits BEGONNENE Bucket (Index) — alles danach liegt in der Zukunft und darf
+  // keine Marke zeigen (weder Balken noch Kurve/Punkt). Im Kumuliert-Modus trug der running-
+  // total sonst den letzten echten Wert als flaches Plateau über den ganzen Rest des Fensters
+  // fort, als gäbe es dort schon Daten. -1 = das ganze Fenster liegt noch in der Zukunft;
+  // buckets.length-1 = das ganze Fenster liegt bereits in der Vergangenheit (kein Kappen nötig).
+  const cutoffIdx = useMemo(() => {
+    if (buckets.length === 0) return -1;
+    const stepMs = unit === "minute" ? 60000 : unit === "hour" ? 3600000 : unit === "day" ? 86400000 : 604800000;
+    const first = Date.parse(buckets[0]);
+    const lastStart = Date.parse(buckets[buckets.length - 1]);
+    if (nowMs >= lastStart + stepMs) return buckets.length - 1;
+    if (nowMs < first) return -1;
+    let i = 0;
+    while (i < buckets.length - 1 && Date.parse(buckets[i + 1]) <= nowMs) i++;
+    return i;
+  }, [buckets, nowMs, unit]);
+
   // Alle Labels in LOKALER Zeit des Endnutzers.
   const fmtAxis = (iso: string) => {
     const d = new Date(iso);
@@ -725,7 +742,7 @@ export default function RateStats() {
                   displaySeries.map((s, si) => (
                     <g key={`b${s.key}`}>
                       {s.vals.map((v, i) => {
-                        if (v <= 0) return null;
+                        if (i > cutoffIdx || v <= 0) return null;
                         const yTop = Y(v), yBot = Y(0);
                         const bx = X(i) + barGeom.x0 + si * barGeom.bw;
                         return (
@@ -742,12 +759,14 @@ export default function RateStats() {
                   ))
                 ) : (
                   <>
+                    {/* Kurve/Fläche bei „jetzt" kappen — keine Zukunfts-Buckets zeichnen
+                        (im Kumuliert-Modus trüge sonst der letzte echte Wert als Plateau fort). */}
                     {displaySeries.map((s) => (
-                      <path key={`a${s.key}`} d={areaPath(s.vals)}
+                      <path key={`a${s.key}`} d={areaPath(s.vals.slice(0, cutoffIdx + 1))}
                         fill={`url(#rs-grad-${String(s.key).replace(/[^a-zA-Z0-9_-]/g, "")})`} />
                     ))}
                     {displaySeries.map((s) => (
-                      <path key={`l${s.key}`} d={smoothPath(s.vals)} fill="none"
+                      <path key={`l${s.key}`} d={smoothPath(s.vals.slice(0, cutoffIdx + 1))} fill="none"
                         stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                         vectorEffect="non-scaling-stroke" />
                     ))}
@@ -768,7 +787,7 @@ export default function RateStats() {
                 {/* Datenpunkte — Tooltip NUR beim Hover auf den einzelnen Dot.
                     Im Säulenmodus überflüssig: dort trägt die Säule selbst den Tooltip. */}
                 {!barMode && showDots && displaySeries.map((s) => s.vals.map((v, i) => {
-                  if ((origById.get(s.key)?.[i] ?? 0) <= 0) return null;
+                  if (i > cutoffIdx || (origById.get(s.key)?.[i] ?? 0) <= 0) return null;
                   const isHover = hoverDot?.key === s.key && hoverDot?.idx === i;
                   return (
                     <g key={`${s.key}-${i}`}>

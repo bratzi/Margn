@@ -303,10 +303,10 @@ export default function ArticleDetail({ id }: { id: number }) {
           <div className="cat-chips">{categories.map((x) => <span key={x} className="cat-chip">{x}</span>)}</div>
         </div>
       )}
-      {/* 2-spaltig: LINKS (2/3) der Artikel selbst — Eckdaten, Scan, Schlagwörter, Autoren,
-          Seitenbaum, dann GANZ UNTEN der Änderungsverlauf. RECHTS (1/3) margns Analyse — Link,
-          Radar, Einordnung, Profil, Echo. Verlagsbilder (og_image) werden aus
-          Urheberrechtsgründen NIRGENDS eingebunden. */}
+      {/* 2-spaltig: LINKS (2/3) der Artikel selbst — erst Identität (Eckdaten, Status,
+          Schlagwörter, Autoren, Seitenbaum), dann der zeitliche Block (Scan-Verlauf, Profil,
+          GANZ UNTEN Änderungsverlauf). RECHTS (1/3) margns Analyse — Link, Radar, Einordnung,
+          Nachbarn. Verlagsbilder (og_image) werden aus Urheberrechtsgründen NIRGENDS eingebunden. */}
       <div className="d-grid">
         {/* Linke Spalte (breit): das Stück + seine Fakten */}
         <aside className="d-aside">
@@ -360,12 +360,6 @@ export default function ArticleDetail({ id }: { id: number }) {
             )}
           </DL>
 
-          <DL h="Scan-Verlauf">
-            <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
-              changeTimes={snaps.map((s) => s.captured_at)}
-              goneAt={link?.state === "gone" ? link.since : null} />
-          </DL>
-
           <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>
             {keywords.length > 0
               ? <div className="row">{keywords.map((x) => <span key={x} className="tag">{x}</span>)}</div>
@@ -393,6 +387,15 @@ export default function ArticleDetail({ id }: { id: number }) {
               {a.depth != null && <p className="faint" style={{ fontSize: 12.5, marginTop: 10 }}>Tiefe: {a.depth} {a.depth === 1 ? "Ebene" : "Ebenen"} von der Startseite</p>}
             </DL>
           )}
+
+          {/* Ab hier der zeitliche/beobachtende Block (vorher zwischen den Identitäts-Metadaten
+              zerrissen): Rohdaten-Chart -> verdichtete Synthese -> volles Log, dieselbe
+              Übersicht-vor-Detail-Kaskade wie rechts (Radar -> Einordnung -> Nachbarn). */}
+          <DL h="Scan-Verlauf">
+            <ScanTimeline firstSeen={a.first_seen} lastSeen={a.last_seen} scanTimes={a.scan_times} scanCount={a.scan_count}
+              changeTimes={snaps.map((s) => s.captured_at)}
+              goneAt={link?.state === "gone" ? link.since : null} />
+          </DL>
 
           {/* Verhaltensprofil — direkt über dem Änderungsverlauf */}
           {profile && (profile.tiles.length > 0 || profile.rev > 0 || profile.insight) && (
