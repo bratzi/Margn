@@ -1537,10 +1537,40 @@ function hasArticleSignal(html: string): boolean {
   return false;
 }
 
+// Strukturelle Chrome-Elemente, die NIE zum Artikeltext gehören, aber gelegentlich als
+// Fließtext mitextrahiert werden — VOR Readability/Fallback aus dem DOM entfernt, statt
+// hinterher per Text-Regex zu raten. Grund: FAZ klebt "Mehr zum Thema"/Empfehlungskarten
+// (RubrikÜberschrift, ohne Trennzeichen) MITTEN in den Artikel-Body, mit rotierenden
+// Schlagzeilen — ein Text-Regex kann eine rotierende Karte nicht zuverlässig von einer
+// echten Zwischenüberschrift oder Bildunterschrift unterscheiden (getestet: >100 False-
+// Positives auf einer 2000-Artikel-Stichprobe, echter Fließtext wurde mitgelöscht). Der
+// strukturelle Marker ist dagegen 100% präzise (Art. 1794369: "…entführten Lehrer.
+// BundesverfassungsgerichtWann darf die Polizei einschreiten? …", stündlich neue Phantom-
+// Edits durch rotierende Karten). Readability filtert die meisten dieser Blöcke selbst
+// schon per Content-Scoring, ABER NICHT verlässlich — insbesondere `extractBodyFallback`
+// (das naiv jedes p/li/h2/h3/h4 im größten Container sammelt) zieht sie ungefiltert mit.
+// Verifiziert gegen 18 echte FAZ-Artikel unterschiedlichster Ressorts/Formate (Liveblog,
+// Rezept, Reisereportage, Finanz-Kurzmeldung, …): Kopf/Ende des extrahierten Texts bleiben
+// exakt gleich, nur die Chrome-Blöcke selbst verschwinden.
+function stripChromeNodes(doc: Document, url: string): void {
+  let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch {}
+  if (/(^|\.)faz\.net$/.test(host)) {
+    for (const sel of ['[data-external-selector="related-articles"]', '[data-external-selector="recommendations"]',
+      '[data-external-selector="job-recommendations"]', '[data-external-selector="taboola-ads"]']) {
+      doc.querySelectorAll(sel).forEach((el) => el.remove());
+    }
+    // "F.A.Z.-Artikel häufiger in Ihren Suchergebnissen sehen"-Box (Google-Personalisierungs-
+    // CTA, kein data-external-selector) — über den stabilen Link-Ziel-Host statt Textinhalt
+    // erkannt (der CTA-Text selbst könnte sich ändern).
+    doc.querySelectorAll('a[href*="google.com/preferences/source"]').forEach((a) => a.closest("div")?.remove());
+  }
+}
+
 // Gerenderte Seite als Artikel lesen (sichtbarer Text). null = eher Übersichtsseite/Hub.
 function asArticle(html: string, url: string): { title: string; teaser: string; body: string } | null {
   try {
     const dom = makeDom(html, url);
+    stripChromeNodes(dom.window.document, url);
     const a = new Readability(dom.window.document).parse();
     if (!a || !a.title?.trim() || (a.textContent?.length ?? 0) < MIN_BODY) return null;
     // Link-Dichte des EXTRAHIERTEN Inhalts: Hubs liefern Teaser-Linklisten statt Fließtext.
@@ -1561,6 +1591,7 @@ function asArticle(html: string, url: string): { title: string; teaser: string; 
 function extractBodyFallback(html: string, url: string): { body: string } | null {
   try {
     const doc = makeDom(html, url).window.document;
+    stripChromeNodes(doc, url);
     let best: any = null, bestLen = 0;
     for (const sel of ['[data-area="body"]', '[itemprop="articleBody"]', "article", "main"]) {
       for (const el of Array.from(doc.querySelectorAll(sel))) {
