@@ -223,7 +223,8 @@ export default function TimeRangeFilter() {
       if (drag !== "resize") setRangeIdx(liveRef.current);
     };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
-    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointercancel", up);
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); };
   }, [drag, idxFromClient, setRangeIdx, N]);
 
   const start = (k: typeof drag, e: React.PointerEvent) => {

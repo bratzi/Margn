@@ -443,7 +443,9 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .trf-mini-label { font-size: 12.5px; color: var(--muted); }
 .trf-mini-label b { color: var(--ink); }
 .trf-open { padding: 12px 18px 8px; display: flex; flex-direction: column; }
-.trf-resize { position: absolute; top: -4px; left: 0; right: 0; height: 9px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; z-index: 2; }
+/* touch-action: none ist Pflicht — sonst übernimmt der Browser die Fingergeste als Scroll
+   (pointercancel) und der Höhen-Drag stirbt nach dem ersten Millimeter (mobil unbenutzbar). */
+.trf-resize { position: absolute; top: -4px; left: 0; right: 0; height: 9px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; z-index: 2; touch-action: none; }
 .trf-resize span { width: 42px; height: 4px; border-radius: 3px; background: var(--line-2); transition: background .15s; }
 .trf-resize:hover span { background: var(--accent); }
 @media (max-width: 980px) { .trf { left: 0; } }
@@ -490,7 +492,8 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
    bei Voll-Auswahl (Default) läge sonst das Band über ALLEN Tagen → keine Tooltips mehr. */
 @media (pointer: coarse) {
   .trf-h span { width: 18px; height: 36px; border-radius: 7px; }
-  .trf-resize { height: 18px; top: -9px; }
+  .trf-resize { height: 26px; top: -13px; }
+  .trf-resize span { width: 56px; height: 5px; }
 }
 /* iOS zoomt die ganze Seite, wenn ein fokussiertes Input < 16px Schrift hat — der
    Filter-Drawer wirkte dadurch „nicht ausfüllbar". 16px unterbindet den Auto-Zoom. */

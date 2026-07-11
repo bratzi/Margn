@@ -90,9 +90,10 @@ export default function RateStats() {
     const startY = e.clientY, startH = chartH;
     setResizing(true);
     const onMove = (ev: PointerEvent) => setChartH(Math.max(100, Math.min(600, startH + ev.clientY - startY)));
-    const onUp = () => { setResizing(false); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    const onUp = () => { setResizing(false); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onUp); };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   };
 
   const fromIso = berlinDayBoundsUTC(f.days[f.rangeIdx.from]).from;
