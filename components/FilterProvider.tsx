@@ -319,6 +319,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const needsCorpus = pathname === "/articles" || pathname === "/articles/edits" || pathname === "/articles/keywords";
   const corpusLoadedAtRef = useRef<number | null>(null); // Frische-Quelle (sofort aktuell, kein State-Lag)
   const fetchedGenRef = useRef(-1);                       // für welche corpusGen zuletzt geladen wurde
+  const corpusLoadingRef = useRef<object | null>(null);  // Token des laufenden Pulls (gegen Doppel-Trigger)
   const FRESH_MS = 10 * 60 * 1000;                        // jünger = kein erneuter Pull bei Navigation/Rückkehr
   // Refresh-Button: Daten neu ziehen, ohne die Seite zu laden (alter Bestand bleibt sichtbar,
   // bis der neue da ist → kein Flackern). reloadCorpus erhöht nur corpusGen → der Lade-Effekt feuert.
@@ -331,6 +332,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (corpusGen === fetchedGenRef.current && age < FRESH_MS) return;
     fetchedGenRef.current = corpusGen;
     let cancelled = false;
+    // Echtes Netz-Abort beim Cleanup: „cancelled" allein stoppte nur die State-Übernahme,
+    // die ~35 Seiten-Requests liefen komplett weiter (Doppel-Egress beim Kaltstart).
+    const ctrl = new AbortController();
     // Corpus auf max. 35 Tage (= größtes Preset 30 + 5 Puffer) begrenzen.
     // Ohne Filter würden Archiv-Artikel (z.B. Le Monde bis 1945) die Zeilen­zahl
     // massiv aufblähen → zu viele parallele Supabase-Requests → Rate-Limit-Fehler
@@ -353,31 +357,40 @@ export default function FilterProvider({ children }: { children: React.ReactNode
       // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
       // Aggregation server-seitig (RPC), dann cap-frei.
       100000,
+      ctrl.signal,
     );
     // Ein Klick = bis zu zwei komplette Versuche: fetchAllRows wirft jetzt bei jedem Loch
     // (statt still unvollständig zu liefern), ein transienter Aussetzer wird also hier
     // abgefangen statt vom Nutzer per Mehrfach-Klick. Scheitern beide: alter Bestand bleibt
     // sichtbar, corpusError signalisiert es dem Button.
     (async () => {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const rows = await load();
-          if (cancelled) return;
-          // Dedupe nach id: Offset-Pagination auf id desc verschiebt bei gleichzeitigen
-          // Inserts (stündlicher Scrape) die Seitengrenzen → einzelne Zeilen kämen doppelt.
-          const seen = new Set<number>();
-          const uniq = rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
-          setCorpus(uniq); setCorpusReady(true); setCorpusError(false);
-          corpusLoadedAtRef.current = Date.now(); setCorpusLoadedAt(Date.now()); setRefreshing(false);
-          return;
-        } catch {
-          if (cancelled) return;
-          if (attempt === 0) await new Promise((res) => setTimeout(res, 1200));
+      // Token statt Boolean: das finally eines abgebrochenen Alt-Laufs darf das Flag
+      // eines bereits gestarteten Nachfolgers nicht löschen.
+      const token = {};
+      corpusLoadingRef.current = token;
+      try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const rows = await load();
+            if (cancelled) return;
+            // Dedupe nach id: Offset-Pagination auf id desc verschiebt bei gleichzeitigen
+            // Inserts (stündlicher Scrape) die Seitengrenzen → einzelne Zeilen kämen doppelt.
+            const seen = new Set<number>();
+            const uniq = rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+            setCorpus(uniq); setCorpusReady(true); setCorpusError(false);
+            corpusLoadedAtRef.current = Date.now(); setCorpusLoadedAt(Date.now()); setRefreshing(false);
+            return;
+          } catch {
+            if (cancelled) return;
+            if (attempt === 0) await new Promise((res) => setTimeout(res, 1200));
+          }
         }
+        if (!cancelled) { setCorpusError(true); setRefreshing(false); }
+      } finally {
+        if (corpusLoadingRef.current === token) corpusLoadingRef.current = null;
       }
-      if (!cancelled) { setCorpusError(true); setRefreshing(false); }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; ctrl.abort(); };
   }, [sources.length, corpusGen, needsCorpus]);
   // KEIN blindes Intervall-Polling mehr: ein vergessener Tab zog sonst ~10 MB ALLE 10 min
   // (≈1,4 GB/Tag) — der mit Abstand größte Egress-Posten. Stattdessen nur nachladen, wenn der
@@ -387,6 +400,10 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!needsCorpus) return;
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
+      // Läuft gerade ein Pull, NICHT bumpen: Beim Kaltstart ist corpusLoadedAt noch null
+      // (age=Infinity) — ein Sichtbarkeits-Wechsel während der ~30 s Ladezeit (z. B.
+      // Edge-Prerender → aktiviert) stieß sonst einen ZWEITEN Komplett-Pull an.
+      if (corpusLoadingRef.current) return;
       const age = corpusLoadedAtRef.current ? Date.now() - corpusLoadedAtRef.current : Infinity;
       if (age > FRESH_MS) setCorpusGen((g) => g + 1);
     };

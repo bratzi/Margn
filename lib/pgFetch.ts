@@ -24,11 +24,18 @@ export async function fetchAllRows<T>(
   countQ: (signal: AbortSignal) => PromiseLike<{ count: number | null }>,
   pageQ: (from: number, to: number, signal: AbortSignal) => PromiseLike<{ data: T[] | null; error: unknown }>,
   maxRows = 30000,
+  // Äußeres Abbruch-Signal des Aufrufers: Ohne dieses lief ein vom Effekt-Cleanup „cancelled"
+  // Ladevorgang im Netz KOMPLETT weiter (alle Seiten) — beim Dashboard-Kaltstart wurde der
+  // Corpus so doppelt gezogen (~3,5 MB Egress verschenkt pro Load). Geprüft wird an den
+  // Batch-/Versuchs-Grenzen; maximal ein laufender 5er-Batch läuft noch aus.
+  outer?: AbortSignal,
 ): Promise<T[]> {
+  const bail = () => { if (outer?.aborted) throw new Error("fetchAllRows: abgebrochen"); };
   // Count MIT Retry und hartem Fehler: fiele er still auf null zurück, würde nur EINE Seite
   // (1000 Zeilen) geladen und als Erfolg gemeldet — Charts zeigten dann ~2 % der Daten.
   let count: number | null = null;
   for (let attempt = 0; attempt < RETRY; attempt++) {
+    bail();
     const ts = timeoutSignal();
     try { count = (await countQ(ts.signal)).count ?? null; } catch { count = null; } finally { ts.done(); }
     if (count !== null) break;
@@ -39,6 +46,7 @@ export async function fetchAllRows<T>(
 
   const fetchPage = async (from: number, to: number): Promise<T[] | null> => {
     for (let attempt = 0; attempt < RETRY; attempt++) {
+      bail();
       const ts = timeoutSignal();
       try {
         const r = await pageQ(from, to, ts.signal);
@@ -52,6 +60,7 @@ export async function fetchAllRows<T>(
 
   const pages: (T[] | null)[] = new Array(nPages).fill(null);
   for (let i = 0; i < nPages; i += BATCH_SIZE) {
+    bail();
     await Promise.all(Array.from(
       { length: Math.min(BATCH_SIZE, nPages - i) },
       (_, j) => fetchPage((i + j) * 1000, (i + j) * 1000 + 999).then((rows) => { pages[i + j] = rows; }),
