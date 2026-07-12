@@ -1030,13 +1030,23 @@ table.dt.dt-fit { width: max-content; }
   .side-foot .obs { display: none; }
   .nextrun { display: none; }
 
-  /* Filter-Button in der Topbar */
+  /* Filter-Button in der Topbar. flex-shrink: 0 — er ist das WICHTIGSTE Element der
+     Zeile und darf nie zusammengedrückt oder (nowrap!) aus dem Viewport gedrängt werden. */
   .filter-toggle {
-    display: inline-flex; align-items: center; gap: 6px; order: 4;
+    display: inline-flex; align-items: center; gap: 6px; order: 4; flex-shrink: 0;
     padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line-2);
     background: var(--surface); color: var(--ink); font-family: inherit;
     font-size: 13px; font-weight: 550; cursor: pointer; position: relative; white-space: nowrap;
   }
+  /* Die Topbar-Zeile ist nowrap: alles rechts vom Spacer muss schmal sein, sonst schiebt es
+     den Filter-Button aus dem sichtbaren Bereich (User-Meldung 12.07., Phone ~390 px).
+     Logout: nur Icon, ans Zeilenende; Brand darf schrumpfen. */
+  .side-logout { order: 6; padding: 0; flex-shrink: 0; }
+  .side-logout button { width: auto; padding: 7px 8px; }
+  .side-logout button span { display: none; }
+  .brand-row { min-width: 0; flex-shrink: 1; }
+  .brand-row .brand { min-width: 0; }
+  .brand-name { overflow: hidden; text-overflow: ellipsis; }
   .filter-toggle:hover { border-color: var(--accent); }
   .filter-toggle-badge {
     display: inline-flex; align-items: center; justify-content: center;
@@ -1126,10 +1136,15 @@ table.dt.dt-fit { width: max-content; }
 }
 /* Sehr schmale Topbar: Nav-Labels weg (nur Icons), kompakter Filter-Button */
 @media (max-width: 560px) {
+  .sidebar { padding: 8px 10px; gap: 6px; }
   .sidebar .nav-item { font-size: 0; gap: 0; padding: 8px; }
   .sidebar .nav-item svg { width: 18px; height: 18px; }
   .filter-toggle { padding: 7px 11px; }
   .brand-name { font-size: 16px; }
+}
+/* Kleinste Phones: Logo-Mark reicht als Brand — der Filter-Button hat Vorrang */
+@media (max-width: 480px) {
+  .sidebar .brand-text { display: none; }
 }
 
 /* ---------- Daten-Transitions (Block 8) ---------- */
