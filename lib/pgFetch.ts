@@ -81,6 +81,21 @@ export async function fetchAllRows<T>(
   return out;
 }
 
+// Nur der exakte Count (head:true), mit Retry/Timeout — für den Delta-Abgleich (Cache):
+// die Zeilenzahl des SERVERS gegen den zusammengeführten Client-Bestand prüfen.
+export async function fetchCount(
+  countQ: (signal: AbortSignal) => PromiseLike<{ count: number | null }>,
+  outer?: AbortSignal,
+): Promise<number> {
+  for (let attempt = 0; attempt < RETRY; attempt++) {
+    if (outer?.aborted) throw new Error("fetchCount: abgebrochen");
+    const ts = timeoutSignal();
+    try { const c = (await countQ(ts.signal)).count; if (c != null) return c; } catch {} finally { ts.done(); }
+    if (attempt < RETRY - 1) await new Promise((res) => setTimeout(res, 350 * (attempt + 1)));
+  }
+  throw new Error("fetchCount: nicht ermittelbar");
+}
+
 // Sequenziell mit Früh-Abbruch (für mittlere Mengen, wenn kein Count verfügbar/nötig).
 export async function fetchPagedSeq<T>(
   pageQ: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,

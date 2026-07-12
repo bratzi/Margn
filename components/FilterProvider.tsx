@@ -4,7 +4,8 @@ import { createContext, useContext, useCallback, useEffect, useMemo, useRef, use
 import { usePathname, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { topicLabel, TOPICS_SANS_REGIONAL } from "@/lib/topics";
-import { fetchAllRows, timeoutSignal } from "@/lib/pgFetch";
+import { fetchAllRows, fetchCount, timeoutSignal } from "@/lib/pgFetch";
+import { readCorpusCache, writeCorpusCache, CACHE_SCHEMA_VERSION } from "@/lib/corpusCache";
 import { ALLOWED_PTYPES, CORPUS_COLS, makeMatcher, snapshotOf, makeBerlinDays, berlinDayBoundsUTC, onlineCutsFrom, type CorpusRow, type TimeAxis } from "@/lib/filterCorpus";
 
 export type Src = { id: number; name: string; country: string; base_url: string };
@@ -320,10 +321,12 @@ export default function FilterProvider({ children }: { children: React.ReactNode
   const corpusLoadedAtRef = useRef<number | null>(null); // Frische-Quelle (sofort aktuell, kein State-Lag)
   const fetchedGenRef = useRef(-1);                       // für welche corpusGen zuletzt geladen wurde
   const corpusLoadingRef = useRef<object | null>(null);  // Token des laufenden Pulls (gegen Doppel-Trigger)
-  const FRESH_MS = 10 * 60 * 1000;                        // jünger = kein erneuter Pull bei Navigation/Rückkehr
+  const forceFullRef = useRef(false);                    // true = Voll-Load erzwingen (Refresh-Button)
+  const FRESH_MS = 10 * 60 * 1000;                        // jünger = gar kein Netz (Cache reicht)
+  const DELTA_MAX_MS = 20 * 60 * 1000;                   // bis hierhin nur Delta nachladen, danach voll
   // Refresh-Button: Daten neu ziehen, ohne die Seite zu laden (alter Bestand bleibt sichtbar,
-  // bis der neue da ist → kein Flackern). reloadCorpus erhöht nur corpusGen → der Lade-Effekt feuert.
-  const reloadCorpus = useCallback(() => { setRefreshing(true); setCorpusGen((g) => g + 1); }, []);
+  // bis der neue da ist → kein Flackern). Erzwingt einen VOLLEN Load (frischester Stand).
+  const reloadCorpus = useCallback(() => { setRefreshing(true); forceFullRef.current = true; setCorpusGen((g) => g + 1); }, []);
   useEffect(() => {
     if (!sources.length || !needsCorpus) return;
     // Bei Navigation zurück ins Dashboard NICHT erneut ziehen, solange der Bestand frisch ist; ein
@@ -331,6 +334,7 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     const age = corpusLoadedAtRef.current ? Date.now() - corpusLoadedAtRef.current : Infinity;
     if (corpusGen === fetchedGenRef.current && age < FRESH_MS) return;
     fetchedGenRef.current = corpusGen;
+    const forceFull = forceFullRef.current; forceFullRef.current = false;
     let cancelled = false;
     // Echtes Netz-Abort beim Cleanup: „cancelled" allein stoppte nur die State-Übernahme,
     // die ~35 Seiten-Requests liefen komplett weiter (Doppel-Egress beim Kaltstart).
@@ -344,48 +348,115 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     // Deckt BEIDE Zeitachsen ab: kürzlich veröffentlicht ODER kürzlich gescannt ("zuletzt gesehen").
     // Sonst fehlten auf der Scan-Achse ältere, aber heute noch online/gescannte Artikel.
     const corpusFilter = `published_at.gte.${cf},and(published_at.is.null,discovered_at.gte.${cf}),last_seen.gte.${cf}`;
-    const load = () => fetchAllRows<CorpusRow>(
-      (signal) => supabase.from("page_overview").select("id", { count: "exact", head: true })
-        .in("ptype", ALLOWED_PTYPES).or(corpusFilter).abortSignal(signal),
-      // WICHTIG: nach dem EINDEUTIGEN PK `id` paginieren, nicht nach
-      // discovered_at. Bei gleichen discovered_at-Werten (Batch-Inserts) ist die
-      // Sortierung über parallele Range-Requests sonst nicht stabil → Zeilen
-      // fallen zwischen Seiten raus → Corpus unvollständig → Charts zählen
-      // weniger als die Tabelle. id desc ≈ neueste zuerst und ist eindeutig.
+    // Cache-Signatur: Floor auf den TAG gerundet (der Floor wandert sekündlich; sonst nie ein Treffer)
+    // + Seitentypen + Schema-Version. Passt etwas nicht, wird der Cache verworfen.
+    const sig = `${CACHE_SCHEMA_VERSION}|${cf.slice(0, 10)}|${ALLOWED_PTYPES.join(",")}`;
+    // Fensterprädikat = clientseitiges Spiegelbild von corpusFilter (ISO-Strings vergleichen
+    // lexikografisch korrekt). Nach dem Delta-Merge werden ausgealterte Zeilen so verworfen.
+    const inWindow = (r: CorpusRow) =>
+      (!!r.published_at && r.published_at >= cf) ||
+      (r.published_at == null && !!r.discovered_at && r.discovered_at >= cf) ||
+      (!!r.last_seen && r.last_seen >= cf);
+    const dedup = (rows: CorpusRow[]) => {
+      const seen = new Set<number>();
+      return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+    };
+    // WICHTIG: nach dem EINDEUTIGEN PK `id` paginieren, nicht nach discovered_at. Bei gleichen
+    // discovered_at (Batch-Inserts) ist die Sortierung über parallele Range-Requests sonst nicht
+    // stabil → Zeilen fallen zwischen Seiten raus → Corpus unvollständig. id desc ist eindeutig.
+    const fullCountHead = (signal: AbortSignal) => supabase.from("page_overview")
+      .select("id", { count: "exact", head: true }).in("ptype", ALLOWED_PTYPES).or(corpusFilter).abortSignal(signal);
+    const fullLoad = () => fetchAllRows<CorpusRow>(
+      fullCountHead,
       (a, b, signal) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
         .or(corpusFilter).order("id", { ascending: false }).range(a, b).abortSignal(signal) as any,
-      // Cap der clientseitigen Analytics-Menge. Langfristig gehört diese
-      // Aggregation server-seitig (RPC), dann cap-frei.
-      100000,
-      ctrl.signal,
+      100000, ctrl.signal,
     );
-    // Ein Klick = bis zu zwei komplette Versuche: fetchAllRows wirft jetzt bei jedem Loch
-    // (statt still unvollständig zu liefern), ein transienter Aussetzer wird also hier
-    // abgefangen statt vom Nutzer per Mehrfach-Klick. Scheitern beide: alter Bestand bleibt
-    // sichtbar, corpusError signalisiert es dem Button.
+    // Delta = nur Zeilen, die seit dem Cache-Wasserstand re-gescannt/neu sind (last_seen >= since).
+    // Der COUNT dieser Query ist klein → fetchAllRows lädt nur die paar nötigen Seiten.
+    const deltaLoad = (since: string) => fetchAllRows<CorpusRow>(
+      (signal) => supabase.from("page_overview").select("id", { count: "exact", head: true })
+        .in("ptype", ALLOWED_PTYPES).or(corpusFilter).gte("last_seen", since).abortSignal(signal),
+      (a, b, signal) => supabase.from("page_overview").select(CORPUS_COLS).in("ptype", ALLOWED_PTYPES)
+        .or(corpusFilter).gte("last_seen", since).order("id", { ascending: false }).range(a, b).abortSignal(signal) as any,
+      100000, ctrl.signal,
+    );
+
+    const commit = (rows: CorpusRow[]) => {
+      if (cancelled) return;
+      setCorpus(rows); setCorpusReady(true); setCorpusError(false);
+      const now = Date.now();
+      corpusLoadedAtRef.current = now; setCorpusLoadedAt(now); setRefreshing(false);
+    };
+    const runFull = async (): Promise<boolean> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const rows = dedup(await fullLoad());
+          if (cancelled) return true;
+          commit(rows);
+          void writeCorpusCache(sig, rows);
+          return true;
+        } catch {
+          if (cancelled) return true;
+          if (attempt === 0) await new Promise((res) => setTimeout(res, 1200));
+        }
+      }
+      return false;
+    };
+
     (async () => {
       // Token statt Boolean: das finally eines abgebrochenen Alt-Laufs darf das Flag
       // eines bereits gestarteten Nachfolgers nicht löschen.
       const token = {};
       corpusLoadingRef.current = token;
+      let painted = false; // haben wir schon SICHTBARE Daten (aus Cache)? Dann kein Fehlerzustand.
       try {
-        for (let attempt = 0; attempt < 2; attempt++) {
+        // (1) Cache-first: sofort ausmalen (Charts stehen ohne Netz), außer der Nutzer erzwingt Frische.
+        let cached = forceFull ? null : await readCorpusCache(sig);
+        if (cancelled) return;
+        if (cached) { commit(cached.rows); painted = true; }
+
+        const cacheAge = cached ? Date.now() - cached.syncedAt : Infinity;
+        // (2) Sync-Modus wählen: frisch genug → gar nichts; mittel → Delta; sonst/erzwungen → voll.
+        if (cached && !forceFull && cacheAge < FRESH_MS) {
+          // Frische-Marke = echte Cache-Zeit (nicht „jetzt"), damit die Sichtbarkeits-/Rückkehr-
+          // Logik das nächste Sync-Fenster korrekt bemisst.
+          corpusLoadedAtRef.current = cached.syncedAt; setCorpusLoadedAt(cached.syncedAt);
+          return; // Wiederbesuch < 10 min = NULL Requests
+        }
+        if (cached && !forceFull && cacheAge <= DELTA_MAX_MS && cached.maxLastSeen) {
           try {
-            const rows = await load();
+            // 2 min Überlappung gegen Sekunden-Skew; doppelte Zeilen fängt der Merge (Map) ab.
+            const since = new Date(Date.parse(cached.maxLastSeen) - 120000).toISOString();
+            const [deltaRows, serverCount] = await Promise.all([
+              deltaLoad(since),
+              fetchCount(fullCountHead, ctrl.signal),
+            ]);
             if (cancelled) return;
-            // Dedupe nach id: Offset-Pagination auf id desc verschiebt bei gleichzeitigen
-            // Inserts (stündlicher Scrape) die Seitengrenzen → einzelne Zeilen kämen doppelt.
-            const seen = new Set<number>();
-            const uniq = rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
-            setCorpus(uniq); setCorpusReady(true); setCorpusError(false);
-            corpusLoadedAtRef.current = Date.now(); setCorpusLoadedAt(Date.now()); setRefreshing(false);
+            const byId = new Map(cached.rows.map((r) => [r.id, r] as const));
+            for (const r of deltaRows) byId.set(r.id, r); // Delta gewinnt (neuere Fassung)
+            const merged = Array.from(byId.values()).filter(inWindow);
+            // Drift-Wächter: weicht der Server-Count zu stark vom zusammengeführten Bestand ab
+            // (Löschungen/Fusionen seit dem letzten Voll-Sync), lieber komplett neu laden —
+            // Charts dürfen nicht von der Tabelle abweichen. Toleranz deckt gleichzeitige Inserts.
+            const tol = Math.max(40, Math.round(serverCount * 0.01));
+            if (Math.abs(serverCount - merged.length) > tol) {
+              if (!(await runFull()) && !painted) { setCorpusError(true); setRefreshing(false); }
+            } else {
+              commit(merged);
+              void writeCorpusCache(sig, merged);
+            }
             return;
           } catch {
             if (cancelled) return;
-            if (attempt === 0) await new Promise((res) => setTimeout(res, 1200));
+            // Delta gescheitert: haben wir den Cache gemalt, bleibt er stehen (kein Fehler-UI);
+            // sonst fällt es unten auf den Voll-Load zurück.
+            if (painted) { setRefreshing(false); return; }
           }
         }
-        if (!cancelled) { setCorpusError(true); setRefreshing(false); }
+        // (3) Voll-Load (kein/zu alter Cache, erzwungen, oder Delta-Fallback ohne Cache-Paint).
+        if (!(await runFull()) && !painted) { setCorpusError(true); setRefreshing(false); }
+        else if (painted) setRefreshing(false);
       } finally {
         if (corpusLoadingRef.current === token) corpusLoadingRef.current = null;
       }
