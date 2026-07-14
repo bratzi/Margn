@@ -10,7 +10,7 @@ import { useTweenedSeries } from "@/lib/chartTween";
 import ChartStyleToggle, { type ChartStyle } from "@/components/ChartStyleToggle";
 
 type Unit = "minute" | "hour" | "day" | "week";
-type ChartMode = "publishers" | "topics";
+type ChartMode = "publishers" | "topics" | "total";
 // Eine Reihe = ein Verleger ODER ein Thema. sid/topic sagt, worauf ein Dot-Klick pinnt.
 type Series = { key: string; color: string; label: string; vals: number[]; sid?: number; topic?: string };
 const short = (n: string) => n.replace(" Online", "");
@@ -31,7 +31,14 @@ export default function RateStats() {
   const [manual, setManual] = useState<"auto" | Unit>("auto");
   const [chartMode, setChartMode] = useState<ChartMode>("publishers");
   const [timeFormat, setTimeFormat] = useState<"abs" | "rel">("rel");
-  const [chartH, setChartH] = useState(220);
+  // Höhe persistiert (gleiches Muster wie DataTable-Spaltenlayout) — sonst fällt sie bei jedem
+  // Neuladen auf den Default zurück, obwohl der Nutzer sie bewusst gezogen hat.
+  const [chartH, setChartH] = useState(() => {
+    if (typeof window === "undefined") return 220;
+    const saved = Number(localStorage.getItem("rs-chart-height"));
+    return saved >= 100 && saved <= 600 ? saved : 220;
+  });
+  useEffect(() => { try { localStorage.setItem("rs-chart-height", String(chartH)); } catch {} }, [chartH]);
   const [resizing, setResizing] = useState(false);
   const VH = chartH;
   const CH = VH - PAD_T - PAD_B;
@@ -201,6 +208,22 @@ export default function RateStats() {
     const snap = { ...snapshotOf(f as any), rangeFrom: fromIso, rangeTo: toIso };
     const match = makeMatcher(snap, f.subPats, f.kwIdSet);
     let tot = 0;
+
+    if (chartMode === "total") {
+      // Keine Aufschlüsselung nach Verleger oder Thema — EINE Linie über alle Artikel im Filter.
+      const m = new Map<string, number>();
+      for (const r of f.corpus) {
+        if (!act.has(r.source_id)) continue;
+        if (!match(r)) continue;
+        const t = axisTime(r, f.timeAxis);
+        if (!t) continue;
+        const k = truncTo(t, unit).toISOString();
+        m.set(k, (m.get(k) ?? 0) + 1);
+        tot++;
+      }
+      const ser: Series[] = [{ key: "total", color: "var(--accent)", label: "Alle Artikel", vals: buckets.map((b) => m.get(b) ?? 0) }];
+      return { series: ser, total: tot, isSightings: false };
+    }
 
     if (chartMode === "topics") {
       // Nach Thema gruppieren statt nach Quelle; Top-10-Themen farbkodiert.
@@ -683,6 +706,7 @@ export default function RateStats() {
         <div className="seg seg-xs" style={{ marginLeft: "auto" }}>
           <button className={chartMode === "publishers" ? "on" : ""} onClick={() => setChartMode("publishers")} title="Linien je Verleger">Verleger</button>
           <button className={chartMode === "topics" ? "on" : ""} onClick={() => setChartMode("topics")} title="Linien je Thema (Top 10)">Themen</button>
+          <button className={chartMode === "total" ? "on" : ""} onClick={() => setChartMode("total")} title="Eine Linie über alle Artikel, ohne Aufschlüsselung">Gesamt</button>
         </div>
         <div className="seg" style={{ marginLeft: 6 }}>
           {/* „Rel./Abs." las sich wie Prozent vs. Anzahl — gemeint ist Rate vs. Kumulation. */}

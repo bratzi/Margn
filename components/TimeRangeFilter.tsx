@@ -27,7 +27,14 @@ export default function TimeRangeFilter() {
   const f = useFilters();
   const { sources, activeArr, days, rangeIdx, setRangeIdx, trfOpen, setTrfOpen, windowDays, setWindowDays } = f;
   const N = days.length;
-  const [h, setH] = useState(168);
+  // Höhe persistiert (gleiches Muster wie DataTable-Spaltenlayout/RateStats) — sonst fällt sie
+  // bei jedem Neuladen auf den Default zurück, obwohl der Nutzer sie bewusst gezogen hat.
+  const [h, setH] = useState(() => {
+    if (typeof window === "undefined") return 168;
+    const saved = Number(localStorage.getItem("trf-height"));
+    return saved >= 96 && saved <= 440 ? saved : 168;
+  });
+  useEffect(() => { try { localStorage.setItem("trf-height", String(h)); } catch {} }, [h]);
   const [chartMode, setChartMode] = useState<ChartMode>("publishers");
   // Darstellung Säulen ↔ Kurve — frei wählbar über das Badge im Chart (wie RateStats).
   const [chartStyle, setChartStyle] = useState<ChartStyle>("bars");
