@@ -657,6 +657,22 @@ function cleanBody(body: string, url: string, title: string | null, dek: string 
     b = b.replace(/\.\s*Folgen\s+(?=(?:Redakteur|Redaktor|Autor|Korrespondent|Reporter|Volont[aä]r|Redaktionsleiter|Ressortleiter|Herausgeber|Kolumnist|Wirtschafts|Politik|Sport|Feuilleton)[a-zäöüß]*\b)/g, ". ");
   }
 
+  if (/(^|\.)spiegel\.de$/.test(host)) {
+    // "Mehr auf SPIEGEL"-Videokarussell rutscht manchmal komplett in den Artikeltext (Art. 494985:
+    // 9 Phantom-Edits binnen zwei Wochen, Wortzahl schwankte ±150 bei jedem Scan). Muster:
+    // <Schlagzeile ohne Trenner><Teaser-Satz>MM:SS<nächste Schlagzeile>… — echter Fließtext reiht
+    // nie mehrere Uhrzeit-Marken so dicht aneinander. Ab der ERSTEN von mindestens drei solchen
+    // Einheiten binnen 900 Zeichen bis zum Ende kappen (das Karussell ist immer ein Anhängsel,
+    // nie mittendrin — Zeilenumbrüche schützen echten Fließtext, [^\n] überspringt sie nicht).
+    const unit = /[^\n]{15,220}?\d{1,2}:\d{2}(?=[A-ZÄÖÜ]|$)/g;
+    const hits: number[] = [];
+    let mm: RegExpExecArray | null;
+    while ((mm = unit.exec(b)) !== null) { hits.push(mm.index); if (hits.length > 30) break; }
+    for (let i = 0; i + 2 < hits.length; i++) {
+      if (hits[i + 2] - hits[i] < 900) { b = b.slice(0, hits[i]); break; }
+    }
+  }
+
   return b.replace(/\s+/g, " ").trim();
 }
 

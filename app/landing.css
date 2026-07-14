@@ -342,11 +342,13 @@ html.lenis, html.lenis body { height: auto; }
 }
 .mg-reveal-card.is-active { opacity: 1; transform: none; pointer-events: auto; }
 .rc-preview {
-  position: relative; border-radius: 12px; border: 1px solid var(--mg-line);
+  position: relative; width: 100%; box-sizing: border-box; align-self: stretch;
+  border-radius: 12px; border: 1px solid var(--mg-line);
   background: radial-gradient(120% 140% at 0% 0%, var(--mg-accent-sub), transparent 58%), var(--mg-bg);
   min-height: 172px; display: flex; align-items: center; justify-content: center;
   padding: 22px; overflow: hidden;
 }
+.rc-body { width: 100%; box-sizing: border-box; }
 .rc-body .rc-tag { font-family: var(--mg-mono); font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--mg-accent); }
 .rc-body h3 { font-family: var(--mg-display); font-weight: 400; font-size: clamp(21px, 2.6vw, 29px); margin: 9px 0 8px; }
 .rc-body p { margin: 0; color: var(--mg-muted); font-size: 14.5px; line-height: 1.7; max-width: 52ch; }

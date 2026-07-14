@@ -143,8 +143,11 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 .brand { display: flex; align-items: center; gap: 11px; padding: 6px 8px 20px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .brand-mark { width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 21px; font-weight: 800; letter-spacing: -0.04em; color: #fff; background: var(--grad-brand); box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 38%, transparent); }
 .brand-text { display: flex; flex-direction: column; line-height: 1.12; }
-.brand-name { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
-.brand-tag { font-size: 9.5px; color: var(--faint); letter-spacing: .1em; text-transform: uppercase; margin-top: 2px; font-weight: 600; }
+/* Wortmarke wie auf der Landingpage (mg-logo): Fraunces-Serife statt System-Sans, JetBrains
+   Mono statt Sans für den Zusatz — dieselben globalen Fonts (--font-display/--font-mono-jb),
+   nur hier ohne das dortige Icon-Quadrat (das bleibt als .brand-mark fürs eingeklappte Menü). */
+.brand-name { font-family: var(--font-display), Georgia, "Times New Roman", serif; font-weight: 600; font-size: 19px; letter-spacing: -0.02em; color: var(--ink); }
+.brand-tag { font-family: var(--font-mono-jb), ui-monospace, "SF Mono", Consolas, monospace; font-size: 9.5px; color: var(--faint); letter-spacing: .16em; text-transform: uppercase; margin-top: 2px; font-weight: 500; }
 .nav-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); padding: 14px 10px 6px; font-weight: 600; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); color: var(--muted); font-size: 13.5px; font-weight: 500; cursor: pointer; transition: background .15s, color .15s; }
 .nav-item:hover { background: var(--surface-2); color: var(--ink); }
