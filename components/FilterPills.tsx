@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { topicLabel } from "@/lib/topics";
 import { useFilters } from "@/components/FilterProvider";
 
@@ -34,6 +35,21 @@ export default function FilterPills() {
   const fullRange = f.rangeIdx.from === 0 && f.rangeIdx.to === f.days.length - 1;
   if (f.pinpoint) pills.push({ id: "pin", label: `🎯 ${f.pinpoint.label}`, on: () => f.setPinpoint(null) });
   else if (!fullRange) pills.push({ id: "range", label: `📅 ${fmtDay(f.days[f.rangeIdx.from])} – ${fmtDay(f.days[f.rangeIdx.to])}`, on: () => f.setRangeIdx({ from: 0, to: f.days.length - 1 }) });
+
+  // Sticky-Offset für die Tabellen-Kopfzeile (DataTable): Topbar + diese Leiste zusammen,
+  // damit der Spaltenkopf beim Seiten-Scroll direkt darunter andockt statt sie zu
+  // überlappen. Läuft bei jeder Pill-Änderung neu (Zeilenumbruch ändert die Höhe) + Resize.
+  useEffect(() => {
+    const set = () => {
+      const tb = document.querySelector<HTMLElement>(".topbar");
+      const fp = document.querySelector<HTMLElement>(".filter-pills");
+      const h = (tb?.offsetHeight ?? 56) + (fp?.offsetHeight ?? 0);
+      document.documentElement.style.setProperty("--dt-sticky-top", `${h}px`);
+    };
+    set();
+    window.addEventListener("resize", set);
+    return () => window.removeEventListener("resize", set);
+  }, [pills.length]);
 
   if (!pills.length) return null;
   return (

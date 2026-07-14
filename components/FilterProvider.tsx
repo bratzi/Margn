@@ -660,9 +660,9 @@ export default function FilterProvider({ children }: { children: React.ReactNode
     if (!active.size) { setKeywordOpts([]); return; }
     // Bei ausgeblendetem Regional die positive Themen-Liste „alle außer regional" durchreichen
     // (die RPC kennt nur p_topics; verifiziert: DB-Topics = exakt die kanonischen Schlüssel).
-    supabase.rpc("keyword_opts_f", { p_sources: [...active], p_topics: topics.length ? topics : (hideRegional ? TOPICS_SANS_REGIONAL : null), p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo })
+    supabase.rpc("keyword_opts_f", { p_sources: [...active], p_topics: topics.length ? topics : (hideRegional ? TOPICS_SANS_REGIONAL : null), p_paywall: nn(paywall), p_author: nn(author), p_lang: nn(lang), p_from: rangeFrom, p_to: rangeTo, p_status: nn(status), p_changed: nn(changed), p_depth: nn(depth) })
       .then(({ data }) => setKeywordOpts((data ?? []).map((r: any) => ({ key: r.term, label: r.term, n: r.n }))));
-  }, [active, topics.join(","), hideRegional, paywall, author, lang, rangeFrom, rangeTo]);
+  }, [active, topics.join(","), hideRegional, paywall, author, lang, rangeFrom, rangeTo, status, changed, depth]);
 
   const toggle = (id: number) => setActive((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setAll = (on: boolean) => setActive(on ? new Set(sources.map((s) => s.id)) : new Set());

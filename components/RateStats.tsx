@@ -666,6 +666,14 @@ export default function RateStats() {
     [displayTarget],
   );
   const showDots = effDens >= 7 || nonZeroPts <= 280;
+  // Unsichtbarer Klick-/Hover-Kreis je Dot: bei dicht stehenden Buckets (kleines effDens) machte
+  // der feste r=11 (22 px Durchmesser) die Kreise BENACHBARTER Punkte überlappen — der zuletzt
+  // gezeichnete (spätester Zeit-Index, bzw. bei Themen: der mit dem kleinsten Gesamtwert, da nach
+  // Häufigkeit aufsteigend übereinandergelegt) gewann jeden Klick in der Überlappungszone, auch
+  // wenn ein ANDERER Punkt sichtbar näher am Cursor lag → Klicks pinnten den falschen Zeitpunkt/
+  // die falsche Reihe. Radius jetzt an den Bucket-Abstand gekoppelt (nie mehr als die halbe
+  // Lücke zum Nachbarn), Untergrenze 3 px hält ihn auf Touch weiter treffbar.
+  const dotHitR = Math.max(3, Math.min(11, effDens / 2 - 0.5));
 
   return (
     <>
@@ -846,7 +854,7 @@ export default function RateStats() {
                       <circle cx={X(i)} cy={Y(v)} r={isHover ? 5.5 : 3.4} fill={s.color}
                         stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
                         className="rate-dot" />
-                      <circle cx={X(i)} cy={Y(v)} r="11" fill="transparent" style={{ cursor: presence ? "default" : "pointer" }}
+                      <circle cx={X(i)} cy={Y(v)} r={dotHitR} fill="transparent" style={{ cursor: presence ? "default" : "pointer" }}
                         onMouseEnter={() => !panRef.current && setHoverDot({ key: s.key, idx: i, x: X(i), y: Y(v) })}
                         onMouseLeave={() => setHoverDot((h) => (h?.key === s.key && h?.idx === i ? null : h))}
                         onClick={() => { if (!didPanRef.current && !presence) pinDot(s, i); }} />

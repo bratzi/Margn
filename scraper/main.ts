@@ -542,6 +542,13 @@ function cleanBody(body: string, url: string, title: string | null, dek: string 
     b = b.slice(0, i) + " " + b.slice(j);
   }
 
+  // Social-Embed-Consent-Platzhalter (X/Twitter/Instagram/TikTok/YouTube …): erscheint/
+  // verschwindet je Render je nach Cookie-Zustimmungsstatus → Phantom-Edits. Verlagsübergreifend
+  // (Standard-CMP-Text), ursprünglich nur für Bild entdeckt (Art. 1084636) aber NICHT
+  // Bild-spezifisch — gehört vor die Host-Verzweigung, sonst bekommen FAZ/n-tv/Tagesschau/
+  // Spiegel dieselben Phantom-Edits, sobald ein Artikel dort einen Social-Embed hat.
+  b = b.replace(/An dieser Stelle findest du Inhalte aus [\s\S]{0,700}?Weitere Infos finden Sie hier\.?/g, " ");
+
   if (/(^|\.)bild\.de$/.test(host)) {
     // Kopf-Chrome: Bild klebt je Render mal <Überschrift><Bild-Caption>Foto: <Credit><DD.MM.YYYY
     // - HH:MM Uhr> VOR den Lauftext → reine Phantom-Edits, deren Diff komplett versiegelt und dann
@@ -564,9 +571,6 @@ function cleanBody(body: string, url: string, title: string | null, dek: string 
     // Bild klebt die Caption an den Satz davor („BesucherFoto:"), da gibt es keine Wortgrenze.
     b = b.replace(/Foto:\s*Getty Images(?:\s+via\s+AFP)?/g, " ")
          .replace(/Foto:\s*[^/]{1,60}\/ZUMA\/[\w.]{1,40}?\.com/g, " ");
-    // Social-Embed-Consent-Platzhalter (X/Twitter/Instagram …): erscheint/verschwindet je Render
-    // → Phantom-Edits (Art. 1084636). Fester Start- + Endmarker, Länge gedeckelt.
-    b = b.replace(/An dieser Stelle findest du Inhalte aus [\s\S]{0,700}?Weitere Infos finden Sie hier\.?/g, " ");
     // Rotierendes Kaufberater-/Deals-Widget hinter "+++" (Prime-Day-/Commerce-Seiten, Art.
     // 265266: die Produktliste "<Produkt>10,29 EUR<Produkt>249,95 EUR…" wird je Scan ein-/
     // ausgeblendet → ±45-W-Pendel). Den Preis-Lauf entfernen, das "+++" selbst bleibt (= die

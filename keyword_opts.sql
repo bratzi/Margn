@@ -23,6 +23,16 @@
 -- statt nach term (text) und keywords erst für die 80 Sieger per PK nachschlagen. (c) sources
 -- nur noch per EXISTS, wenn p_lang gesetzt ist. Ergebnis identisch (verifiziert per EXCEPT über
 -- zwei Parameterkombis), warm 100 -> 60 ms, End-to-End über anon 200–625 ms statt Timeout.
+--
+-- Fix 2026-07-15: p_status/p_changed/p_depth ergänzt (scan_count/revision_count/word_count —
+-- alles Spalten von articles, die die arts-CTE ohnehin schon scannt, also OHNE neuen Join/Index).
+-- Vorher zeigte die Zahl neben jedem Keyword-Pill (f.keywordOpts) einen anderen Filtersatz als
+-- die Tabelle: die RPC kannte nur sources/topics/paywall/author/lang/Zeitraum, NICHT „Erfassung"/
+-- „Nachträglich geändert"/„Artikel-Tiefe" — sobald einer dieser drei aktiv war, wich die Pill-Zahl
+-- von der tatsächlichen Trefferzahl nach Klick ab. linkState/subcats/Volltextsuche bleiben
+-- bewusst außen vor (brauchen pages-Join bzw. Textsuche → teurer, gleiches Timeout-Risiko wie
+-- oben dokumentiert) — bei aktivem Online-Bestand- oder Rubrik-Filter kann die Pill-Zahl also
+-- weiterhin abweichen.
 
 create or replace function public.keyword_opts_f(
   p_sources integer[]   default null,
@@ -31,7 +41,10 @@ create or replace function public.keyword_opts_f(
   p_author  text        default null,
   p_lang    text        default null,
   p_from    timestamptz default null,
-  p_to      timestamptz default null
+  p_to      timestamptz default null,
+  p_status  text        default null,
+  p_changed text        default null,
+  p_depth   text        default null
 ) returns table(term text, n int)
 language sql stable
 set search_path to 'public', 'pg_temp'
@@ -49,6 +62,11 @@ as $func$
       and (p_lang    is null or exists (select 1 from sources s where s.id = a.source_id and s.language = p_lang))
       and (p_from    is null or a.published_at >= p_from)
       and (p_to      is null or a.published_at <= p_to)
+      and (p_status  is null or (p_status='new' and coalesce(a.scan_count,1) <= 1) or (p_status='rescanned' and coalesce(a.scan_count,1) >= 2))
+      and (p_changed is null or (p_changed='yes' and coalesce(a.revision_count,0) >= 1) or (p_changed='no' and coalesce(a.revision_count,0) = 0))
+      and (p_depth   is null or (p_depth='kurz' and a.word_count > 0 and a.word_count < 300)
+                             or (p_depth='mittel' and a.word_count >= 300 and a.word_count <= 900)
+                             or (p_depth='lang' and a.word_count > 900))
   ),
   -- Erst nach keyword_id (int) gruppieren und auf 80 kappen; keywords.term wird NUR für die
   -- Sieger nachgeschlagen. keywords.term ist UNIQUE -> Gruppierung nach id == nach term.
@@ -65,7 +83,7 @@ as $func$
   order by agg.n desc, k.term;
 $func$;
 
-grant execute on function public.keyword_opts_f(integer[], text[], text, text, text, timestamptz, timestamptz)
+grant execute on function public.keyword_opts_f(integer[], text[], text, text, text, timestamptz, timestamptz, text, text, text)
   to anon, authenticated;
 
 -- Deckungs-Indizes für den arts-CTE: liefern (source_id, published_at, id) direkt aus dem Index,

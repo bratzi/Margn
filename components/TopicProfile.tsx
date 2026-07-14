@@ -305,11 +305,11 @@ export default function TopicProfile() {
           <div className="desc">Paywall-Quote — welche Inhalte gelten als zahlungswürdig?</div>
           <div className="bars">
             {[...topicStats].sort((a, b) => b.pwSh - a.pwSh).map((x) => (
-              <div className="barrow" key={x.topic}>
+              <button key={x.topic} className={`barrow barrow-btn ${f.topics.includes(x.topic) ? "sel" : ""}`} onClick={() => f.toggleTopic(x.topic)} title="Klick filtert dieses Thema">
                 <span className="lbl">{topicLabel(x.topic)}</span>
                 <span className="track"><i style={{ width: `${Math.round(x.pwSh * 100)}%`, background: "var(--red)" }} /></span>
                 <span className="val tnum" title={`${x.n.toLocaleString("de-DE")} Artikel`}>{pct(x.pwSh)}</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -318,11 +318,11 @@ export default function TopicProfile() {
           <div className="desc">Anteil namentlich gekennzeichneter Artikel</div>
           <div className="bars">
             {[...topicStats].filter((x) => x.namedSh !== null).sort((a, b) => (b.namedSh! - a.namedSh!)).map((x) => (
-              <div className="barrow" key={x.topic}>
+              <button key={x.topic} className={`barrow barrow-btn ${f.topics.includes(x.topic) ? "sel" : ""}`} onClick={() => f.toggleTopic(x.topic)} title="Klick filtert dieses Thema">
                 <span className="lbl">{topicLabel(x.topic)}</span>
                 <span className="track"><i style={{ width: `${Math.round(x.namedSh! * 100)}%`, background: "var(--green)" }} /></span>
                 <span className="val tnum" title={`${x.n.toLocaleString("de-DE")} Artikel`}>{pct(x.namedSh!)}</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -331,11 +331,11 @@ export default function TopicProfile() {
           <div className="desc">Ø Wortzahl — wo wird ausführlich, wo knapp berichtet?</div>
           <div className="bars">
             {[...topicStats].filter((x) => x.avgWords !== null).sort((a, b) => (b.avgWords! - a.avgWords!)).map((x) => (
-              <div className="barrow" key={x.topic}>
+              <button key={x.topic} className={`barrow barrow-btn ${f.topics.includes(x.topic) ? "sel" : ""}`} onClick={() => f.toggleTopic(x.topic)} title="Klick filtert dieses Thema">
                 <span className="lbl">{topicLabel(x.topic)}</span>
                 <span className="track"><i style={{ width: `${Math.round((x.avgWords! / maxWords) * 100)}%`, background: "var(--teal)" }} /></span>
                 <span className="val tnum" title={`${x.n.toLocaleString("de-DE")} Artikel · ≈ ${Math.round(x.avgWords! / 200)} min`}>{x.avgWords!.toLocaleString("de-DE")}</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>

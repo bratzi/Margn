@@ -92,7 +92,11 @@ export default function ArticleDetail({ id }: { id: number }) {
         // Crawl-Rhythmus zählt, nicht der einer anderen. Gegen „jetzt" zu messen wäre falsch,
         // sobald der Crawler pausiert (dann wäre alles „raus"). Toleranz quellenspezifisch
         // (Discovery-Abdeckung: n-tv stündlich komplett, Tagesschau/FAZ nur gesampelt).
+        // GLEICHE Seitentyp-Einschränkung wie der Dashboard-Corpus (FilterProvider/onlineCutsFrom) —
+        // sonst driftet dieser Cut von dem im Rest der App auseinander, weil Hub-/Video-/Werbe-
+        // Seiten hier mitzählen würden, dort aber nicht (ALLOWED_PTYPES). Eine Wahrheit.
         supabase.from("page_overview").select("link_seen").eq("source_id", (data as Detail).source_id)
+          .in("ptype", ALLOWED_PTYPES)
           .order("link_seen", { ascending: false, nullsFirst: false }).limit(1),
       ]);
       const newestLink = ((cut.data ?? []) as any[])[0]?.link_seen as string | undefined;

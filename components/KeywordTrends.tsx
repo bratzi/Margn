@@ -120,7 +120,7 @@ export default function KeywordTrends() {
   // Zeitachse, Zeitraum). Keyword-Filter selbst greift hier NICHT — diese Seite vergleicht
   // ja alle Schlagwörter. Ein Kalt-Cache-Timeout wird einmal wiederholt.
   const nn = (v: string) => (v === "all" ? null : v);
-  const fetchKey = [f.activeArr.join(","), f.rangeFrom, f.rangeTo, f.timeAxis, f.topics.join(","), f.hideRegional, f.paywall, f.author, f.lang].join("|");
+  const fetchKey = [f.activeArr.join(","), f.rangeFrom, f.rangeTo, f.timeAxis, f.topics.join(","), f.hideRegional, f.paywall, f.author, f.lang, f.status, f.changed, f.depth].join("|");
   useEffect(() => {
     if (!f.activeArr.length) { setRaw([]); setLoading(false); return; }
     let cancelled = false;
@@ -130,6 +130,7 @@ export default function KeywordTrends() {
       // Ausgeblendetes Regional: positive Liste „alle außer regional" (die RPC kennt nur p_topics).
       p_topics: f.topics.length ? f.topics : (f.hideRegional ? TOPICS_SANS_REGIONAL : null),
       p_paywall: nn(f.paywall), p_author: nn(f.author), p_lang: nn(f.lang), p_limit: 300,
+      p_status: nn(f.status), p_changed: nn(f.changed), p_depth: nn(f.depth),
     };
     const run = (attempt: number) => {
       supabase.rpc("keyword_trends", params).then(({ data, error }) => {
