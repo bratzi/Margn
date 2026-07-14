@@ -62,6 +62,14 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
   const dragCol = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  // Kopf und Körper sind ZWEI Tabellen (gleiche <colgroup> hält die Spalten in Deckung):
+  // position:sticky funktioniert nicht, wenn ein Vorfahre horizontal scrollt (überflow-x:auto
+  // macht ihn zum "Scroll Container" — sticky verankert dann am Container statt am Viewport,
+  // ganz unabhängig von overflow-y). Der Körper bleibt der einzige horizontal scrollbare
+  // Bereich; der Kopf sitzt AUSSERHALB davon, sticky, und übernimmt per JS nur den scrollLeft.
+  const bodyScrollRef = useRef<HTMLDivElement | null>(null);
+  const headScrollRef = useRef<HTMLDivElement | null>(null);
+  const syncHeadScroll = () => { if (bodyScrollRef.current && headScrollRef.current) headScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft; };
 
   // Layout (Reihenfolge/versteckt/gepinnt/Breiten) UND Ansicht (Sortierung/Gruppierung/
   // Spalten-Filter) aus localStorage laden + speichern — soll in der nächsten Session
@@ -241,8 +249,9 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
         <button className="dt-tbtn" onClick={exportCsv} title="Sichtbare Sicht als CSV">⭳ CSV</button>
         <span className="dt-count">{view.length} Zeilen{groups ? ` · ${groups.length} Gruppen` : ""}{hasFooter ? " · Σ aggregiert diese Seite" : ""}</span>
       </div>
-      <div className="dt-scroll">
+      <div className="dt-head-scroll" ref={headScrollRef}>
         <table className={`dt${fit ? " dt-fit" : ""}`} style={fit ? undefined : { minWidth }}>
+          <Colgroup cols={orderedCols} colW={colW} />
           <thead>
             <tr>
               <th className="dt-num">#</th>
@@ -269,6 +278,11 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
               </tr>
             )}
           </thead>
+        </table>
+      </div>
+      <div className="dt-scroll" ref={bodyScrollRef} onScroll={syncHeadScroll}>
+        <table className={`dt${fit ? " dt-fit" : ""}`} style={fit ? undefined : { minWidth }}>
+          <Colgroup cols={orderedCols} colW={colW} />
           <tbody>
             {!groups && view.map((r) => <tr key={rowKey(r)} {...rowProps(r)}><Cells r={r} /></tr>)}
             {groups && groups.map(([g, rs]) => (
@@ -316,6 +330,19 @@ export default function DataTable<T>({ columns, rows, rowKey, minWidth = 1100, r
         );
       })()}
     </div>
+  );
+}
+
+// Identische Spaltenbreiten in Kopf- UND Körper-Tabelle (zwei getrennte <table>-Elemente,
+// s. Kommentar bei bodyScrollRef/headScrollRef) — ohne <colgroup> würde table-layout:fixed
+// die Breite je Tabelle unabhängig aus deren eigener erster Zeile ableiten und die Spalten
+// liefen auseinander, sobald der Körper keine <th> mehr hat.
+function Colgroup<T>({ cols, colW }: { cols: Col<T>[]; colW: (c: Col<T>) => number }) {
+  return (
+    <colgroup>
+      <col style={{ width: 44 }} />
+      {cols.map((c) => <col key={c.key} style={{ width: colW(c) }} />)}
+    </colgroup>
   );
 }
 
