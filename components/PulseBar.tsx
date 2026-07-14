@@ -164,30 +164,30 @@ export default function PulseBar() {
         </div>
 
         {/* Paywall */}
-        <div className="pulse-card panel">
+        <button className="pulse-card panel pulse-click" onClick={() => f.setPaywall(f.paywall === "yes" ? "all" : "yes")} title="Klick filtert auf Paywall-Artikel">
           <div className="pulse-k">Hinter Paywall</div>
           <div className="pulse-v" style={{ color: m.pwPct > 40 ? "var(--red)" : undefined }}>{Math.round(animPw)}%</div>
           <div className="pulse-meter"><i style={{ width: `${m.pwPct}%`, background: "var(--red)" }} /></div>
           <div className="pulse-sub">{m.pwPct === 0 ? "frei zugänglich" : `${(100 - m.pwPct)}% frei lesbar`}</div>
-        </div>
+        </button>
 
         {/* Autoren-Transparenz */}
-        <div className="pulse-card panel">
+        <button className="pulse-card panel pulse-click" onClick={() => f.setAuthor(f.author === "named" ? "all" : "named")} title="Klick filtert auf namentliche Autoren">
           <div className="pulse-k">Namentliche Autoren</div>
           <div className="pulse-v" style={{ color: "var(--green)" }}>{Math.round(animNamed)}%</div>
           <div className="pulse-meter"><i style={{ width: `${m.namedPct}%`, background: "var(--green)" }} /></div>
           <div className="pulse-sub">Rest: Redaktion / Agentur</div>
-        </div>
+        </button>
 
         {/* Stille Änderungen — das Alleinstellungsmerkmal */}
-        <div className="pulse-card panel">
+        <button className="pulse-card panel pulse-click" onClick={() => f.setChanged(f.changed === "yes" ? "all" : "yes")} title="Klick filtert auf nachträglich geänderte Artikel">
           <div className="pulse-k">Nachträglich geändert</div>
           <div className="pulse-v" style={{ color: m.revPct > 0 ? "var(--amber)" : undefined }}>{Math.round(animRev)}%</div>
           <div className="pulse-meter"><i style={{ width: `${Math.min(100, m.revPct)}%`, background: "var(--amber)" }} /></div>
           <div className="pulse-sub">{m.edits.toLocaleString("de-DE")} Überschriften-Edits erfasst</div>
-        </div>
+        </button>
 
-        {/* Artikel-Tiefe */}
+        {/* Artikel-Tiefe — Ø-Wert, keine 1:1-Filterstufe → nicht klickbar */}
         <div className="pulse-card panel">
           <div className="pulse-k">Ø Artikel-Tiefe</div>
           <div className="pulse-v">{Math.round(animWords).toLocaleString("de-DE")}<span className="pulse-unit"> Wörter</span></div>
@@ -201,12 +201,12 @@ export default function PulseBar() {
           <div className="pulse-sub">erste Sichtung im Zeitraum</div>
           <Spark vals={m.gains.spark} color="var(--green)" />
         </div>
-        <div className="pulse-card panel pulse-wide" title="Letzte Sichtung liegt im Zeitraum — seither nicht mehr verlinkt angetroffen">
+        <button className="pulse-card panel pulse-wide pulse-click" onClick={() => f.setLinkState(f.linkState === "gone" ? "all" : "gone")} title="Klick filtert auf Rausgeflogen (Online-Bestand)">
           <div className="pulse-k">Rausgeflogen</div>
           <div className="pulse-v" style={{ color: "var(--red)" }}>{Math.round(animLosses).toLocaleString("de-DE")}</div>
           <div className="pulse-sub">seither nicht mehr gesehen</div>
           <Spark vals={m.losses.spark} color="var(--red)" />
-        </div>
+        </button>
 
         {/* Aktivster Publizist */}
         {m.topOutlet && (
