@@ -72,7 +72,6 @@ export default function Sidebar() {
     <aside className={`sidebar ${drawer ? "drawer-open" : ""} ${collapsed ? "is-collapsed" : ""}`}>
       <div className="brand-row">
         <Link href="/articles" className="brand" aria-label="margn — Medienobservatorium" title="margn — Medienobservatorium">
-          <span className="brand-mark">m</span>
           <span className="brand-text">
             <span className="brand-name">margn</span>
             <span className="brand-tag">Medienobservatorium</span>
