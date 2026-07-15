@@ -135,6 +135,14 @@ export default function ArticleDashboard() {
       value: (r) => ((r.scan_count ?? 1) <= 1 ? (r.last_seen ?? r.discovered_at) : r.discovered_at) ?? "",
       render: (r) => { const ts = (r.scan_count ?? 1) <= 1 ? (r.last_seen ?? r.discovered_at) : r.discovered_at; return <span className="mono faint">{fmtDT(ts)}</span>; } },
     { key: "last_seen", label: "Letzter Scan", width: 122, value: (r) => r.last_seen ?? "", render: (r) => <span className="mono faint">{fmtDT(r.last_seen)}</span> },
+    // Tage zwischen Erstem und Letztem Scan — gleiche effektive Erster-Scan-Definition wie die
+    // Spalte "Erster Scan" (bei scan_count<=1 zählt last_seen als Start, sonst wären es immer
+    // 0 Tage trotz eines echten Sitemap-Prefill-Versatzes von nur ~1 Min). Gleiche Rundung wie
+    // ScanTimeline (Math.round, 86.400.000 ms/Tag).
+    { key: "scan_span", label: "Beobachtet", width: 96, align: "right",
+      value: (r) => { const first = (r.scan_count ?? 1) <= 1 ? (r.last_seen ?? r.discovered_at) : r.discovered_at; return first && r.last_seen ? Math.round((Date.parse(r.last_seen) - Date.parse(first)) / 86400000) : 0; },
+      render: (r) => { const first = (r.scan_count ?? 1) <= 1 ? (r.last_seen ?? r.discovered_at) : r.discovered_at; if (!first || !r.last_seen) return <span className="faint">—</span>; const days = Math.round((Date.parse(r.last_seen) - Date.parse(first)) / 86400000); return <span className="faint">{days} T</span>; },
+      agg: "avg", aggFormat: (n) => <span title="Ø Tage zwischen erstem und letztem Scan">ø {n} T</span> },
     { key: "outlet", label: "Quelle", width: 120, value: (r) => r.outlet, render: (r) => <>{r.outlet} <span className="cc">{r.country}</span></>,
       agg: (rs) => { const u = new Set(rs.map((r) => r.outlet)).size; return <span title="verschiedene Quellen auf dieser Seite">{u} Quellen</span>; } },
     { key: "ptype", label: "Typ", width: 96, value: (r) => PTYPE[r.ptype]?.l ?? r.ptype, render: (r) => <span className={`badge ${PTYPE[r.ptype]?.c ?? "neutral"}`}>{PTYPE[r.ptype]?.l ?? r.ptype}</span>,
