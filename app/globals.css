@@ -145,7 +145,11 @@ body, .panel, .card, .kpi, .seg, select, .pager button, thead th, tbody td, .tag
 /* Wortmarke wie auf der Landingpage (mg-logo): Fraunces-Serife statt System-Sans, JetBrains
    Mono statt Sans für den Zusatz — dieselben globalen Fonts (--font-display/--font-mono-jb).
    Kein Icon-Quadrat mehr (wie auf der Landingpage) — der Schriftzug IST das Logo. */
-.brand-name { font-family: var(--font-display), Georgia, "Times New Roman", serif; font-weight: 600; font-size: 22px; letter-spacing: -0.02em; color: var(--ink); }
+/* 44px ist nicht beliebig: bei dieser Groesse ist der Schriftzug exakt 137px breit — also
+   buendig mit der Unterzeile "MEDIENOBSERVATORIUM" darunter. Wortmarke und Zusatz bilden
+   dadurch einen sauber abschliessenden Block, statt dass der Schriftzug im Sidebar-Kopf
+   verloren wirkt. Mobil/kollabiert wird die Groesse eigens ueberschrieben. */
+.brand-name { font-family: var(--font-display), Georgia, "Times New Roman", serif; font-weight: 600; font-size: 44px; letter-spacing: -0.02em; color: var(--ink); }
 .brand-tag { font-family: var(--font-mono-jb), ui-monospace, "SF Mono", Consolas, monospace; font-size: 9.5px; color: var(--faint); letter-spacing: .16em; text-transform: uppercase; margin-top: 2px; font-weight: 500; }
 .nav-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); padding: 14px 10px 6px; font-weight: 600; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); color: var(--muted); font-size: 13.5px; font-weight: 500; cursor: pointer; transition: background .15s, color .15s; }
@@ -1054,7 +1058,9 @@ table.dt.dt-fit { width: max-content; }
   .side-logout button span { display: none; }
   .brand-row { min-width: 0; flex-shrink: 1; }
   .brand-row .brand { min-width: 0; flex-shrink: 1; }
-  .brand-name { overflow: hidden; text-overflow: ellipsis; }
+  /* Die grosse Desktop-Wortmarke (44px) wuerde die einzeilige Topbar sprengen — hier zurueck
+     auf die alte Groesse; <=560px verkleinert weiter auf 16px. */
+  .brand-name { overflow: hidden; text-overflow: ellipsis; font-size: 22px; }
   .filter-toggle:hover { border-color: var(--accent); }
   .filter-toggle-badge {
     display: inline-flex; align-items: center; justify-content: center;
@@ -1322,11 +1328,11 @@ a.art-title:hover { color: var(--accent); text-decoration: underline; }
 
 /* ---------- Sidebar einklappbar (Desktop) ---------- */
 .brand-row { display: flex; align-items: center; gap: 6px; }
-/* Ohne Icon-Box zieht .brand nicht mehr auf volle Breite (flex:1 ließ den Schriftzug sonst
-   links kleben und den Button an den ausgestreckten rechten Rand drücken — genauso sichtbar
-   viel Leerraum wie zuvor). Button sitzt jetzt direkt neben dem Schriftzug (Reihen-gap reicht),
-   überschüssiger Platz bleibt unauffällig rechts von BEIDEN statt sie auseinanderzuziehen. */
-.brand-row .brand { min-width: 0; flex-shrink: 0; }
+/* Der Einklapp-Button gehört in die rechte Ecke, NICHT an den Schriftzug geschoben (er ist ein
+   Bedienelement der Leiste, kein Teil der Marke). .brand füllt daher die Zeile und drückt den
+   Button an den Rand. Der Leerraum dazwischen war nie das eigentliche Problem — der Schriftzug
+   war schlicht zu klein für den Kopf; das löst jetzt die Schriftgröße (siehe .brand-name). */
+.brand-row .brand { flex: 1 1 auto; min-width: 0; }
 .sb-collapse-btn { flex-shrink: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--muted); cursor: pointer; transition: all .14s; }
 .sb-collapse-btn:hover { border-color: var(--accent); color: var(--accent); }
