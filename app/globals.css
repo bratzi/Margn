@@ -746,7 +746,16 @@ table.dt.dt-fit { width: max-content; }
 .radar-spoke { stroke: var(--line); stroke-width: 1; }
 .radar-area { fill: color-mix(in srgb, var(--accent) 24%, transparent); stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
 .radar-dot { fill: var(--accent); }
+/* Vergleichsform: typischer Artikel der Quelle — gedämpft, gestrichelt, DAHINTER (abgelesen wird die Abweichung) */
+.radar-ref { fill: color-mix(in srgb, var(--muted) 12%, transparent); stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 3 3; stroke-linejoin: round; }
 .radar-lbl { fill: var(--muted); font-size: 10px; font-weight: 600; }
+.radar-key { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 2px 0 12px; }
+.rk { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); }
+.rk i { width: 14px; height: 0; border-top-width: 2px; border-top-style: solid; }
+.rk.this i { border-top-color: var(--accent); }
+.rk.peer i { border-top-color: var(--muted); border-top-style: dashed; }
+.radar-leg-ref { position: absolute; top: 0; width: 2px; height: 100%; background: var(--muted); transform: translateX(-50%); opacity: .85; z-index: 1; }
+.radar-leg-bar { position: relative; }
 .radar-legend { display: flex; flex-direction: column; gap: 9px; }
 .radar-leg { display: grid; grid-template-columns: 64px auto; grid-template-rows: auto auto; column-gap: 10px; align-items: center; }
 .radar-leg-bar { grid-row: 1 / 3; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; border: 1px solid var(--line); }
@@ -755,6 +764,27 @@ table.dt.dt-fit { width: max-content; }
 .radar-leg-hint { font-size: 11px; color: var(--faint); grid-column: 2; }
 
 .pctl-rarity { margin: 12px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); padding: 10px 12px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+
+/* Online-Bestand: EIN Block — Status, Grundlage, dann die klickbaren Fundstellen zum Nachschauen */
+.ob { display: flex; flex-direction: column; gap: 0; }
+.ob-none { font-size: 13px; color: var(--faint); }
+.ob-head { display: flex; align-items: center; gap: 8px; }
+.ob-proof { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--green);
+  padding: 2px 7px; border-radius: 999px; background: var(--green-sub); border: 1px solid color-mix(in srgb, var(--green) 34%, transparent); }
+.ob-basis { margin: 10px 0 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.ob-refs { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ob-ref { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+.ob-ref-link { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; font-size: 12.5px; }
+.ob-ref-link:hover { color: var(--accent); }
+.ob-ref-link > svg { color: var(--faint); flex-shrink: 0; }
+.ob-ref-kind { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line-2); color: var(--muted); }
+.ob-ref-kind.home { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 34%, transparent); }
+.ob-ref-kind.section { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 34%, transparent); }
+.ob-ref-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-ref-time { flex-shrink: 0; font-size: 11px; color: var(--faint); white-space: nowrap; }
 .pctl-rarity b { color: var(--ink); }
 .back { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; margin-bottom: 20px; cursor: pointer; transition: color .15s; }
 .back:hover { color: var(--accent); }
@@ -913,6 +943,19 @@ table.dt.dt-fit { width: max-content; }
 .chist-chip.add { color: var(--green); border-color: color-mix(in srgb, var(--green) 42%, transparent); }
 .chist-chip.del { color: var(--red); border-color: color-mix(in srgb, var(--red) 42%, transparent); }
 .chist-chip.date { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+/* Einstufung einer Änderung: WAS für eine Art Korrektur (Absicht), mit nachprüfbarem Grund */
+.chist-class { margin-top: 11px; }
+.cls-lead { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); }
+.cls-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 9px; }
+.cls-chip { font-size: 11px; font-weight: 650; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid var(--line-2); color: var(--muted); background: var(--surface-2); white-space: nowrap; }
+.cls-chip.fact { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-sub); }
+.cls-chip.hedge { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 40%, transparent); background: var(--teal-sub); }
+.cls-chip.heat { color: var(--red); border-color: color-mix(in srgb, var(--red) 42%, transparent); background: var(--red-sub); }
+.cls-chip.cool { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, transparent); background: var(--accent-sub); }
+.cls-chip.grow { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); background: var(--green-sub); }
+.cls-chip.cut { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 42%, transparent); background: var(--amber-sub); }
+.cls-why { margin: 7px 0 0; font-size: 12px; line-height: 1.5; color: var(--faint); }
 .chist-date { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding: 9px 13px; border-radius: 8px;
   font-size: 13px; line-height: 1.55; color: var(--muted); background: var(--accent-sub);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }

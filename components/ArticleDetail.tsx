@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { Lock, LockOpen, Video, FileText, Clock, ArrowLeft, External, Plus, Pencil, Folder, Link2, Link2Off } from "@/components/icons";
 import { topicLabel } from "@/lib/topics";
 import { ALLOWED_PTYPES, onlineToleranceMs } from "@/lib/filterCorpus";
+import { classifySnapshot } from "@/lib/editClass";
 import ScanTimeline from "@/components/ScanTimeline";
 import ExtLink from "@/components/ExtLink";
 
@@ -27,6 +28,10 @@ type Change = { old?: string; new?: string };
 type Pctl = { key: string; label: string; verb: string; pct: number; n: number; selfVal: number; median: number | null; cohort?: string };
 type Neighbor = { articleId: number; title: string | null; outlet: string; country: string | null; shared: string[]; cross: boolean };
 type MetaEdit = { field: string; old: string | null; new: string | null };
+// Median-Werte der Quelle für den Radar-Schatten (roh, gleich normalisiert wie der Artikel).
+type PeerRadar = { wc: number; rev: number; lagH: number; visD: number; extShare: number; depth: number | null };
+// Eine Fundstelle: wo der Artikel zuletzt verlinkt geführt wurde.
+type LinkRef = { u: string; k: "home" | "section" | "feed" | "sitemap"; t: string };
 type Snapshot = { id: number; captured_at: string; change_kind: string; title_old: string | null; title_new: string | null; added: string | null; added_count: number; removed_count: number; word_delta: number; pubdate_old: string | null; pubdate_new: string | null; changes: Change[] | null; meta_edits: MetaEdit[] | null };
 
 const LANG: Record<string, string> = { de: "Deutsch", fr: "Français", en: "English" };
@@ -76,6 +81,8 @@ export default function ArticleDetail({ id }: { id: number }) {
   const [editedShare, setEditedShare] = useState<number | null>(null); // Anteil bearbeiteter Artikel der Quelle
   const [neighbors, setNeighbors] = useState<Neighbor[] | null>(null);
   const [onlineCut, setOnlineCut] = useState<string | null>(null);
+  const [peerRadar, setPeerRadar] = useState<PeerRadar | null>(null); // Median-Artikel der Quelle (Radar-Schatten)
+  const [linkRefs, setLinkRefs] = useState<LinkRef[] | null>(null);   // Fundstellen: wo ist er verlinkt
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -108,54 +115,44 @@ export default function ArticleDetail({ id }: { id: number }) {
       setCategories(((cat.data ?? []) as any[]).map((r) => r.categories?.name).filter(Boolean));
       setSnaps((sn.data ?? []) as Snapshot[]);
       setLoading(false);
+      // Fundstellen separat (kleine RPC, liefert linked_from jsonb). Fehlt die RPC/Spalte noch,
+      // bleibt der Block leer statt zu brechen — die Daten füllen sich mit den nächsten Crawls.
+      supabase.rpc("article_link_refs", { p_article_id: id }).then(({ data }) => {
+        const refs = Array.isArray(data) ? data : [];
+        setLinkRefs(refs.filter((r: any) => r && r.u) as LinkRef[]);
+      }, () => setLinkRefs([]));
     })();
   }, [id]);
 
-  // Einordnung gegen Peers (gleiche Quelle / gleiches Thema). Statt vieler COUNT-Round-Trips je
-  // EINE Abfrage je Vergleichsraum (die Peer-Mengen sind klein) → Perzentil + Median client-seitig.
-  // WICHTIG (Fix): Die Bearbeitungs-Häufigkeit wird NICHT gegen ALLE Artikel verglichen — die
-  // meisten haben 0 Änderungen, jeder bearbeitete landete so bei ~100 %. Stattdessen Perzentil
-  // INNERHALB der bearbeiteten Artikel (revision_count ≥ 1) + Median, plus Seltenheits-Quote.
+  // Einordnung + Radar-Schatten in EINEM Server-Aufruf (RPC article_context). Vorher zog die Seite
+  // je ~30 KB Peer-Zeilen (source + topic) und rechnete Perzentil/Median client-seitig — doppelt
+  // teuer UND falsch: PostgREST deckelte serverseitig bei 1.000 UNGEORDNETEN Zeilen, die Statistik
+  // lief also auf einer willkürlichen Scheibe. Die RPC rechnet über ALLE Peers (percentile_cont)
+  // und liefert ~300 Byte: Perzentile für die Einordnung + Median-Rohwerte für den Radar-Schatten.
   useEffect(() => {
     if (!a) return;
     let cancelled = false;
     (async () => {
-      const wc = a.word_count, rc = a.revision_count ?? 0, sid = a.source_id, topic = a.topic;
-      const median = (arr: number[]): number | null => {
-        if (arr.length < 4) return null;
-        const s = [...arr].sort((x, y) => x - y); const m = Math.floor(s.length / 2);
-        return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
-      };
-      // Anteil der Peers strikt unter v. Deckel bei 99 %: der Artikel selbst steckt in arr, kann also
-      // nie „länger als 100 %" sein (das las sich absurd) — und die abgeleiteten Radar-Achsen maxen
-      // damit nicht mehr exakt auf den Außenring aus.
-      const pctBelow = (arr: number[], v: number) => arr.length ? Math.min(99, Math.round((arr.filter((x) => x < v).length / arr.length) * 100)) : 0;
-
-      // Quelle: Wortzahl + Revisionen in EINER Abfrage.
-      const { data: srcRows } = await supabase.from("page_overview")
-        .select("word_count,revision_count").eq("source_id", sid).in("ptype", ALLOWED_PTYPES).not("word_count", "is", null).limit(3000);
-      const src = (srcRows ?? []) as { word_count: number | null; revision_count: number | null }[];
-      const srcWc = src.map((r) => r.word_count).filter((n): n is number => n != null);
-      const srcEdited = src.map((r) => r.revision_count ?? 0).filter((n) => n >= 1);
-
-      // Thema: nur Wortzahl, nur falls vorhanden.
-      let topicWc: number[] = [];
-      if (topic) {
-        const { data: tRows } = await supabase.from("page_overview")
-          .select("word_count").eq("topic", topic).in("ptype", ALLOWED_PTYPES).not("word_count", "is", null).limit(3000);
-        topicWc = ((tRows ?? []) as any[]).map((r) => r.word_count).filter((n) => n != null);
-      }
+      const { data, error } = await supabase.rpc("article_context", {
+        p_article_id: a.id, p_source_id: a.source_id, p_topic: a.topic,
+      });
+      if (cancelled || error || !data) { if (!cancelled && error) { setPctls([]); } return; }
+      const d = (Array.isArray(data) ? data[0] : data) as any;
 
       const res: Pctl[] = [];
-      if (wc != null && srcWc.length >= 5)
-        res.push({ key: "len_src", label: `Umfang · ${a.outlet}`, verb: "länger als", pct: pctBelow(srcWc, wc), n: srcWc.length, selfVal: wc, median: median(srcWc) });
-      if (wc != null && topicWc.length >= 8)
-        res.push({ key: "len_topic", label: `Umfang · ${topicLabel(topic!)}`, verb: "länger als", pct: pctBelow(topicWc, wc), n: topicWc.length, selfVal: wc, median: median(topicWc) });
-      if (rc > 0 && srcEdited.length >= 4)
-        res.push({ key: "edit", label: `Bearbeitung · ${a.outlet}`, verb: "öfter geändert als", pct: pctBelow(srcEdited, rc), n: srcEdited.length, selfVal: rc, median: median(srcEdited), cohort: "bearbeiteten Artikeln" });
+      const wc = a.word_count, rc = a.revision_count ?? 0;
+      if (wc != null && d.len_src_n >= 5)
+        res.push({ key: "len_src", label: `Umfang · ${a.outlet}`, verb: "länger als", pct: d.len_src_pct, n: d.len_src_n, selfVal: wc, median: d.len_src_med });
+      if (rc > 0 && d.edit_n >= 4)
+        res.push({ key: "edit", label: `Bearbeitung · ${a.outlet}`, verb: "öfter geändert als", pct: d.edit_pct, n: d.edit_n, selfVal: rc, median: d.edit_med, cohort: "bearbeiteten Artikeln" });
 
-      const share = srcWc.length >= 8 ? srcEdited.length / srcWc.length : null;
-      if (!cancelled) { setPctls(res); setEditedShare(share); }
+      setPctls(res);
+      setEditedShare(d.edited_share ?? null);
+      // Median-Artikel der Quelle als Radar-Schatten (Rohwerte, gleich normalisiert wie der Artikel).
+      setPeerRadar(d.peer_wc != null ? {
+        wc: d.peer_wc ?? 0, rev: d.peer_rev ?? 0, lagH: d.peer_lag_h ?? 0,
+        visD: d.peer_vis_d ?? 0, extShare: d.peer_ext_share ?? 0, depth: d.peer_depth ?? null,
+      } : null);
     })();
     return () => { cancelled = true; };
   }, [a?.id]);
@@ -169,10 +166,12 @@ export default function ArticleDetail({ id }: { id: number }) {
       const { data: kwRows } = await supabase.from("article_keywords").select("keyword_id, keywords(term)").eq("article_id", self);
       const myKw = ((kwRows ?? []) as any[]).map((r) => ({ id: r.keyword_id as number, term: r.keywords?.term as string })).filter((r) => r.id && r.term);
       if (myKw.length < 2) { if (!cancelled) setNeighbors([]); return; }
-      const withDf = await Promise.all(myKw.slice(0, 24).map(async (kw) => {
-        const { count } = await supabase.from("article_keywords").select("article_id", { count: "exact", head: true }).eq("keyword_id", kw.id);
-        return { ...kw, df: count ?? 0 };
-      }));
+      // Dokumentfrequenz je Schlagwort in EINER Abfrage statt bis zu 24 Einzel-COUNTs (head-Requests
+      // sind je ~1 Roundtrip → spürbare Latenz + Egress). RPC keyword_dfs gruppiert server-seitig.
+      const ids = myKw.slice(0, 24).map((k) => k.id);
+      const { data: dfRows } = await supabase.rpc("keyword_dfs", { ids });
+      const dfById = new Map(((dfRows ?? []) as any[]).map((r) => [r.keyword_id as number, r.df as number]));
+      const withDf = myKw.slice(0, 24).map((kw) => ({ ...kw, df: dfById.get(kw.id) ?? 0 }));
       const useful = withDf.filter((k) => k.df >= 1 && k.df <= 1200);
       if (useful.length < 2) { if (!cancelled) setNeighbors([]); return; }
       const wById = new Map(useful.map((k) => [k.id, 1 / Math.sqrt(k.df)]));
@@ -230,26 +229,40 @@ export default function ArticleDetail({ id }: { id: number }) {
     return { tiles, edit, ext, rev, insight };
   }, [a, snaps]);
 
-  // Radar-„Fingerabdruck": 6 normalisierte Achsen (0..1), die das Verhalten des Artikels auf
-  // einen Blick zeigen — das „zwischen den Zeilen". Perzentil-Achsen kommen aus pctls, der Rest
-  // aus bereits geladenen Daten (sanfte Obergrenzen). Bewusst robust gegen fehlende Werte.
+  // Radar-„Fingerabdruck": 6 normalisierte Achsen (0..1), alle ÜBER DEN ARTIKEL (nicht über uns).
+  // Die frühere Fassung maß teils margns Crawl-Budget (Beobachtung/Scan-Zahl) oder Verlags-
+  // Hausgewohnheiten (Schlagwort-Menge) und deckelte „Echo" gegen die eigene slice(0,8)-Kappung
+  // → jedes Radar sah gleich aus. Jetzt: Umfang, Bearbeitung, Nachlauf, Sichtbarkeit, Erweiterung,
+  // Prominenz — jede aus bereits geladenen Feldern. `peerRadar` (Median der Quelle, aus der RPC)
+  // legt sich als gedämpfter Schatten dahinter; fehlt er, zeigt die Form nur den Artikel.
   const radar = useMemo(() => {
     if (!a) return null;
-    const byKey = (k: string) => pctls?.find((p) => p.key === k)?.pct ?? null;
-    const lenPct = byKey("len_src");
-    const editPct = byKey("edit");
-    const rev = a.revision_count ?? 0, sc = a.scan_count ?? 0;
-    const axes = [
-      { label: "Umfang", v: lenPct != null ? lenPct / 100 : Math.min(1, (a.word_count ?? 0) / 1500), hint: "Länge vs. Quelle" },
-      { label: "Bearbeitung", v: rev === 0 ? 0 : editPct != null ? Math.max(0.12, editPct / 100) : Math.min(1, rev / 8), hint: "Änderungs-Intensität" },
-      { label: "Volatilität", v: sc > 0 ? Math.min(1, rev / sc / 0.5) : 0, hint: "Änderungen je Scan" },
-      { label: "Schlagwörter", v: Math.min(1, keywords.length / 12), hint: "thematische Dichte" },
-      { label: "Echo", v: Math.min(1, (neighbors?.length ?? 0) / 8), hint: "blattübergreifende Nähe" },
-      { label: "Beobachtung", v: Math.min(1, sc / 24), hint: "wie oft margn nachsah" },
+    const nWc = (x: number) => Math.min(1, x / 2000);
+    const nRev = (x: number) => Math.min(1, x / 6);
+    const nLag = (h: number) => Math.min(1, h / 168);     // Stunden → 1 Woche = voll
+    const nVis = (d: number) => Math.min(1, d / 14);      // Tage → 2 Wochen = voll
+    const nDepth = (d: number | null) => d == null ? 0 : Math.max(0, Math.min(1, 1 - (d - 1) / 4));
+    const pr = peerRadar;
+
+    const wc = a.word_count ?? 0;
+    const rev = a.revision_count ?? 0;
+    const ext = a.extension_count ?? 0, edit = a.edit_count ?? 0;
+    const lagH = a.modified_at && a.published_at && Date.parse(a.modified_at) > Date.parse(a.published_at)
+      ? (Date.parse(a.modified_at) - Date.parse(a.published_at)) / 3600e3 : 0;
+    const visD = a.link_seen && a.first_seen ? Math.max(0, (Date.parse(a.link_seen) - Date.parse(a.first_seen)) / 864e5) : 0;
+    const extShare = (ext + edit) > 0 ? ext / (ext + edit) : 0;
+
+    const axes: RadarAxis[] = [
+      { label: "Umfang",       v: nWc(wc),        ref: pr ? nWc(pr.wc) : null,      hint: "Länge vs. Quelle",        self: `${wc.toLocaleString("de-DE")} Wörter` },
+      { label: "Bearbeitung",  v: nRev(rev),      ref: pr ? nRev(pr.rev) : null,   hint: "Änderungs-Intensität",    self: `${rev} Änderung${rev !== 1 ? "en" : ""}` },
+      { label: "Nachlauf",     v: nLag(lagH),     ref: pr ? nLag(pr.lagH) : null,  hint: "noch angefasst nach Erscheinen", self: lagH > 0 ? `bis ${durStr(lagH * 3600e3)} danach` : "kein Nachlauf" },
+      { label: "Sichtbarkeit", v: nVis(visD),     ref: pr ? nVis(pr.visD) : null,  hint: "wie lange verlinkt geführt", self: visD >= 1 ? `${Math.round(visD)} Tag${Math.round(visD) !== 1 ? "e" : ""} verlinkt` : "kurz sichtbar" },
+      { label: "Erweiterung",  v: extShare,       ref: pr ? pr.extShare : null,    hint: "Wachstum vs. stille Korrektur", self: (ext + edit) > 0 ? `${Math.round(extShare * 100)}% Zuwachs` : "keine Änderung" },
+      { label: "Prominenz",    v: nDepth(a.depth), ref: pr ? nDepth(pr.depth) : null, hint: "Nähe zur Startseite",    self: a.depth != null ? `Tiefe ${a.depth}` : "unbekannt" },
     ];
-    const area = axes.reduce((s, x) => s + x.v, 0) / axes.length; // grobes „Aktivitäts"-Maß
+    const area = axes.reduce((s, x) => s + x.v, 0) / axes.length;
     return { axes, area };
-  }, [a, pctls, keywords.length, neighbors]);
+  }, [a, peerRadar]);
 
   // Cross-Version-Dedup für Liveblogs: je Snapshot die Absatz-Keys, die in FRÜHEREN Versionen
   // schon gezeigt wurden → ChangeCard blendet die dort aus (kein doppeltes Anzeigen desselben
@@ -270,19 +283,23 @@ export default function ArticleDetail({ id }: { id: number }) {
 
   const segs = (() => { try { return new URL(a.url).pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean); } catch { return []; } })();
   const type = a.article_type ?? "news";
-  // Online-Bestand, DREI Zustände: „noch verlinkt" = letzte LINK-Sichtung innerhalb der Toleranz.
-  // „rausgeflogen" = Sichtung älter als Toleranz UND der Link wurde nach der Entdeckung je
-  // WIEDER-gesichtet (link_resighted) — nur dann ist Stille ein Beleg. Einmal-Sichtungen
-  // (Nischen-Ressorts außerhalb der Sampling-Umlaufbahn, Art. 1640704) = „unbekannt": kein
-  // Badge, kein roter Punkt. Bezugsgröße ist NIE der letzte Scan (budgetiert, sagt nichts).
-  const link: { state: "online" | "gone" | "unknown"; since: string } | null =
-    a.link_seen && onlineCut
-      ? Date.parse(a.link_seen) >= Date.parse(onlineCut)
-        ? { state: "online", since: a.link_seen }
-        : a.link_resighted === true
-          ? { state: "gone", since: a.link_seen }
-          : { state: "unknown", since: a.link_seen }
-      : null;
+  // Online-Bestand, HYBRID: liegt ein harter Beleg vor (Fundstellen aus dem letzten Crawl,
+  // linked_from), schlägt er die Zeit-Heuristik — der Artikel wird nachweislich auf mindestens
+  // einer Seite geführt → „online, belegt". Fehlt der Beleg (Altbestand, noch nicht neu gecrawlt),
+  // greift wie bisher die quellenspezifische Toleranz: „noch verlinkt" (Sichtung < Toleranz),
+  // „rausgeflogen" (älter + nach Entdeckung je wieder-gesichtet = link_resighted) oder „unbekannt".
+  // Bezugsgröße ist NIE der letzte Scan (budgetiert, sagt nichts).
+  const linkedNow = (linkRefs?.length ?? 0) > 0;
+  const link: { state: "online" | "gone" | "unknown"; since: string; grounded: "evidence" | "time" } | null =
+    linkedNow
+      ? { state: "online", since: a.link_seen ?? linkRefs![0].t, grounded: "evidence" }
+      : a.link_seen && onlineCut
+        ? Date.parse(a.link_seen) >= Date.parse(onlineCut)
+          ? { state: "online", since: a.link_seen, grounded: "time" }
+          : a.link_resighted === true
+            ? { state: "gone", since: a.link_seen, grounded: "time" }
+            : { state: "unknown", since: a.link_seen, grounded: "time" }
+        : null;
 
   return (
     <div className="page detail">
@@ -335,33 +352,7 @@ export default function ArticleDetail({ id }: { id: number }) {
           </DL>
 
           <DL h="Online-Bestand">
-            {!link ? (
-              <span className="faint" style={{ fontSize: 13 }}>Verlinkung unbekannt — für diese Seite liegt keine Link-Sichtung vor.</span>
-            ) : link.state === "gone" ? (
-              <>
-                <span className="badge gone"><Link2Off /> Rausgeflogen</span>
-                <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>
-                  Zuletzt verlinkt gesehen am <b>{fmtDate(link.since)}</b> — seither taucht der Artikel
-                  auf keiner Startseite, keinem Ressort, in keinem Feed und keiner Sitemap mehr auf
-                  (seit {timeDelta(link.since, new Date().toISOString())}).
-                </p>
-              </>
-            ) : link.state === "online" ? (
-              <>
-                <span className="badge online"><Link2 /> Noch verlinkt</span>
-                <p className="faint" style={{ fontSize: 13, marginTop: 10 }}>
-                  Zuletzt verlinkt gesehen am <b>{fmtDate(link.since)}</b> — der Verlag führt den Artikel
-                  weiterhin auf mindestens einer Übersichtsseite, im Feed oder in der Sitemap.
-                </p>
-              </>
-            ) : (
-              <p className="faint" style={{ fontSize: 13, margin: 0 }}>
-                Verlinkung unbekannt — der Link wurde nur bei der Entdeckung gesehen
-                ({fmtDate(link.since)}). Sein Ressort liegt außerhalb der regelmäßigen
-                Beobachtung, daher ist das Ausbleiben weiterer Sichtungen kein Beleg für
-                einen Abgang.
-              </p>
-            )}
+            <OnlineStatus link={link} refs={linkRefs} baseUrl={a.base_url} />
           </DL>
 
           <DL h={`Schlagwörter${keywords.length ? ` · ${keywords.length}` : ""}`}>
@@ -523,14 +514,20 @@ export default function ArticleDetail({ id }: { id: number }) {
 }
 
 // Radar/Spinnendiagramm (handgemaltes SVG, keine Dependency). Zeigt 6 normalisierte Achsen als
-// gefülltes Polygon über zwei Gitterringen — der „Fingerabdruck" des Artikels.
-function RadarChart({ axes }: { axes: { label: string; v: number; hint: string }[] }) {
+// gefülltes Polygon über zwei Gitterringen — der „Fingerabdruck" des Artikels. Liegt ein
+// Vergleichswert vor (`ref` = Median-Artikel derselben Quelle), wird er als gedämpfte zweite
+// Form DAHINTER gezeichnet — abgelesen wird dann die ABWEICHUNG, nicht der absolute Wert.
+type RadarAxis = { label: string; v: number; ref?: number | null; hint: string; self?: string; peer?: string };
+function RadarChart({ axes }: { axes: RadarAxis[] }) {
   const N = axes.length;
   const size = 260, cx = size / 2, cy = size / 2 + 6, R = 86;
   const ang = (i: number) => (Math.PI * 2 * i) / N - Math.PI / 2;
   const pt = (i: number, r: number) => [cx + Math.cos(ang(i)) * R * r, cy + Math.sin(ang(i)) * R * r] as const;
   const poly = (r: (i: number) => number) => axes.map((_, i) => pt(i, r(i)).join(",")).join(" ");
-  const shape = poly((i) => Math.max(0.02, Math.min(1, axes[i].v)));
+  const clamp = (x: number) => Math.max(0.02, Math.min(1, x));
+  const shape = poly((i) => clamp(axes[i].v));
+  const hasRef = axes.some((a) => a.ref != null);
+  const refShape = hasRef ? poly((i) => clamp(axes[i].ref ?? 0)) : "";
   return (
     <div className="radar">
       <svg viewBox={`0 0 ${size} ${size}`} className="radar-svg" role="img" aria-label="Profil-Radar">
@@ -538,20 +535,30 @@ function RadarChart({ axes }: { axes: { label: string; v: number; hint: string }
           <polygon key={r} className="radar-grid" points={poly(() => r)} />
         ))}
         {axes.map((_, i) => { const [x, y] = pt(i, 1); return <line key={i} className="radar-spoke" x1={cx} y1={cy} x2={x} y2={y} />; })}
+        {hasRef && <polygon className="radar-ref" points={refShape} />}
         <polygon className="radar-area" points={shape} />
-        {axes.map((ax, i) => { const [x, y] = pt(i, Math.max(0.02, Math.min(1, ax.v))); return <circle key={i} className="radar-dot" cx={x} cy={y} r={3} />; })}
+        {axes.map((ax, i) => { const [x, y] = pt(i, clamp(ax.v)); return <circle key={i} className="radar-dot" cx={x} cy={y} r={3} />; })}
         {axes.map((ax, i) => {
           const [x, y] = pt(i, 1.2);
           const anchor = Math.abs(Math.cos(ang(i))) < 0.3 ? "middle" : Math.cos(ang(i)) > 0 ? "start" : "end";
           return <text key={i} className="radar-lbl" x={x} y={y} textAnchor={anchor} dominantBaseline="middle">{ax.label}</text>;
         })}
       </svg>
+      {hasRef && (
+        <div className="radar-key">
+          <span className="rk this"><i /> dieser Artikel</span>
+          <span className="rk peer"><i /> typischer Artikel der Quelle</span>
+        </div>
+      )}
       <div className="radar-legend">
         {axes.map((ax) => (
           <div className="radar-leg" key={ax.label}>
-            <span className="radar-leg-bar"><i style={{ width: `${Math.round(Math.min(1, ax.v) * 100)}%` }} /></span>
+            <span className="radar-leg-bar">
+              <i style={{ width: `${Math.round(clamp(ax.v) * 100)}%` }} />
+              {ax.ref != null && <b className="radar-leg-ref" style={{ left: `${Math.round(clamp(ax.ref) * 100)}%` }} />}
+            </span>
             <span className="radar-leg-lbl">{ax.label}</span>
-            <span className="radar-leg-hint">{ax.hint}</span>
+            <span className="radar-leg-hint">{ax.self ?? ax.hint}</span>
           </div>
         ))}
       </div>
@@ -1020,6 +1027,70 @@ function MetaEditView({ m }: { m: MetaEdit }) {
   return null;
 }
 
+const REF_KIND: Record<LinkRef["k"], { label: string; icon: React.ReactNode }> = {
+  home:    { label: "Startseite", icon: <Link2 size={13} /> },
+  section: { label: "Ressort",    icon: <Folder size={13} /> },
+  feed:    { label: "Feed",       icon: <FileText size={13} /> },
+  sitemap: { label: "Sitemap",    icon: <FileText size={13} /> },
+};
+
+// Ein Block für den Online-Bestand: großer Status, die Grundlage des Urteils, dann die konkreten
+// Fundstellen zum Nachschauen. Liegt ein harter Beleg (Fundstellen) vor, steht er über der
+// Zeit-Heuristik — sonst wird die Grundlage offen als „aus Zeitablauf" benannt.
+function OnlineStatus({ link, refs, baseUrl }: { link: { state: "online" | "gone" | "unknown"; since: string; grounded: "evidence" | "time" } | null; refs: LinkRef[] | null; baseUrl: string }) {
+  const base = baseUrl.replace(/\/+$/, "");
+  const host = baseUrl.replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
+  const sorted = (refs ?? []).slice().sort((a, b) => Date.parse(b.t) - Date.parse(a.t));
+
+  if (!link) return <span className="ob-none">Verlinkung unbekannt — für diese Seite liegt keine Link-Sichtung vor.</span>;
+
+  return (
+    <div className={`ob ob-${link.state}`}>
+      <div className="ob-head">
+        {link.state === "online" && <span className="badge online"><Link2 /> Noch verlinkt</span>}
+        {link.state === "gone" && <span className="badge gone"><Link2Off /> Rausgeflogen</span>}
+        {link.state === "unknown" && <span className="badge neutral">Verlinkung unklar</span>}
+        {link.grounded === "evidence" && <span className="ob-proof">belegt</span>}
+      </div>
+
+      {link.state === "online" ? (
+        <p className="ob-basis">
+          {link.grounded === "evidence"
+            ? <>Steht aktuell auf <b>{sorted.length}</b> erfassten {sorted.length === 1 ? "Fundstelle" : "Fundstellen"} bei <b>{host}</b> — zuletzt gesehen {fmtDate(link.since)}.</>
+            : <>Zuletzt verlinkt gesehen am <b>{fmtDate(link.since)}</b> — der Verlag führt ihn weiterhin auf mindestens einer Übersichtsseite, im Feed oder in der Sitemap. (Genaue Fundstellen folgen mit dem nächsten Crawl.)</>}
+        </p>
+      ) : link.state === "gone" ? (
+        <p className="ob-basis">
+          Aus Zeitablauf geschlossen: zuletzt verlinkt gesehen am <b>{fmtDate(link.since)}</b>, seither
+          auf keiner Startseite, keinem Ressort, in keinem Feed und keiner Sitemap mehr
+          aufgetaucht (seit {timeDelta(link.since, new Date().toISOString())}).
+        </p>
+      ) : (
+        <p className="ob-basis">
+          Der Link wurde nur bei der Entdeckung gesehen ({fmtDate(link.since)}). Sein Ressort liegt
+          außerhalb der regelmäßigen Beobachtung — das Ausbleiben weiterer Sichtungen ist daher
+          kein Beleg für einen Abgang.
+        </p>
+      )}
+
+      {sorted.length > 0 && (
+        <ul className="ob-refs">
+          {sorted.map((r) => (
+            <li key={r.u} className="ob-ref">
+              <ExtLink href={base + r.u} className="ob-ref-link">
+                <span className={`ob-ref-kind ${r.k}`}>{REF_KIND[r.k]?.icon}{REF_KIND[r.k]?.label ?? r.k}</span>
+                <span className="ob-ref-path">{r.u}</span>
+                <External size={12} />
+              </ExtLink>
+              <span className="ob-ref-time">{fmtDate(r.t)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ChistAnchor({ kind, label, time, sub }: { kind: "pub" | "now"; label: string; time: string | null; sub?: string }) {
   return (
     <div className={`chist-anchor ${kind}`}>
@@ -1060,6 +1131,10 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
   // heikel. Nur wenn die Karte sonst KOMPLETT leer wäre, ein bildloser Hinweis.
   const metaEdits = (s.meta_edits ?? []).filter((m) => m && m.field && m.field !== "og_image");
   const imageSwapped = (s.meta_edits ?? []).some((m) => m && m.field === "og_image");
+  // Einstufung: WAS für eine Art Korrektur (Absicht), aus den abgeglichenen Changes + Titel-Paar.
+  // Jede Einstufung ist am beigefügten Grund selbst nachprüfbar; Unbelegtes fällt weg (s. editClass).
+  const bodyChanged = allChanges.length > 0 || (s.added?.length ?? 0) > 0;
+  const editTags = classifySnapshot({ items: allChanges, titleOld: s.title_old, titleNew: s.title_new, bodyChanged });
   return (
     <div className={`chist-card ${s.change_kind}`}>
       <div className="chist-head">
@@ -1075,6 +1150,17 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
           {s.word_delta ? <span className="chist-chip">{s.word_delta > 0 ? "+" : ""}{s.word_delta}&nbsp;W</span> : null}
         </span>
       </div>
+      {editTags.length > 0 && (
+        <div className="chist-class">
+          <span className="cls-lead">Einstufung</span>
+          <div className="cls-chips">
+            {editTags.map((t) => (
+              <span key={t.key} className={`cls-chip ${t.tone}`} title={t.reason}>{t.label}</span>
+            ))}
+          </div>
+          <p className="cls-why">{editTags.map((t) => t.reason).join(" · ")}</p>
+        </div>
+      )}
       {dateChanged && (
         <div className="chist-date"><Clock size={14} /><span>Veröffentlichungsdatum still geändert — <b>vorher</b> {fmtDate(s.pubdate_old)} · <b>jetzt</b> {fmtDate(s.pubdate_new)}</span></div>
       )}
