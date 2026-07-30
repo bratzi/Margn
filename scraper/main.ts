@@ -1393,19 +1393,21 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   sitemaps = recentFirst([...new Set(sitemaps)]);
 
   const arts = new Set<string>();
+  // Welche Sitemap-Datei den Artikel führt — sonst wäre die Fundstelle nur "irgendeine Sitemap".
+  const fromSitemap = new Map<string, string>();
   // Exakte Veröffentlichungszeit je URL aus der News-Sitemap. precise=true nur bei
   // <news:publication_date> (autoritativ) — false beim <lastmod>-Fallback (= Änderungs-,
   // nicht Erscheinungszeit → darf einen vorhandenen Wert nur füllen, nie überschreiben).
   const pubDates = new Map<string, { at: string; precise: boolean }>();
   let files = 0;
   const MAX_FILES = 10;
-  const grabLocs = (xml: string) => {
+  const grabLocs = (xml: string, smUrl: string) => {
     // URLs einsammeln (tolerant ggü. Sitemap-Struktur, wie bisher).
     for (const m of xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)) {
       const u = stripHash(m[1].trim());
       // classifyUrl statt nur looksLikeArticle: News-Sitemaps führen auch Advertorials/
       // Shopping-Deals — die dürfen keine Stubs/Datumszeilen mehr erzeugen (kind-Gates).
-      if (u.startsWith(origin) && classifyUrl(u) === "article") arts.add(u);
+      if (u.startsWith(origin) && classifyUrl(u) === "article") { arts.add(u); if (!fromSitemap.has(u)) fromSitemap.set(u, smUrl); }
     }
     // Pro <url>-Block die Veröffentlichungszeit ziehen (publication_date > lastmod).
     for (const block of xml.matchAll(/<url\b[^>]*>([\s\S]*?)<\/url>/gi)) {
@@ -1434,10 +1436,10 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
         if (files >= MAX_FILES || arts.size >= MAX_SITEMAP_URLS || Date.now() > deadline) break;
         if (seen.has(c)) continue; seen.add(c);
         const cx = await fetchXml(c);
-        if (cx) { files++; grabLocs(cx); }
+        if (cx) { files++; grabLocs(cx, c); }
       }
     } else {
-      grabLocs(xml);
+      grabLocs(xml, sm);
     }
   }
 
@@ -1445,7 +1447,11 @@ async function harvestSitemaps(src: Source, deadline: number): Promise<number> {
   if (list.length && !DRY_RUN) {
     try {
       for (let i = 0; i < list.length; i += 200) {
-        const batch = list.slice(i, i + 200).map((url) => canonUrl(url));
+        const raw = list.slice(i, i + 200);
+        const batch = raw.map((url) => canonUrl(url));
+        // Fundstelle je Artikel: die konkrete Sitemap-Datei, die ihn führt (News- vs. Archiv-Sitemap
+        // ist ein Unterschied, den die Detailseite zeigen soll).
+        for (let j = 0; j < raw.length; j++) { const sm = fromSitemap.get(raw[j]); if (sm) recordRefs([batch[j]], sm, "sitemap"); }
         await sb.from("pages").upsert(
           batch.map((url) => ({ source_id: src.id, url, kind: "article", depth: 1 })),
           { onConflict: "url", ignoreDuplicates: true },
@@ -1791,7 +1797,57 @@ async function flushSightings() {
   console.log(`Sichtungen protokolliert: ${rows.length} Minuten-Zeilen.`);
 }
 
-async function ensureNodes(sourceId: number, urls: string[], depth: number) {
+// === Fundstellen-Protokoll: WO ein Artikel verlinkt gefunden wurde ===
+// pages.last_seen sagt nur, DASS ein Artikel noch irgendwo geführt wird — nie wo. Genau diese
+// Zuordnung liegt beim Crawl längst vor (Hub-URL + ihre Artikel-Links, Feed, Sitemap) und wurde
+// bisher weggeworfen. Sie trägt zwei Dinge: die Detailseite kann die Fundstellen zum Nachschauen
+// benennen ("steht auf der Startseite und im Politik-Ressort"), und ein Abgang wird belegbar —
+// von den Hubs zu verschwinden, die einen Artikel führten, ist etwas anderes als bloßes Schweigen.
+//
+// BEWUSST KEINE Kanten-Tabelle: page_links war mit ~915k Zeilen / ~100 MB der schnellste
+// DB-Größen-Treiber und wurde deshalb stillgelegt (s. maintenance.sql). Stattdessen je Artikel
+// eine auf MAX_REFS gedeckelte Liste in articles.linked_from (jsonb), die pro Lauf KOMPLETT
+// ersetzt wird: sie beschreibt immer den aktuellen Stand und wächst daher nicht.
+type RefKind = "home" | "section" | "feed" | "sitemap";
+const MAX_REFS = 6;
+const REF_PRIO: Record<RefKind, number> = { home: 0, section: 1, feed: 2, sitemap: 3 };
+// Artikel-URL (kanonisch) -> Fundstelle (Pfad) -> Art + Zeitpunkt der Sichtung.
+const linkRefs = new Map<string, Map<string, { k: RefKind; t: string }>>();
+
+function recordRefs(articleUrls: string[], refUrl: string, kind: RefKind) {
+  let ref = refUrl;
+  try { const u = new URL(refUrl); ref = (u.pathname || "/") + u.search; } catch {}
+  const t = new Date().toISOString();
+  for (const u of articleUrls) {
+    let m = linkRefs.get(u);
+    if (!m) { m = new Map(); linkRefs.set(u, m); }
+    // Erste Sichtung je Fundstelle gewinnt (früheste Zeit im Lauf). Zwischenpuffer großzügiger
+    // als MAX_REFS, damit beim Flush nach Wichtigkeit ausgewählt wird statt nach Zufallsreihenfolge.
+    if (!m.has(ref) && m.size < MAX_REFS * 3) m.set(ref, { k: kind, t });
+  }
+}
+
+// Fundstellen in articles.linked_from schreiben — server-seitig per RPC, damit NUR bestehende
+// Artikelzeilen aktualisiert werden. Ein Upsert würde für jeden verlinkten, aber nie gerenderten
+// Pfad eine leere Artikelzeile anlegen und den Korpus aufblähen.
+async function flushLinkRefs() {
+  if (!linkRefs.size || DRY_RUN) return;
+  const rows = [...linkRefs].map(([url, m]) => ({
+    url,
+    refs: [...m].sort((a, b) => REF_PRIO[a[1].k] - REF_PRIO[b[1].k]).slice(0, MAX_REFS)
+      .map(([u, v]) => ({ u, k: v.k, t: v.t })),
+  }));
+  linkRefs.clear();
+  let done = 0;
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb.rpc("apply_link_refs", { p: rows.slice(i, i + 200) });
+    if (error) { console.error("FUNDSTELLEN-RPC-FEHLER:", error.message); return; }
+    done += Math.min(200, rows.length - i);
+  }
+  console.log(`Fundstellen geschrieben: ${done} Artikel.`);
+}
+
+async function ensureNodes(sourceId: number, urls: string[], depth: number, refUrl?: string, refDepth = 1) {
   const all = [...new Set(urls.map(canonUrl))];
   const fresh = all.filter((u) => !pageId.has(u));
   if (fresh.length) {
@@ -1805,6 +1861,8 @@ async function ensureNodes(sourceId: number, urls: string[], depth: number) {
   // Nur Artikel-Links, je Lauf einmal (Navigation/Hubs stehen auf jeder Seite → sparen).
   const artLinks = all.filter((u) => classifyUrl(u) === "article");
   recordSightings(sourceId, artLinks);
+  // Fundstelle festhalten: die verweisende Seite selbst. Tiefe 0 = Startseite, sonst Ressort/Hub.
+  if (refUrl && artLinks.length) recordRefs(artLinks, refUrl, refDepth === 0 ? "home" : "section");
   const toBump = artLinks.filter((u) => !bumpedThisRun.has(u));
   for (const u of toBump) bumpedThisRun.add(u);
   for (let i = 0; i < toBump.length; i += 200) {
@@ -1966,6 +2024,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
         try {
           for (let i = 0; i < arts.length; i += 200) {
             const batch = arts.slice(i, i + 200).map((url) => canonUrl(url));
+            recordRefs(batch, s.url, "feed");
             await sb.from("pages").upsert(
               batch.map((url) => ({ source_id: src.id, url, kind: "article", depth })),
               { onConflict: "url", ignoreDuplicates: true },
@@ -2024,7 +2083,7 @@ async function crawlSource(ctx: BrowserContext | null, src: Source, deadline: nu
         // NUR die Knoten (pages) anlegen — die Kanten-Tabelle page_links wird NICHT mehr befüllt:
         // sie war write-only Ballast (nirgends gelesen) und der mit Abstand schnellste DB-Größen-
         // Treiber (≈872k Zeilen / ~100 MB bei stündlichem Lauf) → frisst das 500-MB-Free-Limit.
-        if (links.length) await ensureNodes(src.id, links, s.depth + 1);
+        if (links.length) await ensureNodes(src.id, links, s.depth + 1, s.url, s.depth);
         // Artikel nur speichern, wenn WIRKLICH gerendert (sonst rendert analyze
         // ihn sauber nach — kein Speichern aus link-armem Roh-HTML).
         if (kind === "article" && article && didRender && MODE !== "structure") {
@@ -2652,6 +2711,8 @@ async function run() {
     // Sichtungs-Aggregate IMMER schreiben — auch bei Teilabbruch (Zeitbudget) sind die
     // bereits gezählten Minuten korrekt.
     await flushSightings();
+    // Fundstellen im selben Zug — auch bei Teilabbruch ist das Bisherige korrekt.
+    await flushLinkRefs();
   }
 }
 
