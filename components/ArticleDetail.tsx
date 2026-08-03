@@ -1135,6 +1135,14 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
   // Jede Einstufung ist am beigefügten Grund selbst nachprüfbar; Unbelegtes fällt weg (s. editClass).
   const bodyChanged = allChanges.length > 0 || (s.added?.length ?? 0) > 0;
   const editTags = classifySnapshot({ items: allChanges, titleOld: s.title_old, titleNew: s.title_new, bodyChanged });
+  // Payload-Trim (Platzersparnis, s. prune_db): bei Snapshots >14 T wird der Volltext-Diff
+  // (added/changes) verworfen, die Chronik-Zeile bleibt. Erkennbar an: hatte nachweislich Inhalt
+  // (Wortbilanz/Absatzzähler/Erweiterung), aber es ist nichts Renderbares mehr da → ehrlicher
+  // Hinweis statt leerer Karte. Eng gegated, damit er nur greift, wenn sonst kein Body erscheint.
+  const payloadTrimmed = !titleChanged && !dateChanged && metaEdits.length === 0 && !imageSwapped
+    && allChanges.length === 0 && !(s.added && s.added.length)
+    && (isExt ? true : (s.removed_count ?? 0) === 0)
+    && (isExt || (s.word_delta ?? 0) !== 0 || (s.added_count ?? 0) > 0 || (s.removed_count ?? 0) > 0);
   return (
     <div className={`chist-card ${s.change_kind}`}>
       <div className="chist-head">
@@ -1160,6 +1168,9 @@ function ChangeCard({ s, v, dupKeys }: { s: Snapshot; v: number; dupKeys?: Set<s
           </div>
           <p className="cls-why">{editTags.map((t) => t.reason).join(" · ")}</p>
         </div>
+      )}
+      {payloadTrimmed && (
+        <p className="chist-archived">Der Volltext-Vergleich dieser Änderung wurde nach 14 Tagen archiviert — Zeitpunkt, Umfang und Einstufung oben bleiben erhalten.</p>
       )}
       {dateChanged && (
         <div className="chist-date"><Clock size={14} /><span>Veröffentlichungsdatum still geändert — <b>vorher</b> {fmtDate(s.pubdate_old)} · <b>jetzt</b> {fmtDate(s.pubdate_new)}</span></div>

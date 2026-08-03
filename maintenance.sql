@@ -11,6 +11,9 @@
 --       snapshots mit. ALLE jemals geänderten Artikel (≥1 Snapshot) bleiben für immer — Kern-Wert.
 --   (2) Dauer-Ticker/Liveblogs deckeln: je Artikel nur die 60 jüngsten Extension-Snapshots
 --       behalten (ein offener n-tv-Ticker hatte 571 → reine Re-Segmentierungs-Wiederholung).
+--   (3) 2026-08-03: Diff-Payload (added/changes) von Snapshots >14 T verwerfen — der größte,
+--       unbegrenzt wachsende Treiber (snapshots-TOAST 119 MB). Chronik-Zeile bleibt.
+--   (4) 2026-08-03: article_paras dormanter Artikel (>30 T) löschen — nur Diff-Arbeitsstand.
 
 create or replace function public.prune_db() returns void
 language plpgsql
@@ -30,6 +33,24 @@ begin
     from article_snapshots where change_kind = 'extension'
   ) r
   where s.id = r.id and r.rn > 60;
+
+  -- (3) NEU 2026-08-03: Diff-Payload (added/changes) alter Snapshots verwerfen. Das war die
+  -- größte, UNBEGRENZT wachsende Leak-Quelle: article_snapshots-TOAST lief auf 119 MB (die
+  -- Volltext-Deltas jeder je erfassten Änderung). Die Chronik-ZEILE bleibt (Zeitpunkt, Titel-
+  -- Änderung, Wortbilanz, Einstufung); nur der Volltext-Diff von Änderungen älter als 14 Tage
+  -- entfällt. Das Frontend zeigt dafür einen „archiviert"-Hinweis. Fenster bewusst knapp (14 T),
+  -- weil bei ~483/500 MB kein VACUUM-FULL-Headroom für ein größeres Fenster bleibt.
+  update article_snapshots
+     set added = null, changes = null
+   where captured_at < now() - interval '14 days'
+     and (added is not null or changes is not null);
+
+  -- (4) NEU 2026-08-03: Diff-Arbeitsstand (article_paras) dormanter Artikel verwerfen — die
+  -- gespeicherten Absätze braucht nur der NÄCHSTE Scan zum Diffen. Wird ein Artikel nach >30 T
+  -- doch wieder gescannt, re-baselined er sauber (kein Falsch-Diff). Deckelt den paras-TOAST.
+  delete from article_paras p
+   using articles a
+   where a.id = p.article_id and a.last_seen < now() - interval '30 days';
 end;
 $fn$;
 
